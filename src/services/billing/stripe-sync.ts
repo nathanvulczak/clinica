@@ -21,10 +21,14 @@ function getSubscriptionPeriods(subscription: Stripe.Subscription) {
     current_period_start?: number | null;
     current_period_end?: number | null;
   };
+  const firstItem = subscription.items.data[0] as Stripe.SubscriptionItem & {
+    current_period_start?: number | null;
+    current_period_end?: number | null;
+  };
 
   return {
-    start: periodSource.current_period_start ?? null,
-    end: periodSource.current_period_end ?? null,
+    start: periodSource.current_period_start ?? firstItem?.current_period_start ?? null,
+    end: periodSource.current_period_end ?? firstItem?.current_period_end ?? null,
   };
 }
 

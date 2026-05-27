@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { PLAN_LIMITS } from "@/config/plans";
 import { ACTIVE_CLINIC_COOKIE } from "@/features/clinics/context";
 import { clinicSchema } from "@/features/clinics/validation";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentSubscription } from "@/repositories/subscriptions";
 import type { PlanSlug } from "@/types/domain";
@@ -47,12 +48,11 @@ export async function createClinicAction(_state: ClinicState, formData: FormData
   }
 
   const maxClinics = PLAN_LIMITS[subscription.plan_slug as PlanSlug];
-  const { count } = await supabase
-    .from("clinic_members")
+  const admin = createSupabaseAdminClient();
+  const { count } = await admin
+    .from("clinics")
     .select("id", { count: "exact", head: true })
-    .eq("user_id", user.id)
-    .eq("role", "clinic_owner")
-    .eq("status", "active")
+    .eq("created_by", user.id)
     .is("deleted_at", null);
 
   if ((count ?? 0) >= maxClinics) {
@@ -61,7 +61,7 @@ export async function createClinicAction(_state: ClinicState, formData: FormData
     };
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await admin
     .from("clinics")
     .insert({
       ...parsed.data,

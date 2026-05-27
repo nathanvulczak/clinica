@@ -5,6 +5,7 @@ Execute os arquivos em ordem no SQL Editor do Supabase:
 1. `migrations/001_initial_enterprise_foundation.sql`
 2. `migrations/002_clinic_context_members_foundation.sql`
 3. `migrations/003_billing_profile_hardening.sql`
+4. `migrations/004_clinic_creation_policy_fix.sql`
 
 Depois configure:
 

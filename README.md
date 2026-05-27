@@ -43,6 +43,7 @@ Execute no Supabase, nesta ordem:
 supabase/migrations/001_initial_enterprise_foundation.sql
 supabase/migrations/002_clinic_context_members_foundation.sql
 supabase/migrations/003_billing_profile_hardening.sql
+supabase/migrations/004_clinic_creation_policy_fix.sql
 ```
 
 A migration cria:
