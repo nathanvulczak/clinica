@@ -1,0 +1,175 @@
+import Stripe from "stripe";
+import { getStripe } from "@/lib/stripe";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import type { PlanSlug, SubscriptionStatus } from "@/types/domain";
+
+export function normalizeSubscriptionStatus(status?: Stripe.Subscription.Status): SubscriptionStatus {
+  if (status === "active" || status === "trialing" || status === "past_due" || status === "canceled") {
+    return status;
+  }
+
+  return "inactive";
+}
+
+export function planFromMetadata(metadata?: Stripe.Metadata | null): PlanSlug {
+  const plan = metadata?.plan_slug;
+  return plan === "duo" || plan === "master" ? plan : "singular";
+}
+
+function getSubscriptionPeriods(subscription: Stripe.Subscription) {
+  const periodSource = subscription as Stripe.Subscription & {
+    current_period_start?: number | null;
+    current_period_end?: number | null;
+  };
+
+  return {
+    start: periodSource.current_period_start ?? null,
+    end: periodSource.current_period_end ?? null,
+  };
+}
+
+function isUsableSubscriptionId(subscriptionId?: string | null) {
+  return Boolean(subscriptionId?.startsWith("sub_"));
+}
+
+export async function upsertSubscriptionFromStripe(subscription: Stripe.Subscription, fallbackUserId?: string) {
+  const admin = createSupabaseAdminClient();
+  const userId = subscription.metadata.user_id || fallbackUserId;
+  const periods = getSubscriptionPeriods(subscription);
+  const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id;
+
+  let ownerUserId = userId;
+
+  if (!ownerUserId) {
+    const { data } = await admin
+      .from("subscriptions")
+      .select("owner_user_id")
+      .eq("stripe_customer_id", customerId)
+      .maybeSingle();
+
+    ownerUserId = data?.owner_user_id;
+  }
+
+  if (!ownerUserId) {
+    return null;
+  }
+
+  const payload = {
+    owner_user_id: ownerUserId,
+    stripe_customer_id: customerId,
+    stripe_subscription_id: subscription.id,
+    plan_slug: planFromMetadata(subscription.metadata),
+    status: normalizeSubscriptionStatus(subscription.status),
+    current_period_start: periods.start ? new Date(periods.start * 1000).toISOString() : null,
+    current_period_end: periods.end ? new Date(periods.end * 1000).toISOString() : null,
+    cancel_at_period_end: subscription.cancel_at_period_end,
+    canceled_at: subscription.canceled_at ? new Date(subscription.canceled_at * 1000).toISOString() : null,
+    updated_by: ownerUserId,
+  };
+
+  await admin.from("subscriptions").upsert(payload, { onConflict: "owner_user_id" });
+
+  return payload;
+}
+
+export async function saveInvoiceFromStripe(invoice: Stripe.Invoice) {
+  const admin = createSupabaseAdminClient();
+  const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id;
+  const invoiceWithSubscription = invoice as Stripe.Invoice & {
+    subscription?: string | Stripe.Subscription | null;
+  };
+  const subscriptionId =
+    typeof invoiceWithSubscription.subscription === "string"
+      ? invoiceWithSubscription.subscription
+      : invoiceWithSubscription.subscription?.id;
+
+  if (!customerId) return;
+
+  const { data: subscription } = await admin
+    .from("subscriptions")
+    .select("owner_user_id")
+    .eq("stripe_customer_id", customerId)
+    .maybeSingle();
+
+  if (!subscription?.owner_user_id) return;
+
+  await admin.from("invoices").upsert(
+    {
+      owner_user_id: subscription.owner_user_id,
+      stripe_customer_id: customerId,
+      stripe_subscription_id: subscriptionId,
+      stripe_invoice_id: invoice.id,
+      status: invoice.status,
+      amount_due: invoice.amount_due,
+      amount_paid: invoice.amount_paid,
+      currency: invoice.currency,
+      hosted_invoice_url: invoice.hosted_invoice_url,
+      invoice_pdf: invoice.invoice_pdf,
+      paid_at: invoice.status_transitions.paid_at
+        ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
+        : null,
+    },
+    { onConflict: "stripe_invoice_id" },
+  );
+}
+
+export async function syncCheckoutSession(sessionId: string, userId?: string) {
+  const stripe = getStripe();
+  const session = await stripe.checkout.sessions.retrieve(sessionId, {
+    expand: ["subscription"],
+  });
+
+  if (!session.subscription) {
+    return null;
+  }
+
+  const subscription =
+    typeof session.subscription === "string"
+      ? await stripe.subscriptions.retrieve(session.subscription)
+      : session.subscription;
+
+  return upsertSubscriptionFromStripe(subscription, userId || session.client_reference_id || undefined);
+}
+
+export async function resolveActiveStripeSubscription({
+  customerId,
+  storedSubscriptionId,
+  ownerUserId,
+}: {
+  customerId: string;
+  storedSubscriptionId?: string | null;
+  ownerUserId: string;
+}) {
+  const stripe = getStripe();
+
+  if (isUsableSubscriptionId(storedSubscriptionId)) {
+    try {
+      const subscription = await stripe.subscriptions.retrieve(storedSubscriptionId as string);
+
+      if (subscription.customer === customerId && subscription.status !== "canceled") {
+        await upsertSubscriptionFromStripe(subscription, ownerUserId);
+        return subscription;
+      }
+    } catch {
+      // Stale or cross-environment IDs are repaired by listing customer subscriptions below.
+    }
+  }
+
+  const subscriptions = await stripe.subscriptions.list({
+    customer: customerId,
+    limit: 10,
+    status: "all",
+  });
+
+  const activeSubscription =
+    subscriptions.data.find((subscription) => subscription.status === "active") ??
+    subscriptions.data.find((subscription) => subscription.status === "trialing") ??
+    subscriptions.data.find((subscription) => subscription.status === "past_due") ??
+    null;
+
+  if (activeSubscription) {
+    await upsertSubscriptionFromStripe(activeSubscription, ownerUserId);
+  }
+
+  return activeSubscription;
+}
