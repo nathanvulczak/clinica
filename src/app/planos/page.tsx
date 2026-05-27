@@ -4,9 +4,26 @@ import { Badge } from "@/components/ui/badge";
 export default async function PlanosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ selected?: string; signup?: string; reason?: string; checkout?: string }>;
+  searchParams: Promise<{
+    selected?: string;
+    signup?: string;
+    reason?: string;
+    checkout?: string;
+    checkout_error?: string;
+  }>;
 }) {
   const params = await searchParams;
+  const checkoutErrorMessages: Record<string, string> = {
+    missing_stripe_secret_key: "Configure STRIPE_SECRET_KEY na Vercel e faça redeploy.",
+    missing_supabase_service_role_key: "Configure SUPABASE_SERVICE_ROLE_KEY na Vercel e faça redeploy.",
+    missing_stripe_price_singular: "Configure STRIPE_PRICE_SINGULAR na Vercel e faça redeploy.",
+    missing_stripe_price_duo: "Configure STRIPE_PRICE_DUO na Vercel e faça redeploy.",
+    missing_stripe_price_master: "Configure STRIPE_PRICE_MASTER na Vercel e faça redeploy.",
+    stripe_customer_failed: "A Stripe recusou a criação do cliente. Confira a chave secreta e o modo teste.",
+    stripe_checkout_failed: "A Stripe recusou a sessão de checkout. Confira se o price_id existe nessa conta Stripe.",
+    stripe_portal_failed: "Não foi possível abrir o portal Stripe. Confira a configuração do Customer Portal.",
+    stripe_subscription_sync_failed: "Não foi possível sincronizar a assinatura com a Stripe.",
+  };
 
   return (
     <main className="mx-auto min-h-screen max-w-7xl px-4 py-10 lg:px-8">
@@ -15,6 +32,11 @@ export default async function PlanosPage({
           <Badge className="mb-3">Assinatura necessária</Badge>
         ) : null}
         <h1 className="text-3xl font-semibold">Escolha seu plano</h1>
+        {params.checkout_error ? (
+          <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+            {checkoutErrorMessages[params.checkout_error] ?? "Não foi possível iniciar o checkout."}
+          </div>
+        ) : null}
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
           {params.reason === "subscription_required"
             ? "Para acessar o sistema, conclua a assinatura de um plano. Se o pagamento falhar ou for cancelado, você continuará retornando para esta tela."

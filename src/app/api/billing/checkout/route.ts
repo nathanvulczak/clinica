@@ -10,6 +10,17 @@ import type { PlanSlug } from "@/types/domain";
 const validPlans: PlanSlug[] = ["singular", "duo", "master"];
 const activeStatuses = ["active", "trialing", "past_due"];
 
+function redirectWithBillingError(request: NextRequest, code: string, plan: PlanSlug) {
+  const url = new URL("/planos", request.url);
+  url.searchParams.set("selected", plan);
+  url.searchParams.set("checkout_error", code);
+  return NextResponse.redirect(url);
+}
+
+function hasValue(value?: string) {
+  return Boolean(value && !/temporario|placeholder|missing|xxx|sua_|seu_/i.test(value));
+}
+
 export async function GET(request: NextRequest) {
   const plan = (request.nextUrl.searchParams.get("plan") ?? "singular") as PlanSlug;
 
@@ -30,8 +41,16 @@ export async function GET(request: NextRequest) {
 
   const priceId = process.env[getStripePriceEnvName(plan)];
 
-  if (!priceId) {
-    return NextResponse.json({ error: `Configure ${getStripePriceEnvName(plan)} no .env.local.` }, { status: 500 });
+  if (!hasValue(priceId)) {
+    return redirectWithBillingError(request, `missing_${getStripePriceEnvName(plan).toLowerCase()}`, plan);
+  }
+
+  if (!hasValue(process.env.STRIPE_SECRET_KEY)) {
+    return redirectWithBillingError(request, "missing_stripe_secret_key", plan);
+  }
+
+  if (!hasValue(process.env.SUPABASE_SERVICE_ROLE_KEY)) {
+    return redirectWithBillingError(request, "missing_supabase_service_role_key", plan);
   }
 
   const admin = createSupabaseAdminClient();
@@ -46,11 +65,17 @@ export async function GET(request: NextRequest) {
 
   if (customerId && activeStatuses.includes(String(existingSubscription?.status))) {
     const currentPlan = existingSubscription?.plan_slug as PlanSlug | undefined;
-    const activeSubscription = await resolveActiveStripeSubscription({
-      customerId,
-      storedSubscriptionId: existingSubscription?.stripe_subscription_id,
-      ownerUserId: user.id,
-    });
+    let activeSubscription;
+
+    try {
+      activeSubscription = await resolveActiveStripeSubscription({
+        customerId,
+        storedSubscriptionId: existingSubscription?.stripe_subscription_id,
+        ownerUserId: user.id,
+      });
+    } catch {
+      return redirectWithBillingError(request, "stripe_subscription_sync_failed", plan);
+    }
 
     if (!activeSubscription) {
       return NextResponse.redirect(new URL("/assinatura?billing=subscription_not_found", request.url));
@@ -93,23 +118,33 @@ export async function GET(request: NextRequest) {
         },
       });
     } catch {
-      portalSession = await stripe.billingPortal.sessions.create({
-        customer: customerId,
-        return_url: `${getAppUrl()}/assinatura?billing=portal_return`,
-      });
+      try {
+        portalSession = await stripe.billingPortal.sessions.create({
+          customer: customerId,
+          return_url: `${getAppUrl()}/assinatura?billing=portal_return`,
+        });
+      } catch {
+        return redirectWithBillingError(request, "stripe_portal_failed", plan);
+      }
     }
 
     return NextResponse.redirect(portalSession.url);
   }
 
   if (!customerId) {
-    const customer = await stripe.customers.create({
-      email: user.email,
-      name: String(user.user_metadata?.full_name ?? ""),
-      metadata: {
-        user_id: user.id,
-      },
-    });
+    let customer;
+
+    try {
+      customer = await stripe.customers.create({
+        email: user.email,
+        name: String(user.user_metadata?.full_name ?? ""),
+        metadata: {
+          user_id: user.id,
+        },
+      });
+    } catch {
+      return redirectWithBillingError(request, "stripe_customer_failed", plan);
+    }
 
     customerId = customer.id;
 
@@ -125,24 +160,30 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${getAppUrl()}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${getAppUrl()}/planos?selected=${plan}&checkout=cancelled&reason=subscription_required`,
-    client_reference_id: user.id,
-    subscription_data: {
+  let session;
+
+  try {
+    session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customerId,
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${getAppUrl()}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${getAppUrl()}/planos?selected=${plan}&checkout=cancelled&reason=subscription_required`,
+      client_reference_id: user.id,
+      subscription_data: {
+        metadata: {
+          user_id: user.id,
+          plan_slug: plan,
+        },
+      },
       metadata: {
         user_id: user.id,
         plan_slug: plan,
       },
-    },
-    metadata: {
-      user_id: user.id,
-      plan_slug: plan,
-    },
-  });
+    });
+  } catch {
+    return redirectWithBillingError(request, "stripe_checkout_failed", plan);
+  }
 
   if (!session.url) {
     return NextResponse.json({ error: "Não foi possível iniciar o checkout." }, { status: 500 });
