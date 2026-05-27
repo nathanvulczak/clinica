@@ -4,6 +4,7 @@ import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/env";
 
 const protectedPrefixes = ["/dashboard", "/clinicas", "/assinatura", "/usuarios", "/auditoria", "/perfil"];
 const authPrefixes = ["/login", "/cadastro"];
+const subscriptionRequiredPrefixes = ["/dashboard", "/clinicas", "/usuarios", "/auditoria"];
 
 export async function updateSession(request: NextRequest) {
   if (
@@ -57,6 +58,7 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isProtected = protectedPrefixes.some((prefix) => pathname.startsWith(prefix));
   const isAuthPage = authPrefixes.some((prefix) => pathname.startsWith(prefix));
+  const requiresSubscription = subscriptionRequiredPrefixes.some((prefix) => pathname.startsWith(prefix));
 
   if (isProtected && !user) {
     const redirectUrl = request.nextUrl.clone();
@@ -67,9 +69,33 @@ export async function updateSession(request: NextRequest) {
 
   if (isAuthPage && user) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/dashboard";
+    redirectUrl.pathname = "/planos";
     redirectUrl.search = "";
     return NextResponse.redirect(redirectUrl);
+  }
+
+  if (user && requiresSubscription) {
+    const { data: subscription } = await supabase
+      .from("subscriptions")
+      .select("status, current_period_end")
+      .eq("owner_user_id", user.id)
+      .maybeSingle();
+
+    const status = subscription?.status;
+    const canAccess =
+      status === "active" ||
+      status === "trialing" ||
+      (status === "past_due" &&
+        subscription?.current_period_end &&
+        new Date(subscription.current_period_end).getTime() > Date.now());
+
+    if (!canAccess) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/planos";
+      redirectUrl.search = "";
+      redirectUrl.searchParams.set("reason", "subscription_required");
+      return NextResponse.redirect(redirectUrl);
+    }
   }
 
   return response;

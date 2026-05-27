@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { signInSchema, signUpSchema } from "@/features/auth/validation";
 import { getAppUrl } from "@/lib/env";
 import { isPlaceholderValue } from "@/lib/validators";
+import { hasBillableAccess } from "@/services/billing/access";
 
 type AuthState = {
   error?: string;
@@ -76,7 +77,28 @@ export async function signInAction(_state: AuthState, formData: FormData): Promi
     return { error: "Não foi possível conectar ao Supabase. Confira a URL e as chaves no .env.local." };
   }
 
-  const next = String(formData.get("next") ?? "/dashboard");
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: subscription } = user
+    ? await supabase
+        .from("subscriptions")
+        .select("plan_slug, status, current_period_end, stripe_customer_id")
+        .eq("owner_user_id", user.id)
+        .maybeSingle()
+    : { data: null };
+
+  const next = String(formData.get("next") ?? "");
+
+  if (next.startsWith("/api/billing/checkout")) {
+    redirect(next);
+  }
+
+  if (!hasBillableAccess(subscription)) {
+    redirect("/planos?reason=subscription_required");
+  }
+
   redirect(next.startsWith("/") ? next : "/dashboard");
 }
 

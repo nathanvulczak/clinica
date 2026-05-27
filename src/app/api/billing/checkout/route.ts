@@ -130,7 +130,7 @@ export async function GET(request: NextRequest) {
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${getAppUrl()}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${getAppUrl()}/planos?selected=${plan}&checkout=cancelled`,
+    cancel_url: `${getAppUrl()}/planos?selected=${plan}&checkout=cancelled&reason=subscription_required`,
     client_reference_id: user.id,
     subscription_data: {
       metadata: {
