@@ -3,6 +3,7 @@
 import { ROLE_LABELS } from "@/config/permissions";
 import { suspendMemberAction, updateMemberRoleAction } from "@/features/members/actions";
 import type { ClinicMember } from "@/types/domain";
+import { useToast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -18,6 +19,8 @@ const editableRoles = [
 ] as const;
 
 export function MembersTable({ members }: { members: ClinicMember[] }) {
+  const { toast } = useToast();
+
   if (members.length === 0) {
     return <p className="text-sm text-muted-foreground">Nenhum membro vinculado à clínica ativa.</p>;
   }
@@ -39,7 +42,10 @@ export function MembersTable({ members }: { members: ClinicMember[] }) {
               <p className="text-xs text-muted-foreground">{member.user_id}</p>
             </div>
             <span className="text-muted-foreground">{member.profile?.email ?? "sem e-mail"}</span>
-            <form action={updateMemberRoleAction}>
+            <form
+              action={updateMemberRoleAction}
+              onSubmit={() => toast({ title: "Alteração enviada", description: "O papel do usuário será atualizado." })}
+            >
               <input type="hidden" name="member_id" value={member.id} />
               <Select name="role" defaultValue={member.role} onChange={(event) => event.currentTarget.form?.requestSubmit()}>
                 {editableRoles.map((role) => (
@@ -52,7 +58,11 @@ export function MembersTable({ members }: { members: ClinicMember[] }) {
             <span>
               <Badge>{member.status}</Badge>
             </span>
-            <form action={suspendMemberAction} className="text-right">
+            <form
+              action={suspendMemberAction}
+              className="text-right"
+              onSubmit={() => toast({ title: "Suspensão enviada", description: "O usuário será suspenso na clínica ativa." })}
+            >
               <input type="hidden" name="member_id" value={member.id} />
               <Button variant="outline" size="sm" disabled={member.role === "clinic_owner"}>
                 Suspender

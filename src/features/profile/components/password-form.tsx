@@ -1,14 +1,26 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { KeyRound } from "lucide-react";
 import { updatePasswordAction } from "@/features/profile/actions";
+import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 
 export function PasswordForm() {
   const [state, formAction, pending] = useActionState(updatePasswordAction, {});
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (state.success) {
+      toast({ title: state.success, description: "Use a nova senha no próximo acesso." });
+    }
+
+    if (state.error) {
+      toast({ title: "Senha não alterada", description: state.error, variant: "destructive" });
+    }
+  }, [state.error, state.success, toast]);
 
   return (
     <form action={formAction} className="grid gap-4">

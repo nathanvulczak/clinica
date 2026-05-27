@@ -8,6 +8,7 @@ import { clinicSchema } from "@/features/clinics/validation";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrentSubscription } from "@/repositories/subscriptions";
+import { logAuditEvent } from "@/services/audit/audit-service";
 import type { PlanSlug } from "@/types/domain";
 
 type ClinicState = {
@@ -86,6 +87,42 @@ export async function createClinicAction(_state: ClinicState, formData: FormData
   }
 
   if (data?.id) {
+    await admin.from("clinic_members").upsert(
+      {
+        clinic_id: data.id,
+        user_id: user.id,
+        role: "clinic_owner",
+        status: "active",
+        joined_at: new Date().toISOString(),
+        created_by: user.id,
+        updated_by: user.id,
+      },
+      { onConflict: "clinic_id,user_id" },
+    );
+
+    await admin
+      .from("profiles")
+      .update({
+        platform_role: "clinic_owner",
+        updated_by: user.id,
+      })
+      .eq("id", user.id)
+      .eq("platform_role", "professional");
+
+    await logAuditEvent({
+      clinicId: data.id,
+      userId: user.id,
+      actionType: "clinic_created",
+      module: "clinics",
+      recordTable: "clinics",
+      recordId: data.id,
+      newValues: {
+        trade_name: parsed.data.trade_name,
+        legal_name: parsed.data.legal_name,
+      },
+      notes: "Clínica cadastrada e usuário criador vinculado como clinic_owner.",
+    });
+
     const cookieStore = await cookies();
     cookieStore.set(ACTIVE_CLINIC_COOKIE, data.id, {
       httpOnly: true,

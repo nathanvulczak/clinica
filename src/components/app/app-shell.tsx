@@ -14,6 +14,7 @@ import {
   LogOut,
   Menu,
   ShieldCheck,
+  Sparkles,
   UserCircle,
   Users,
 } from "lucide-react";
@@ -65,7 +66,10 @@ export function AppShell({
   const firstName = useMemo(() => profile?.full_name?.split(" ")[0] ?? "bem-vindo", [profile]);
 
   return (
-    <div className="min-h-screen bg-background lg:grid" style={{ gridTemplateColumns: collapsed ? "88px 1fr" : "284px 1fr" }}>
+    <div
+      className="min-h-screen bg-background lg:grid"
+      style={{ gridTemplateColumns: collapsed ? "88px 1fr" : "284px 1fr" }}
+    >
       <aside
         className={cn(
           "sticky top-0 z-30 hidden h-screen border-r bg-card/95 shadow-sm backdrop-blur lg:flex lg:flex-col",
@@ -197,26 +201,44 @@ export function AppShell({
             ))}
         </nav>
 
-        {showWelcome ? (
-          <section className="border-b bg-[linear-gradient(135deg,#ecfdf5_0%,#f8fafc_55%,#fff7ed_100%)] px-4 py-4 lg:px-8">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-semibold">Bem-vindo ao CliniCore, {firstName}.</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Escolha a clínica ativa e gerencie usuários, assinatura e operação com segurança por permissão.
-                </p>
-              </div>
+        <main className="px-4 py-6 lg:px-8">{children}</main>
+      </div>
+
+      {showWelcome ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-background px-4">
+          <div className="absolute inset-x-0 top-0 h-1 bg-primary" />
+          <section className="grid w-full max-w-xl gap-8 text-center">
+            <div className="mx-auto flex size-16 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+              <Activity className="size-8" />
+            </div>
+            <div>
+              <p className="text-sm font-medium uppercase text-muted-foreground">CliniCore</p>
+              <h1 className="mt-3 text-3xl font-semibold tracking-normal text-foreground sm:text-4xl">
+                Bem-vindo, {firstName}.
+              </h1>
+              <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-muted-foreground">
+                Seu ambiente clínico está pronto para operar com contexto ativo, permissões e auditoria.
+              </p>
+            </div>
+            <div className="mx-auto grid w-full max-w-xs gap-3">
+              <Button type="button" onClick={() => setShowWelcome(false)} size="lg">
+                <Sparkles />
+                Entrar no sistema
+              </Button>
               <form action={dismissWelcomeAction}>
-                <Button variant="ghost" size="sm" onClick={() => setShowWelcome(false)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-xs text-muted-foreground"
+                  onClick={() => setShowWelcome(false)}
+                >
                   Não mostrar novamente
                 </Button>
               </form>
             </div>
           </section>
-        ) : null}
-
-        <main className="px-4 py-6 lg:px-8">{children}</main>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

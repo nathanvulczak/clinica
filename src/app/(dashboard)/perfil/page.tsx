@@ -4,12 +4,12 @@ import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PasswordForm } from "@/features/profile/components/password-form";
-import { ProfileForm } from "@/features/profile/components/profile-form";
-import { listCurrentUserAccessLogs } from "@/repositories/audit";
+import { ProfileForm, ProfilePreferencesForm } from "@/features/profile/components/profile-form";
+import { SecurityLogsPanel } from "@/features/profile/components/security-logs-panel";
 import { getCurrentProfile } from "@/repositories/profile";
 
 export default async function PerfilPage() {
-  const [profile, accessLogs] = await Promise.all([getCurrentProfile(), listCurrentUserAccessLogs()]);
+  const profile = await getCurrentProfile();
 
   if (!profile) {
     redirect("/login");
@@ -19,7 +19,7 @@ export default async function PerfilPage() {
     <>
       <PageHeader
         title="Meu perfil"
-        description="Controle seus dados pessoais, segurança e transparência de acesso. Papéis e permissões são geridos por administradores da clínica."
+        description="Controle seus dados pessoais, segurança, preferências e transparência de acesso."
       />
       <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
         <Card>
@@ -53,24 +53,24 @@ export default async function PerfilPage() {
               <PasswordForm />
             </CardContent>
           </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Preferências</CardTitle>
+              <CardDescription>Personalize sua experiência no sistema.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ProfilePreferencesForm profile={profile} />
+            </CardContent>
+          </Card>
         </div>
       </div>
       <Card className="mt-6">
         <CardHeader>
           <CardTitle>Logins e ações de segurança</CardTitle>
-          <CardDescription>Eventos registrados a partir desta versão.</CardDescription>
+          <CardDescription>Use filtros para consultar eventos. A lista atualiza automaticamente.</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-2">
-          {accessLogs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum evento recente encontrado.</p>
-          ) : (
-            accessLogs.map((log) => (
-              <div key={log.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-                <span>{log.action_type}</span>
-                <span className="text-muted-foreground">{new Date(log.created_at).toLocaleString("pt-BR")}</span>
-              </div>
-            ))
-          )}
+        <CardContent>
+          <SecurityLogsPanel />
         </CardContent>
       </Card>
     </>

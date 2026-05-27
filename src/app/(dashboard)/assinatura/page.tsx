@@ -1,5 +1,6 @@
 import { redirectToCustomerPortalAction } from "@/features/billing/actions";
 import { PlanCards } from "@/features/billing/components/plan-cards";
+import { formatDateBr } from "@/lib/dates";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,12 +46,11 @@ export default async function AssinaturaPage({
             <span className="font-medium">{subscription?.status ?? "inactive"}</span>
           </p>
           <p>
-            <span className="text-muted-foreground">Fim do ciclo:</span>{" "}
-            <span className="font-medium">
-              {subscription?.current_period_end
-                ? new Date(subscription.current_period_end).toLocaleDateString("pt-BR")
-                : "não informado"}
-            </span>
+            <span className="text-muted-foreground">Próxima renovação / fim do ciclo pago:</span>{" "}
+            <span className="font-medium">{formatDateBr(subscription?.current_period_end)}</span>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Os planos são mensais. Se a assinatura começa em 27/05/2026, o ciclo pago termina em 27/06/2026.
           </p>
         </CardContent>
       </Card>

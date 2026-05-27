@@ -7,6 +7,7 @@ import { signInSchema, signUpSchema } from "@/features/auth/validation";
 import { getAppUrl } from "@/lib/env";
 import { isPlaceholderValue } from "@/lib/validators";
 import { hasBillableAccess } from "@/services/billing/access";
+import { logAuditEvent } from "@/services/audit/audit-service";
 
 type AuthState = {
   error?: string;
@@ -66,9 +67,9 @@ export async function signInAction(_state: AuthState, formData: FormData): Promi
     } = await supabase.auth.getUser();
 
     if (user) {
-      await supabase.from("audit_logs").insert({
-        user_id: user.id,
-        action_type: "login",
+      await logAuditEvent({
+        userId: user.id,
+        actionType: "login",
         level: "security",
         notes: "Login realizado com e-mail e senha.",
       });
@@ -181,9 +182,9 @@ export async function signOutAction() {
   } = await supabase.auth.getUser();
 
   if (user) {
-    await supabase.from("audit_logs").insert({
-      user_id: user.id,
-      action_type: "logout",
+    await logAuditEvent({
+      userId: user.id,
+      actionType: "logout",
       level: "security",
       notes: "Logout realizado pelo usuário.",
     });

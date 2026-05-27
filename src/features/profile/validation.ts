@@ -8,7 +8,6 @@ export const updateProfileSchema = z.object({
     .string()
     .transform((value) => onlyDigits(formatPhone(value)))
     .refine((value) => value.length === 0 || (value.length >= 10 && value.length <= 11), "Telefone inválido."),
-  avatar_url: z.string().url("Informe uma URL válida para a imagem.").optional().or(z.literal("")),
 });
 
 export const updatePasswordSchema = z.object({

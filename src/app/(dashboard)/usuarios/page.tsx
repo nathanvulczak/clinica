@@ -15,7 +15,7 @@ export default async function UsuariosPage() {
         title="Usuários e permissões"
         description="Gerencie membros por clínica. O mesmo usuário pode ter papéis diferentes em clínicas diferentes."
       />
-      <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+      <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
         <Card>
           <CardHeader>
             <CardTitle>Membros da clínica ativa</CardTitle>
@@ -31,7 +31,7 @@ export default async function UsuariosPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Convidar usuário</CardTitle>
+            <CardTitle>Cadastrar usuário</CardTitle>
             <CardDescription>
               Se o e-mail já existir, o usuário será vinculado imediatamente. Caso contrário, o convite fica registrado.
             </CardDescription>
