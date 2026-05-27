@@ -6,6 +6,26 @@ const protectedPrefixes = ["/dashboard", "/clinicas", "/assinatura", "/usuarios"
 const authPrefixes = ["/login", "/cadastro"];
 const subscriptionRequiredPrefixes = ["/dashboard", "/clinicas", "/usuarios", "/auditoria"];
 
+function hasValidSupabasePublicConfig() {
+  const url = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+
+  if (!url || !anonKey || anonKey === "missing-anon-key") {
+    return false;
+  }
+
+  if (/example\.supabase\.co|seu_|sua_|xxx|placeholder/i.test(`${url} ${anonKey}`)) {
+    return false;
+  }
+
+  try {
+    const parsedUrl = new URL(url);
+    return parsedUrl.protocol === "https:" && parsedUrl.hostname.endsWith(".supabase.co");
+  } catch {
+    return false;
+  }
+}
+
 export async function updateSession(request: NextRequest) {
   if (
     request.nextUrl.searchParams.has("code") &&
@@ -36,6 +56,23 @@ export async function updateSession(request: NextRequest) {
     request,
   });
 
+  const pathname = request.nextUrl.pathname;
+  const isProtected = protectedPrefixes.some((prefix) => pathname.startsWith(prefix));
+  const isAuthPage = authPrefixes.some((prefix) => pathname.startsWith(prefix));
+  const requiresSubscription = subscriptionRequiredPrefixes.some((prefix) => pathname.startsWith(prefix));
+
+  if (!hasValidSupabasePublicConfig()) {
+    if (isProtected) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/login";
+      redirectUrl.search = "";
+      redirectUrl.searchParams.set("config", "supabase_missing");
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    return response;
+  }
+
   const supabase = createServerClient(getSupabaseUrl(), getSupabaseAnonKey(), {
     cookies: {
       getAll() {
@@ -51,14 +88,22 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
 
-  const pathname = request.nextUrl.pathname;
-  const isProtected = protectedPrefixes.some((prefix) => pathname.startsWith(prefix));
-  const isAuthPage = authPrefixes.some((prefix) => pathname.startsWith(prefix));
-  const requiresSubscription = subscriptionRequiredPrefixes.some((prefix) => pathname.startsWith(prefix));
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+  } catch {
+    if (isProtected) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/login";
+      redirectUrl.search = "";
+      redirectUrl.searchParams.set("auth", "session_error");
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    return response;
+  }
 
   if (isProtected && !user) {
     const redirectUrl = request.nextUrl.clone();
