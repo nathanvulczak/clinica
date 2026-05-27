@@ -1,3 +1,4 @@
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { AppRole, PermissionModule } from "@/types/domain";
 
@@ -75,7 +76,25 @@ export async function listClinicAuditLogs(
   }
 
   const supabase = await createSupabaseServerClient();
-  let query = supabase
+  const { data: canView } = await supabase.rpc("user_has_permission", {
+    clinic_uuid: clinicId,
+    permission_module: "audit",
+    permission_action: "view",
+  });
+
+  if (canView !== true) {
+    return [];
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: members } = await admin
+    .from("clinic_members")
+    .select("user_id")
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null);
+  const memberUserIds = [...new Set((members ?? []).map((member) => member.user_id).filter(Boolean))];
+
+  let clinicQuery = admin
     .from("audit_logs")
     .select(
       "id, clinic_id, user_id, action_type, module, record_table, record_id, old_values, new_values, ip_address, user_agent, level, notes, created_at, user:profiles(id, full_name, email, platform_role)",
@@ -83,39 +102,75 @@ export async function listClinicAuditLogs(
     .eq("clinic_id", clinicId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(150);
 
   if (filters.from) {
-    query = query.gte("created_at", new Date(`${filters.from}T00:00:00-03:00`).toISOString());
+    clinicQuery = clinicQuery.gte("created_at", new Date(`${filters.from}T00:00:00-03:00`).toISOString());
   }
 
   if (filters.to) {
-    query = query.lte("created_at", new Date(`${filters.to}T23:59:59-03:00`).toISOString());
+    clinicQuery = clinicQuery.lte("created_at", new Date(`${filters.to}T23:59:59-03:00`).toISOString());
   }
 
   if (filters.action_type && filters.action_type !== "all") {
-    query = query.eq("action_type", filters.action_type);
+    clinicQuery = clinicQuery.eq("action_type", filters.action_type);
   }
 
   if (filters.module && filters.module !== "all") {
-    query = query.eq("module", filters.module);
+    clinicQuery = clinicQuery.eq("module", filters.module);
   }
 
   if (filters.level && filters.level !== "all") {
-    query = query.eq("level", filters.level);
+    clinicQuery = clinicQuery.eq("level", filters.level);
   }
 
   if (filters.user_id && filters.user_id !== "all") {
-    query = query.eq("user_id", filters.user_id);
+    clinicQuery = clinicQuery.eq("user_id", filters.user_id);
   }
 
-  const { data, error } = await query;
+  let globalLogs: AuditLogEntry[] = [];
+
+  if (memberUserIds.length > 0 && (!filters.module || filters.module === "all")) {
+    let globalQuery = admin
+      .from("audit_logs")
+      .select(
+        "id, clinic_id, user_id, action_type, module, record_table, record_id, old_values, new_values, ip_address, user_agent, level, notes, created_at, user:profiles(id, full_name, email, platform_role)",
+      )
+      .is("clinic_id", null)
+      .in("user_id", filters.user_id && filters.user_id !== "all" ? [filters.user_id] : memberUserIds)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (filters.from) {
+      globalQuery = globalQuery.gte("created_at", new Date(`${filters.from}T00:00:00-03:00`).toISOString());
+    }
+
+    if (filters.to) {
+      globalQuery = globalQuery.lte("created_at", new Date(`${filters.to}T23:59:59-03:00`).toISOString());
+    }
+
+    if (filters.action_type && filters.action_type !== "all") {
+      globalQuery = globalQuery.eq("action_type", filters.action_type);
+    }
+
+    if (filters.level && filters.level !== "all") {
+      globalQuery = globalQuery.eq("level", filters.level);
+    }
+
+    const { data: globalData } = await globalQuery;
+    globalLogs = (globalData ?? []) as unknown as AuditLogEntry[];
+  }
+
+  const { data, error } = await clinicQuery;
 
   if (error) {
     return [];
   }
 
-  const logs = data as unknown as AuditLogEntry[];
+  const logs = [...((data ?? []) as unknown as AuditLogEntry[]), ...globalLogs]
+    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+    .slice(0, 200);
 
   if (filters.role && filters.role !== "all") {
     return logs.filter((log) => log.user?.platform_role === filters.role);

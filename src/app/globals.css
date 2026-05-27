@@ -67,3 +67,56 @@ select,
 textarea {
   letter-spacing: 0;
 }
+
+@keyframes welcome-wave {
+  0% {
+    transform: translate3d(-8%, 8%, 0) rotate(0deg) scale(1);
+  }
+
+  50% {
+    transform: translate3d(6%, -6%, 0) rotate(8deg) scale(1.08);
+  }
+
+  100% {
+    transform: translate3d(-8%, 8%, 0) rotate(0deg) scale(1);
+  }
+}
+
+.welcome-wave {
+  position: absolute;
+  width: 76vw;
+  height: 34vh;
+  border-radius: 999px;
+  filter: blur(42px);
+  opacity: 0.42;
+  animation: welcome-wave 14s ease-in-out infinite;
+  will-change: transform;
+}
+
+.welcome-wave-one {
+  top: 7%;
+  left: -18%;
+  background: #0f766e;
+}
+
+.welcome-wave-two {
+  right: -22%;
+  bottom: 14%;
+  background: #38bdf8;
+  animation-duration: 18s;
+  animation-delay: -5s;
+}
+
+.welcome-wave-three {
+  left: 18%;
+  bottom: -12%;
+  background: #f59e0b;
+  animation-duration: 20s;
+  animation-delay: -9s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-wave {
+    animation: none;
+  }
+}

@@ -1,15 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-
-const USER_VISIBLE_ACTIONS = [
-  "login",
-  "logout",
-  "password_changed",
-  "profile_updated",
-  "preferences_updated",
-  "avatar_uploaded",
-  "record_updated",
-];
 
 export async function GET(request: NextRequest) {
   const supabase = await createSupabaseServerClient();
@@ -25,14 +16,19 @@ export async function GET(request: NextRequest) {
   const actionType = params.get("action_type");
   const dateFrom = params.get("from");
   const dateTo = params.get("to");
+  const admin = createSupabaseAdminClient();
 
-  let query = supabase
+  let query = admin
     .from("audit_logs")
-    .select("id, action_type, created_at, notes, level")
+    .select("id, action_type, created_at, notes, level, module, record_table")
     .eq("user_id", user.id)
-    .in("action_type", actionType && actionType !== "all" ? [actionType] : USER_VISIBLE_ACTIONS)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
-    .limit(50);
+    .limit(100);
+
+  if (actionType && actionType !== "all") {
+    query = query.eq("action_type", actionType);
+  }
 
   if (dateFrom) {
     query = query.gte("created_at", new Date(`${dateFrom}T00:00:00-03:00`).toISOString());

@@ -14,6 +14,8 @@ type SecurityLog = {
   created_at: string;
   notes: string | null;
   level: string;
+  module: string | null;
+  record_table: string | null;
 };
 
 const actionOptions = [
@@ -24,6 +26,17 @@ const actionOptions = [
   ["profile_updated", "Perfil atualizado"],
   ["avatar_uploaded", "Imagem alterada"],
   ["preferences_updated", "Preferências"],
+  ["clinic_created", "Clínica criada"],
+  ["member_invited", "Convite enviado"],
+  ["member_added", "Usuário vinculado"],
+  ["member_updated", "Usuário atualizado"],
+  ["member_role_updated", "Perfil alterado"],
+  ["member_suspended", "Usuário suspenso"],
+  ["record_created", "Registro criado"],
+  ["record_updated", "Registro atualizado"],
+  ["record_deleted", "Registro excluído"],
+  ["subscription_changed", "Assinatura"],
+  ["access_denied", "Acesso negado"],
 ] as const;
 
 export function SecurityLogsPanel() {
@@ -34,6 +47,10 @@ export function SecurityLogsPanel() {
   const [loading, setLoading] = useState(false);
 
   const loadLogs = useCallback(async () => {
+    if (document.hidden) {
+      return;
+    }
+
     const params = new URLSearchParams();
     params.set("action_type", actionType);
 
@@ -60,9 +77,19 @@ export function SecurityLogsPanel() {
 
   useEffect(() => {
     void loadLogs();
-    const interval = window.setInterval(() => void loadLogs(), 15000);
+    const interval = window.setInterval(() => void loadLogs(), 20000);
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        void loadLogs();
+      }
+    };
 
-    return () => window.clearInterval(interval);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [loadLogs]);
 
   return (
@@ -100,7 +127,9 @@ export function SecurityLogsPanel() {
             <div key={log.id} className="flex flex-col gap-1 rounded-md border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <span className="font-medium">{log.action_type}</span>
-                {log.notes ? <p className="text-xs text-muted-foreground">{log.notes}</p> : null}
+                <p className="text-xs text-muted-foreground">
+                  {[log.module, log.record_table, log.notes].filter(Boolean).join(" • ") || "Evento registrado."}
+                </p>
               </div>
               <span className="text-muted-foreground">{formatDateTimeBr(log.created_at)}</span>
             </div>

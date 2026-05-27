@@ -35,6 +35,8 @@ const nav = [
   { href: "/agenda", label: "Agenda", icon: CalendarDays, disabled: true },
 ];
 
+const WELCOME_SESSION_KEY = "clinicore.welcome.seen";
+
 export function AppShell({
   children,
   profile,
@@ -60,7 +62,8 @@ export function AppShell({
   }, [collapsed]);
 
   useEffect(() => {
-    setShowWelcome(!profile?.app_preferences?.hide_welcome);
+    const alreadySeen = window.sessionStorage.getItem(WELCOME_SESSION_KEY) === "true";
+    setShowWelcome(!profile?.app_preferences?.hide_welcome && !alreadySeen);
   }, [profile?.app_preferences?.hide_welcome]);
 
   const firstName = useMemo(() => profile?.full_name?.split(" ")[0] ?? "bem-vindo", [profile]);
@@ -205,9 +208,13 @@ export function AppShell({
       </div>
 
       {showWelcome ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-background px-4">
+        <div className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-background px-4">
+          <div className="welcome-wave welcome-wave-one" />
+          <div className="welcome-wave welcome-wave-two" />
+          <div className="welcome-wave welcome-wave-three" />
+          <div className="absolute inset-0 bg-background/62 backdrop-blur-3xl" />
           <div className="absolute inset-x-0 top-0 h-1 bg-primary" />
-          <section className="grid w-full max-w-xl gap-8 text-center">
+          <section className="relative z-10 grid w-full max-w-xl gap-8 text-center">
             <div className="mx-auto flex size-16 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
               <Activity className="size-8" />
             </div>
@@ -221,7 +228,14 @@ export function AppShell({
               </p>
             </div>
             <div className="mx-auto grid w-full max-w-xs gap-3">
-              <Button type="button" onClick={() => setShowWelcome(false)} size="lg">
+              <Button
+                type="button"
+                onClick={() => {
+                  window.sessionStorage.setItem(WELCOME_SESSION_KEY, "true");
+                  setShowWelcome(false);
+                }}
+                size="lg"
+              >
                 <Sparkles />
                 Entrar no sistema
               </Button>
@@ -230,7 +244,10 @@ export function AppShell({
                   variant="ghost"
                   size="sm"
                   className="w-full text-xs text-muted-foreground"
-                  onClick={() => setShowWelcome(false)}
+                  onClick={() => {
+                    window.sessionStorage.setItem(WELCOME_SESSION_KEY, "true");
+                    setShowWelcome(false);
+                  }}
                 >
                   Não mostrar novamente
                 </Button>
