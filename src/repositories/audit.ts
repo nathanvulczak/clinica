@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { ensureOwnerMembership } from "@/repositories/clinics";
 import type { AppRole, PermissionModule } from "@/types/domain";
 
 export type AccessLog = {
@@ -76,17 +77,40 @@ export async function listClinicAuditLogs(
   }
 
   const supabase = await createSupabaseServerClient();
-  const { data: canView } = await supabase.rpc("user_has_permission", {
-    clinic_uuid: clinicId,
-    permission_module: "audit",
-    permission_action: "view",
-  });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const admin = createSupabaseAdminClient();
 
-  if (canView !== true) {
+  if (!user) {
     return [];
   }
 
-  const admin = createSupabaseAdminClient();
+  const { data: clinic } = await admin
+    .from("clinics")
+    .select("id, created_by")
+    .eq("id", clinicId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!clinic) {
+    return [];
+  }
+
+  if (clinic.created_by === user.id) {
+    await ensureOwnerMembership(clinicId, user.id);
+  } else {
+    const { data: canView } = await supabase.rpc("user_has_permission", {
+      clinic_uuid: clinicId,
+      permission_module: "audit",
+      permission_action: "view",
+    });
+
+    if (canView !== true) {
+      return [];
+    }
+  }
+
   const { data: members } = await admin
     .from("clinic_members")
     .select("user_id")

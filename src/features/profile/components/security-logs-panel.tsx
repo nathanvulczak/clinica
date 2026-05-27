@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Search } from "lucide-react";
 import { formatDateTimeBr } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,39 @@ type SecurityLog = {
   level: string;
   module: string | null;
   record_table: string | null;
+};
+
+const actionLabels: Record<string, string> = {
+  login: "Login realizado",
+  logout: "Logout realizado",
+  password_changed: "Senha alterada",
+  profile_updated: "Perfil atualizado",
+  avatar_uploaded: "Imagem de perfil alterada",
+  preferences_updated: "Preferências atualizadas",
+  clinic_created: "Clínica cadastrada",
+  member_invited: "Convite enviado",
+  member_added: "Usuário vinculado",
+  member_updated: "Usuário atualizado",
+  member_role_updated: "Perfil de usuário alterado",
+  member_suspended: "Usuário suspenso",
+  record_created: "Registro criado",
+  record_updated: "Registro atualizado",
+  record_deleted: "Registro excluído",
+  subscription_changed: "Assinatura alterada",
+  access_denied: "Tentativa de acesso negada",
+};
+
+const moduleLabels: Record<string, string> = {
+  clinics: "Clínicas",
+  members: "Usuários e permissões",
+  permissions: "Permissões",
+  billing: "Assinatura e pagamentos",
+  audit: "Auditoria",
+  patients: "Pacientes",
+  medical_records: "Prontuário",
+  schedule: "Agenda",
+  financial: "Financeiro",
+  reports: "Relatórios",
 };
 
 const actionOptions = [
@@ -39,12 +72,29 @@ const actionOptions = [
   ["access_denied", "Acesso negado"],
 ] as const;
 
+function getFriendlyDescription(log: SecurityLog) {
+  if (log.action_type === "clinic_created") {
+    return "A clínica foi cadastrada e seu acesso como proprietário foi registrado.";
+  }
+
+  if (log.action_type === "profile_updated") {
+    return "Seus dados pessoais foram atualizados.";
+  }
+
+  if (log.action_type === "record_updated") {
+    return `${moduleLabels[log.module ?? ""] ?? "Um registro"} teve alteração registrada.`;
+  }
+
+  return log.notes || moduleLabels[log.module ?? ""] || "Evento registrado no sistema.";
+}
+
 export function SecurityLogsPanel() {
   const [logs, setLogs] = useState<SecurityLog[]>([]);
   const [actionType, setActionType] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
 
   const loadLogs = useCallback(async () => {
     if (document.hidden) {
@@ -70,13 +120,17 @@ export function SecurityLogsPanel() {
       });
       const payload = (await response.json()) as { logs?: SecurityLog[] };
       setLogs(payload.logs ?? []);
+      setSearched(true);
     } finally {
       setLoading(false);
     }
   }, [actionType, from, to]);
 
   useEffect(() => {
-    void loadLogs();
+    if (!searched) {
+      return;
+    }
+
     const interval = window.setInterval(() => void loadLogs(), 20000);
     const handleVisibility = () => {
       if (!document.hidden) {
@@ -90,7 +144,7 @@ export function SecurityLogsPanel() {
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [loadLogs]);
+  }, [loadLogs, searched]);
 
   return (
     <div className="grid gap-4">
@@ -114,22 +168,22 @@ export function SecurityLogsPanel() {
           <Input id="security_to" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
         </div>
         <Button type="button" variant="outline" onClick={() => void loadLogs()} disabled={loading}>
-          <RefreshCw className={loading ? "animate-spin" : ""} />
-          Atualizar
+          <Search />
+          {loading ? "Filtrando..." : "Filtrar"}
         </Button>
       </div>
 
       <div className="grid gap-2">
-        {logs.length === 0 ? (
+        {!searched ? (
+          <p className="text-sm text-muted-foreground">Use os filtros acima e clique em Filtrar para visualizar seus eventos.</p>
+        ) : logs.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nenhum evento encontrado para os filtros aplicados.</p>
         ) : (
           logs.map((log) => (
             <div key={log.id} className="flex flex-col gap-1 rounded-md border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <span className="font-medium">{log.action_type}</span>
-                <p className="text-xs text-muted-foreground">
-                  {[log.module, log.record_table, log.notes].filter(Boolean).join(" • ") || "Evento registrado."}
-                </p>
+                <span className="font-medium">{actionLabels[log.action_type] ?? "Evento registrado"}</span>
+                <p className="text-xs text-muted-foreground">{getFriendlyDescription(log)}</p>
               </div>
               <span className="text-muted-foreground">{formatDateTimeBr(log.created_at)}</span>
             </div>

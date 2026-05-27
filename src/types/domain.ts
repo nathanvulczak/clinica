@@ -49,6 +49,7 @@ export type Clinic = {
   city: string | null;
   state: string | null;
   created_at: string;
+  created_by?: string | null;
 };
 
 export type SubscriptionSummary = {

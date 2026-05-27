@@ -12,27 +12,59 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 
-const actionTypes = [
-  "all",
-  "login",
-  "logout",
-  "record_created",
-  "record_updated",
-  "record_deleted",
-  "clinic_created",
-  "member_invited",
-  "member_added",
-  "member_updated",
-  "member_role_updated",
-  "member_suspended",
-  "profile_updated",
-  "avatar_uploaded",
-  "preferences_updated",
-  "subscription_changed",
-  "access_denied",
-];
+const actionLabels: Record<string, string> = {
+  all: "Todas",
+  login: "Login realizado",
+  logout: "Logout realizado",
+  record_created: "Registro criado",
+  record_updated: "Registro atualizado",
+  record_deleted: "Registro excluído",
+  clinic_created: "Clínica cadastrada",
+  member_invited: "Convite enviado",
+  member_added: "Usuário vinculado",
+  member_updated: "Usuário atualizado",
+  member_role_updated: "Perfil de usuário alterado",
+  member_suspended: "Usuário suspenso",
+  profile_updated: "Perfil atualizado",
+  avatar_uploaded: "Imagem de perfil alterada",
+  preferences_updated: "Preferências alteradas",
+  subscription_changed: "Assinatura alterada",
+  access_denied: "Acesso negado",
+};
 
+const moduleLabels: Record<string, string> = {
+  clinics: "Clínicas",
+  members: "Usuários",
+  permissions: "Permissões",
+  billing: "Assinatura",
+  audit: "Auditoria",
+  patients: "Pacientes",
+  medical_records: "Prontuário",
+  schedule: "Agenda",
+  financial: "Financeiro",
+  reports: "Relatórios",
+};
+
+const tableLabels: Record<string, string> = {
+  profiles: "Perfil do usuário",
+  clinics: "Clínica",
+  clinic_members: "Membro da clínica",
+  subscriptions: "Assinatura",
+  invoices: "Pagamento",
+  role_permissions: "Permissões do perfil",
+  member_permissions: "Permissões do usuário",
+};
+
+const actionTypes = Object.keys(actionLabels);
 const levels = ["all", "info", "warning", "critical", "security"];
+
+function formatJson(value: Record<string, unknown> | null) {
+  if (!value) {
+    return "Sem dados registrados.";
+  }
+
+  return JSON.stringify(value, null, 2);
+}
 
 export default async function AuditoriaPage({
   searchParams,
@@ -60,7 +92,7 @@ export default async function AuditoriaPage({
     <>
       <PageHeader
         title="Auditoria e logs"
-        description="Rastreie ações da clínica ativa com filtros, valores antigos/novos, IP, dispositivo e severidade."
+        description="Rastreie ações da clínica ativa com filtros, valores anteriores, valores substituídos, IP, dispositivo e severidade."
       />
 
       <Card className="mb-6">
@@ -85,7 +117,7 @@ export default async function AuditoriaPage({
               <Select id="action_type" name="action_type" defaultValue={filters.action_type ?? "all"}>
                 {actionTypes.map((action) => (
                   <option key={action} value={action}>
-                    {action === "all" ? "Todas" : action}
+                    {actionLabels[action]}
                   </option>
                 ))}
               </Select>
@@ -96,7 +128,7 @@ export default async function AuditoriaPage({
                 <option value="all">Todos</option>
                 {PERMISSION_MODULES.map((module) => (
                   <option key={module} value={module}>
-                    {module}
+                    {moduleLabels[module] ?? module}
                   </option>
                 ))}
               </Select>
@@ -145,22 +177,24 @@ export default async function AuditoriaPage({
         </CardHeader>
         <CardContent>
           {logs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum evento encontrado para os filtros aplicados.</p>
+            <p className="text-sm text-muted-foreground">
+              Nenhum evento encontrado. Se a clínica acabou de ser criada, confirme se as migrations 005 e 006 foram aplicadas no Supabase.
+            </p>
           ) : (
             <div className="overflow-hidden rounded-lg border">
-              <div className="grid min-w-[1100px] grid-cols-[170px_160px_170px_1fr_170px] bg-muted px-4 py-3 text-xs font-medium uppercase text-muted-foreground">
+              <div className="grid min-w-[1120px] grid-cols-[170px_180px_180px_1fr_180px] bg-muted px-4 py-3 text-xs font-medium uppercase text-muted-foreground">
                 <span>Data</span>
                 <span>Ação</span>
                 <span>Usuário</span>
-                <span>Registro</span>
-                <span>Detalhes</span>
+                <span>Registro afetado</span>
+                <span>Alterações</span>
               </div>
-              <div className="min-w-[1100px] divide-y">
+              <div className="min-w-[1120px] divide-y">
                 {logs.map((log) => (
-                  <div key={log.id} className="grid grid-cols-[170px_160px_170px_1fr_170px] gap-3 px-4 py-3 text-sm">
+                  <div key={log.id} className="grid grid-cols-[170px_180px_180px_1fr_180px] gap-3 px-4 py-3 text-sm">
                     <span className="text-muted-foreground">{formatDateTimeBr(log.created_at)}</span>
                     <div className="grid gap-1">
-                      <span className="font-medium">{log.action_type}</span>
+                      <span className="font-medium">{actionLabels[log.action_type] ?? log.action_type}</span>
                       <Badge>{log.level}</Badge>
                     </div>
                     <div>
@@ -168,24 +202,32 @@ export default async function AuditoriaPage({
                       <p className="text-xs text-muted-foreground">{log.user?.email ?? log.user_id ?? "sem usuário"}</p>
                     </div>
                     <div>
-                      <p className="font-medium">{log.record_table ?? log.module ?? "registro"}</p>
-                      <p className="text-xs text-muted-foreground">{log.record_id ?? log.notes ?? "sem referência"}</p>
+                      <p className="font-medium">
+                        {tableLabels[log.record_table ?? ""] ?? moduleLabels[log.module ?? ""] ?? "Registro do sistema"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{log.notes ?? "Evento auditado."}</p>
+                      {log.record_id ? <p className="text-xs text-muted-foreground">ID: {log.record_id}</p> : null}
                       {log.ip_address ? <p className="text-xs text-muted-foreground">IP: {log.ip_address}</p> : null}
                     </div>
                     <details className="text-xs">
-                      <summary className="cursor-pointer font-medium text-primary">Ver alterações</summary>
-                      <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-muted p-3 text-[11px] leading-5">
-                        {JSON.stringify(
-                          {
-                            anterior: log.old_values,
-                            novo: log.new_values,
-                            dispositivo: log.user_agent,
-                            observacoes: log.notes,
-                          },
-                          null,
-                          2,
-                        )}
-                      </pre>
+                      <summary className="cursor-pointer font-medium text-primary">Ver dados</summary>
+                      <div className="mt-2 grid gap-2">
+                        <div>
+                          <p className="mb-1 font-medium">Dado anterior</p>
+                          <pre className="max-h-44 overflow-auto rounded-md bg-muted p-3 text-[11px] leading-5">
+                            {formatJson(log.old_values)}
+                          </pre>
+                        </div>
+                        <div>
+                          <p className="mb-1 font-medium">Substituído por</p>
+                          <pre className="max-h-44 overflow-auto rounded-md bg-muted p-3 text-[11px] leading-5">
+                            {formatJson(log.new_values)}
+                          </pre>
+                        </div>
+                        {log.user_agent ? (
+                          <p className="text-muted-foreground">Dispositivo: {log.user_agent}</p>
+                        ) : null}
+                      </div>
                     </details>
                   </div>
                 ))}
