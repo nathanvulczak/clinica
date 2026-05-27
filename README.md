@@ -75,3 +75,4 @@ O link do e-mail deve apontar para `/auth/callback`, que troca o `code` por sess
 npm run lint
 npm run build
 ```
+"# clinica" 
