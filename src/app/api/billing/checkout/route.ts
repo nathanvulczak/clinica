@@ -90,11 +90,9 @@ export async function GET(request: NextRequest) {
 
     if (targetLimit < currentLimit) {
       const { count } = await admin
-        .from("clinic_members")
+        .from("clinics")
         .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .eq("role", "clinic_owner")
-        .eq("status", "active")
+        .eq("created_by", user.id)
         .is("deleted_at", null);
 
       if ((count ?? 0) > targetLimit) {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getAppUrl } from "@/lib/env";
 
 const checks = [
   "NEXT_PUBLIC_APP_URL",
@@ -23,5 +24,6 @@ export function GET() {
   return NextResponse.json({
     ok: checks.every((key) => statusFor(process.env[key]) === "present"),
     env: Object.fromEntries(checks.map((key) => [key, statusFor(process.env[key])])),
+    stripe_webhook_endpoint: `${getAppUrl()}/api/stripe/webhook`,
   });
 }

@@ -10,10 +10,12 @@ export function PlanCards({
   selected,
   currentPlan,
   subscriptionStatus,
+  isAuthenticated = true,
 }: {
   selected?: string;
   currentPlan?: PlanSlug;
   subscriptionStatus?: SubscriptionStatus;
+  isAuthenticated?: boolean;
 }) {
   const hasActiveSubscription =
     subscriptionStatus === "active" || subscriptionStatus === "trialing" || subscriptionStatus === "past_due";
@@ -57,6 +59,13 @@ export function PlanCards({
               <Button className="w-full" disabled>
                 <CreditCard />
                 Plano atual
+              </Button>
+            ) : !isAuthenticated ? (
+              <Button asChild className="w-full" variant={selected === plan.slug ? "default" : "outline"}>
+                <a href={`/cadastro?plan=${plan.slug}`}>
+                  <CreditCard />
+                  Começar cadastro
+                </a>
               </Button>
             ) : (
               <Button asChild className="w-full" variant={selected === plan.slug ? "default" : "outline"}>

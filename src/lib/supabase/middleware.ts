@@ -112,18 +112,14 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (isAuthPage && user) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/planos";
-    redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl);
-  }
+  const userId = user?.id;
+  const shouldCheckSubscription = Boolean(userId && (requiresSubscription || isAuthPage));
 
-  if (user && requiresSubscription) {
+  if (shouldCheckSubscription) {
     const { data: subscription } = await supabase
       .from("subscriptions")
       .select("status, current_period_end")
-      .eq("owner_user_id", user.id)
+      .eq("owner_user_id", userId as string)
       .maybeSingle();
 
     const status = subscription?.status;
@@ -134,7 +130,14 @@ export async function updateSession(request: NextRequest) {
         subscription?.current_period_end &&
         new Date(subscription.current_period_end).getTime() > Date.now());
 
-    if (!canAccess) {
+    if (isAuthPage) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = canAccess ? "/dashboard" : "/planos";
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+
+    if (requiresSubscription && !canAccess) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = "/planos";
       redirectUrl.search = "";

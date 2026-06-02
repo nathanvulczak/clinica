@@ -1,7 +1,10 @@
 import Stripe from "stripe";
+import { getStripePriceEnvName } from "@/config/plans";
 import { getStripe } from "@/lib/stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { PlanSlug, SubscriptionStatus } from "@/types/domain";
+
+const planSlugs: PlanSlug[] = ["singular", "duo", "master"];
 
 export function normalizeSubscriptionStatus(status?: Stripe.Subscription.Status): SubscriptionStatus {
   if (status === "active" || status === "trialing" || status === "past_due" || status === "canceled") {
@@ -14,6 +17,24 @@ export function normalizeSubscriptionStatus(status?: Stripe.Subscription.Status)
 export function planFromMetadata(metadata?: Stripe.Metadata | null): PlanSlug {
   const plan = metadata?.plan_slug;
   return plan === "duo" || plan === "master" ? plan : "singular";
+}
+
+export function planFromSubscription(subscription: Stripe.Subscription): PlanSlug {
+  const subscriptionPriceIds = new Set(
+    subscription.items.data
+      .map((item) => item.price?.id)
+      .filter((priceId): priceId is string => Boolean(priceId)),
+  );
+
+  for (const plan of planSlugs) {
+    const configuredPriceId = process.env[getStripePriceEnvName(plan)];
+
+    if (configuredPriceId && subscriptionPriceIds.has(configuredPriceId)) {
+      return plan;
+    }
+  }
+
+  return planFromMetadata(subscription.metadata);
 }
 
 function getSubscriptionPeriods(subscription: Stripe.Subscription) {
@@ -62,7 +83,7 @@ export async function upsertSubscriptionFromStripe(subscription: Stripe.Subscrip
     owner_user_id: ownerUserId,
     stripe_customer_id: customerId,
     stripe_subscription_id: subscription.id,
-    plan_slug: planFromMetadata(subscription.metadata),
+    plan_slug: planFromSubscription(subscription),
     status: normalizeSubscriptionStatus(subscription.status),
     current_period_start: periods.start ? new Date(periods.start * 1000).toISOString() : null,
     current_period_end: periods.end ? new Date(periods.end * 1000).toISOString() : null,

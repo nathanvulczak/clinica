@@ -1,5 +1,9 @@
+import Link from "next/link";
 import { PlanCards } from "@/features/billing/components/plan-cards";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { PlanSlug, SubscriptionStatus } from "@/types/domain";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 export default async function PlanosPage({
   searchParams,
@@ -13,6 +17,18 @@ export default async function PlanosPage({
   }>;
 }) {
   const params = await searchParams;
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: subscription } = user
+    ? await supabase
+        .from("subscriptions")
+        .select("plan_slug, status")
+        .eq("owner_user_id", user.id)
+        .maybeSingle()
+    : { data: null };
+
   const checkoutErrorMessages: Record<string, string> = {
     missing_stripe_secret_key: "Configure STRIPE_SECRET_KEY na Vercel e faça redeploy.",
     missing_supabase_service_role_key: "Configure SUPABASE_SERVICE_ROLE_KEY na Vercel e faça redeploy.",
@@ -27,27 +43,47 @@ export default async function PlanosPage({
 
   return (
     <main className="mx-auto min-h-screen max-w-7xl px-4 py-10 lg:px-8">
-      <div className="mb-8">
-        {params.reason === "subscription_required" ? (
-          <Badge className="mb-3">Assinatura necessária</Badge>
-        ) : null}
-        <h1 className="text-3xl font-semibold">Escolha seu plano</h1>
-        {params.checkout_error ? (
-          <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-            {checkoutErrorMessages[params.checkout_error] ?? "Não foi possível iniciar o checkout."}
+      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          {params.reason === "subscription_required" ? (
+            <Badge className="mb-3">Assinatura necessária</Badge>
+          ) : null}
+          {!user ? <Badge className="mb-3">Cadastro necessário</Badge> : null}
+          <h1 className="text-3xl font-semibold">Escolha seu plano</h1>
+          {params.checkout_error ? (
+            <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+              {checkoutErrorMessages[params.checkout_error] ?? "Não foi possível iniciar o checkout."}
+            </div>
+          ) : null}
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            {!user
+              ? "Para assinar, primeiro crie sua conta ou entre com um usuário existente. Depois disso o checkout será aberto com segurança."
+              : params.reason === "subscription_required"
+                ? "Para acessar o sistema, conclua a assinatura de um plano. Se o pagamento falhar ou for cancelado, você continuará retornando para esta tela."
+                : params.checkout === "cancelled"
+                  ? "Checkout cancelado. Nenhum plano foi assinado; escolha um plano para continuar."
+                  : params.signup
+                    ? "Conta criada. Se a confirmação de e-mail estiver ativa no Supabase, confirme o e-mail antes do pagamento."
+                    : "Assine com Stripe Checkout e gerencie upgrades ou downgrades pelo portal do cliente."}
+          </p>
+        </div>
+        {!user ? (
+          <div className="flex gap-2">
+            <Button asChild variant="outline">
+              <Link href={`/login?next=/api/billing/checkout?plan=${params.selected ?? "singular"}`}>Entrar</Link>
+            </Button>
+            <Button asChild>
+              <Link href={`/cadastro?plan=${params.selected ?? "singular"}`}>Criar conta</Link>
+            </Button>
           </div>
         ) : null}
-        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          {params.reason === "subscription_required"
-            ? "Para acessar o sistema, conclua a assinatura de um plano. Se o pagamento falhar ou for cancelado, você continuará retornando para esta tela."
-            : params.checkout === "cancelled"
-              ? "Checkout cancelado. Nenhum plano foi assinado; escolha um plano para continuar."
-              : params.signup
-            ? "Conta criada. Se a confirmação de e-mail estiver ativa no Supabase, confirme o e-mail antes do pagamento."
-            : "Assine com Stripe Checkout e gerencie upgrades ou downgrades pelo portal do cliente."}
-        </p>
       </div>
-      <PlanCards selected={params.selected} />
+      <PlanCards
+        selected={params.selected}
+        currentPlan={subscription?.plan_slug as PlanSlug | undefined}
+        subscriptionStatus={subscription?.status as SubscriptionStatus | undefined}
+        isAuthenticated={Boolean(user)}
+      />
     </main>
   );
 }

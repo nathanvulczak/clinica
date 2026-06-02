@@ -73,6 +73,7 @@ function BillingNotice({ billing, target }: { billing?: string; target?: string 
     downgrade_blocked: `Downgrade bloqueado: reduza a quantidade de clínicas ativas antes de migrar para ${target ?? "este plano"}.`,
     missing_customer: "Assinatura incompleta: customer_id não encontrado. Abra o portal ou refaça o checkout.",
     portal_return: "Você voltou do portal Stripe. As alterações serão refletidas após o webhook processar a assinatura.",
+    portal_failed: "Não foi possível abrir o portal Stripe. Confira se o Customer Portal está configurado na Stripe.",
     subscription_not_found: "Não encontramos uma assinatura ativa na Stripe para este cliente. Refazer o checkout pode corrigir o vínculo.",
     missing_session: "Sessão de checkout ausente. Refaça a assinatura.",
     sync_failed: "Pagamento concluído, mas não foi possível sincronizar automaticamente. Confira o webhook Stripe ou tente atualizar a página.",

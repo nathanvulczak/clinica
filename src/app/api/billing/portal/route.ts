@@ -24,16 +24,26 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/assinatura", request.url));
   }
 
-  await resolveActiveStripeSubscription({
-    customerId: subscription.stripe_customer_id,
-    storedSubscriptionId: subscription.stripe_subscription_id,
-    ownerUserId: user.id,
-  });
+  try {
+    await resolveActiveStripeSubscription({
+      customerId: subscription.stripe_customer_id,
+      storedSubscriptionId: subscription.stripe_subscription_id,
+      ownerUserId: user.id,
+    });
+  } catch {
+    return NextResponse.redirect(new URL("/assinatura?billing=subscription_not_found", request.url));
+  }
 
-  const session = await getStripe().billingPortal.sessions.create({
-    customer: subscription.stripe_customer_id,
-    return_url: `${getAppUrl()}/assinatura`,
-  });
+  let session;
+
+  try {
+    session = await getStripe().billingPortal.sessions.create({
+      customer: subscription.stripe_customer_id,
+      return_url: `${getAppUrl()}/assinatura`,
+    });
+  } catch {
+    return NextResponse.redirect(new URL("/assinatura?billing=portal_failed", request.url));
+  }
 
   return NextResponse.redirect(session.url);
 }
