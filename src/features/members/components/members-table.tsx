@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
-import { Check, ShieldCheck } from "lucide-react";
+import { Check, ShieldCheck, UserRound } from "lucide-react";
 import {
   CRITICAL_PERMISSION_OPTIONS,
   MODULE_LABELS,
@@ -69,7 +69,7 @@ export function MembersTable({
   }
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-4">
       {members.map((member) => (
         <MemberRow
           key={member.id}
@@ -113,84 +113,95 @@ function MemberRow({
   }, [statusState, toast]);
 
   return (
-    <article className="rounded-lg border bg-background p-4">
-      <div className="grid gap-4 xl:grid-cols-[1.1fr_240px_220px] xl:items-start">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-medium">{member.profile?.full_name ?? "Usuário sem perfil"}</p>
-            <Badge
-              className={cn(
-                member.status === "active" && "bg-primary/10 text-primary",
-                member.status === "suspended" && "bg-destructive/10 text-destructive",
-              )}
-            >
-              {statusLabels[member.status]}
-            </Badge>
-            {isSelf ? <Badge>Você</Badge> : null}
+    <article className="overflow-hidden rounded-lg border bg-card shadow-sm">
+      <div className="grid gap-4 p-4">
+        <header className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 gap-3">
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <UserRound className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="truncate font-medium">{member.profile?.full_name ?? "Usuário sem perfil"}</p>
+                <Badge
+                  className={cn(
+                    member.status === "active" && "bg-primary/10 text-primary",
+                    member.status === "suspended" && "bg-destructive/10 text-destructive",
+                    member.status === "invited" && "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {statusLabels[member.status]}
+                </Badge>
+                {isSelf ? <Badge>Você</Badge> : null}
+              </div>
+              <p className="mt-1 truncate text-sm text-muted-foreground">{member.profile?.email ?? "sem e-mail"}</p>
+              <p className="mt-2 max-w-3xl text-xs leading-5 text-muted-foreground">
+                {ROLE_PRESET_DESCRIPTIONS[member.role]}
+              </p>
+            </div>
           </div>
-          <p className="mt-1 truncate text-sm text-muted-foreground">{member.profile?.email ?? "sem e-mail"}</p>
-          <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            {ROLE_PRESET_DESCRIPTIONS[member.role]}
-          </p>
-        </div>
+          <Badge className="w-fit shrink-0">{ROLE_LABELS[member.role]}</Badge>
+        </header>
 
-        <form ref={roleFormRef} action={roleAction} className="grid gap-2">
-          <input type="hidden" name="member_id" value={member.id} />
-          <span className="text-xs font-medium text-muted-foreground">Perfil na clínica</span>
-          <div className="flex gap-2">
-            <Select name="role" defaultValue={member.role} disabled={isOwner || rolePending} className="min-w-0">
-              {isOwner ? (
-                <option value="clinic_owner">{ROLE_LABELS.clinic_owner}</option>
-              ) : (
-                editableRoles.map((role) => (
-                  <option key={role} value={role}>
-                    {ROLE_LABELS[role]}
+        <div className="grid gap-3 rounded-md border bg-background p-3 xl:grid-cols-2">
+          <form ref={roleFormRef} action={roleAction} className="grid min-w-0 gap-2">
+            <input type="hidden" name="member_id" value={member.id} />
+            <span className="text-xs font-medium text-muted-foreground">Perfil na clínica</span>
+            <div className="flex min-w-0 gap-2">
+              <Select name="role" defaultValue={member.role} disabled={isOwner || rolePending} className="min-w-0 flex-1">
+                {isOwner ? (
+                  <option value="clinic_owner">{ROLE_LABELS.clinic_owner}</option>
+                ) : (
+                  editableRoles.map((role) => (
+                    <option key={role} value={role}>
+                      {ROLE_LABELS[role]}
+                    </option>
+                  ))
+                )}
+              </Select>
+              <Button type="button" variant="outline" size="sm" disabled={isOwner || rolePending} onClick={() => setRoleConfirmOpen(true)}>
+                Salvar
+              </Button>
+            </div>
+            <ConfirmDialog
+              open={roleConfirmOpen}
+              onOpenChange={setRoleConfirmOpen}
+              title="Alterar perfil do usuário?"
+              description="A mudança pode liberar ou restringir áreas da clínica e ficará registrada na auditoria."
+              confirmLabel="Alterar perfil"
+              onConfirm={() => roleFormRef.current?.requestSubmit()}
+            />
+          </form>
+
+          <form ref={statusFormRef} action={statusAction} className="grid min-w-0 gap-2">
+            <input type="hidden" name="member_id" value={member.id} />
+            <span className="text-xs font-medium text-muted-foreground">Status de acesso</span>
+            <div className="flex min-w-0 gap-2">
+              <Select name="status" defaultValue={member.status} disabled={actionsDisabled || statusPending} className="min-w-0 flex-1">
+                {statusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {statusLabels[status]}
                   </option>
-                ))
-              )}
-            </Select>
-            <Button type="button" variant="outline" size="sm" disabled={isOwner || rolePending} onClick={() => setRoleConfirmOpen(true)}>
-              Salvar
-            </Button>
-          </div>
-          <ConfirmDialog
-            open={roleConfirmOpen}
-            onOpenChange={setRoleConfirmOpen}
-            title="Alterar perfil do usuário?"
-            description="A mudança pode liberar ou restringir áreas da clínica e ficará registrada na auditoria."
-            confirmLabel="Alterar perfil"
-            onConfirm={() => roleFormRef.current?.requestSubmit()}
-          />
-        </form>
-
-        <form ref={statusFormRef} action={statusAction} className="grid gap-2">
-          <input type="hidden" name="member_id" value={member.id} />
-          <span className="text-xs font-medium text-muted-foreground">Status</span>
-          <div className="flex gap-2">
-            <Select name="status" defaultValue={member.status} disabled={actionsDisabled || statusPending} className="min-w-0">
-              {statusOptions.map((status) => (
-                <option key={status} value={status}>
-                  {statusLabels[status]}
-                </option>
-              ))}
-            </Select>
-            <Button type="button" variant="outline" size="sm" disabled={actionsDisabled || statusPending} onClick={() => setStatusConfirmOpen(true)}>
-              Salvar
-            </Button>
-          </div>
-          <ConfirmDialog
-            open={statusConfirmOpen}
-            onOpenChange={setStatusConfirmOpen}
-            title="Alterar status do usuário?"
-            description="Usuários suspensos perdem acesso operacional à clínica. Esta ação ficará registrada na auditoria."
-            confirmLabel="Alterar status"
-            destructive
-            onConfirm={() => statusFormRef.current?.requestSubmit()}
-          />
-        </form>
+                ))}
+              </Select>
+              <Button type="button" variant="outline" size="sm" disabled={actionsDisabled || statusPending} onClick={() => setStatusConfirmOpen(true)}>
+                Salvar
+              </Button>
+            </div>
+            <ConfirmDialog
+              open={statusConfirmOpen}
+              onOpenChange={setStatusConfirmOpen}
+              title="Alterar status do usuário?"
+              description="Usuários suspensos perdem acesso operacional à clínica. Esta ação ficará registrada na auditoria."
+              confirmLabel="Alterar status"
+              destructive
+              onConfirm={() => statusFormRef.current?.requestSubmit()}
+            />
+          </form>
+        </div>
       </div>
 
-      <details className="mt-4 rounded-md border bg-card">
+      <details className="border-t bg-background">
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
           Permissões individuais adicionais
         </summary>
@@ -200,7 +211,7 @@ function MemberRow({
               Proprietários possuem acesso total à clínica por definição. Permissões individuais não são necessárias.
             </p>
           ) : (
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid gap-3 xl:grid-cols-2">
               {CRITICAL_PERMISSION_OPTIONS.map((option) => {
                 const enabled = permissionOverrides.some(
                   (permission) => permission.module === option.module && permission.action === option.action,
@@ -251,13 +262,13 @@ function PermissionToggle({
   }, [state, toast]);
 
   return (
-    <form ref={formRef} action={formAction} className="rounded-md border bg-background p-3">
+    <form ref={formRef} action={formAction} className="min-w-0 rounded-md border bg-card p-3">
       <input type="hidden" name="member_id" value={memberId} />
       <input type="hidden" name="module" value={module} />
       <input type="hidden" name="action" value={action} />
       <input type="hidden" name="enabled" value={String(!enabled)} />
-      <div className="flex items-start justify-between gap-3">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-medium">{label}</p>
             {enabled ? (
@@ -271,7 +282,14 @@ function PermissionToggle({
             {MODULE_LABELS[module]} • {description}
           </p>
         </div>
-        <Button type="button" variant={enabled ? "secondary" : "outline"} size="sm" disabled={pending} onClick={() => setOpen(true)}>
+        <Button
+          type="button"
+          variant={enabled ? "secondary" : "outline"}
+          size="sm"
+          disabled={pending}
+          className="shrink-0"
+          onClick={() => setOpen(true)}
+        >
           <ShieldCheck />
           {enabled ? "Remover" : "Liberar"}
         </Button>

@@ -23,6 +23,20 @@ const fieldLabels: Record<string, string> = {
   plan_slug: "plano",
   current_period_end: "fim do ciclo",
   cancel_at_period_end: "cancelamento no fim do ciclo",
+  patient_id: "paciente",
+  professional_member_id: "profissional",
+  starts_at: "início",
+  ends_at: "fim",
+  appointment_type: "tipo de consulta",
+  channel: "canal",
+  cancellation_reason: "motivo de cancelamento",
+  notes: "observações",
+  block_type: "tipo de bloqueio",
+  reason: "motivo",
+  slot_minutes: "janela padrão",
+  buffer_minutes: "intervalo",
+  online_booking_enabled: "confirmação por link",
+  working_hours: "horários de atendimento",
 };
 
 function getChangedFields(log: {

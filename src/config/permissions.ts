@@ -114,9 +114,21 @@ export const CRITICAL_PERMISSION_OPTIONS: Array<{
   },
   {
     module: "schedule",
+    action: "view",
+    label: "Visualizar agenda",
+    description: "Permite consultar compromissos, bloqueios e status da agenda.",
+  },
+  {
+    module: "schedule",
     action: "manage",
     label: "Gerenciar agenda",
-    description: "Prepara acesso para agenda e bloqueios de horários.",
+    description: "Permite criar consultas, bloquear horários e alterar etapas do fluxo.",
+  },
+  {
+    module: "patients",
+    action: "view",
+    label: "Visualizar pacientes",
+    description: "Permite consultar dados básicos necessários para a rotina de agenda.",
   },
   {
     module: "patients",

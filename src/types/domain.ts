@@ -111,3 +111,82 @@ export type UserProfile = {
     hide_welcome?: boolean;
   };
 };
+
+export type AppointmentStatus =
+  | "scheduled"
+  | "confirmed"
+  | "checked_in"
+  | "in_triage"
+  | "in_progress"
+  | "completed"
+  | "cancelled"
+  | "no_show"
+  | "rescheduled"
+  | "billing_pending"
+  | "billed";
+
+export type ScheduleBlockType = "unavailable" | "lunch" | "vacation" | "administrative" | "other";
+
+export type PatientSummary = {
+  id: string;
+  clinic_id: string;
+  full_name: string;
+  cpf: string | null;
+  birth_date: string | null;
+  phone: string | null;
+  email: string | null;
+  notes: string | null;
+};
+
+export type ScheduleProfessional = {
+  id: string;
+  clinic_id: string;
+  user_id: string;
+  role: AppRole;
+  profile: {
+    full_name: string;
+    email: string | null;
+  } | null;
+};
+
+export type ScheduleSettings = {
+  id: string;
+  clinic_id: string;
+  professional_member_id: string;
+  slot_minutes: number;
+  buffer_minutes: number;
+  timezone: string;
+  default_location: string | null;
+  online_booking_enabled: boolean;
+  working_hours: Record<string, unknown>;
+};
+
+export type ScheduleBlock = {
+  id: string;
+  clinic_id: string;
+  professional_member_id: string;
+  starts_at: string;
+  ends_at: string;
+  block_type: ScheduleBlockType;
+  reason: string | null;
+};
+
+export type AppointmentSummary = {
+  id: string;
+  clinic_id: string;
+  patient_id: string;
+  professional_member_id: string;
+  scheduled_by: string | null;
+  starts_at: string;
+  ends_at: string;
+  status: AppointmentStatus;
+  appointment_type: string;
+  channel: string;
+  confirmation_token: string;
+  confirmation_sent_at: string | null;
+  confirmed_at: string | null;
+  cancellation_reason: string | null;
+  notes: string | null;
+  patient: PatientSummary | null;
+  professional: ScheduleProfessional | null;
+};

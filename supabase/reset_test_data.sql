@@ -13,6 +13,24 @@
 
 begin;
 
+do $$
+declare
+  agenda_table text;
+begin
+  foreach agenda_table in array array[
+    'appointment_workflow_events',
+    'appointments',
+    'schedule_blocks',
+    'schedule_professional_settings',
+    'patients'
+  ]
+  loop
+    if to_regclass(format('public.%I', agenda_table)) is not null then
+      execute format('delete from public.%I', agenda_table);
+    end if;
+  end loop;
+end $$;
+
 delete from public.member_permissions;
 delete from public.clinic_invitations;
 delete from public.clinic_members;

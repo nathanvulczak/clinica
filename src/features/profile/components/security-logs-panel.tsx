@@ -39,6 +39,11 @@ const actionLabels: Record<string, string> = {
   record_updated: "Registro atualizado",
   record_deleted: "Registro excluído",
   subscription_changed: "Assinatura alterada",
+  appointment_created: "Consulta agendada",
+  appointment_status_updated: "Status da consulta alterado",
+  patient_appointment_confirmed: "Paciente confirmou consulta",
+  schedule_block_created: "Bloqueio de agenda criado",
+  schedule_settings_updated: "Agenda do profissional atualizada",
   access_denied: "Tentativa de acesso negada",
 };
 
@@ -76,6 +81,11 @@ const actionOptions = [
   ["record_updated", "Registro atualizado"],
   ["record_deleted", "Registro excluído"],
   ["subscription_changed", "Assinatura"],
+  ["appointment_created", "Consulta agendada"],
+  ["appointment_status_updated", "Status da consulta"],
+  ["patient_appointment_confirmed", "Paciente confirmou"],
+  ["schedule_block_created", "Bloqueio de agenda"],
+  ["schedule_settings_updated", "Agenda do profissional"],
   ["access_denied", "Acesso negado"],
 ] as const;
 
@@ -105,6 +115,26 @@ function getFriendlyDescription(log: SecurityLog) {
 
   if (log.action_type === "subscription_changed") {
     return `Sua assinatura teve alteração registrada.${changedFields}`;
+  }
+
+  if (log.action_type === "appointment_created") {
+    return "Uma consulta foi criada na agenda da clínica ativa.";
+  }
+
+  if (log.action_type === "appointment_status_updated") {
+    return `A etapa de uma consulta foi atualizada.${changedFields}`;
+  }
+
+  if (log.action_type === "patient_appointment_confirmed") {
+    return "Um paciente confirmou a consulta por link público.";
+  }
+
+  if (log.action_type === "schedule_block_created") {
+    return "Um bloqueio de horário foi criado na agenda do profissional.";
+  }
+
+  if (log.action_type === "schedule_settings_updated") {
+    return `A configuração de agenda de um profissional foi atualizada.${changedFields}`;
   }
 
   if (log.action_type === "member_permission_updated") {

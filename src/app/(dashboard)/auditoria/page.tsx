@@ -32,6 +32,11 @@ const actionLabels: Record<string, string> = {
   avatar_uploaded: "Imagem de perfil alterada",
   preferences_updated: "Preferências alteradas",
   subscription_changed: "Assinatura alterada",
+  appointment_created: "Consulta agendada",
+  appointment_status_updated: "Status da consulta alterado",
+  patient_appointment_confirmed: "Paciente confirmou consulta",
+  schedule_block_created: "Bloqueio de agenda criado",
+  schedule_settings_updated: "Agenda do profissional atualizada",
   access_denied: "Acesso negado",
 };
 
@@ -56,6 +61,11 @@ const tableLabels: Record<string, string> = {
   invoices: "Pagamento",
   role_permissions: "Permissões do perfil",
   member_permissions: "Permissões do usuário",
+  patients: "Paciente",
+  appointments: "Consulta",
+  schedule_blocks: "Bloqueio de agenda",
+  schedule_professional_settings: "Agenda do profissional",
+  appointment_workflow_events: "Histórico da consulta",
 };
 
 const actionTypes = Object.keys(actionLabels);
@@ -88,6 +98,22 @@ const fieldLabels: Record<string, string> = {
   amount_due: "Valor cobrado",
   amount_paid: "Valor pago",
   hosted_invoice_url: "Link da fatura",
+  patient_id: "Paciente",
+  professional_member_id: "Profissional",
+  starts_at: "Início",
+  ends_at: "Fim",
+  appointment_type: "Tipo de consulta",
+  channel: "Canal",
+  confirmation_token: "Token de confirmação",
+  confirmed_at: "Confirmação",
+  cancellation_reason: "Motivo de cancelamento",
+  notes: "Observações",
+  block_type: "Tipo de bloqueio",
+  reason: "Motivo",
+  slot_minutes: "Janela padrão",
+  buffer_minutes: "Intervalo",
+  online_booking_enabled: "Confirmação por link",
+  working_hours: "Horários de atendimento",
 };
 
 function formatJson(value: Record<string, unknown> | null) {

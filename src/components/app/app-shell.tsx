@@ -17,6 +17,7 @@ import {
   Sparkles,
   UserCircle,
   Users,
+  type LucideIcon,
 } from "lucide-react";
 import { signOutAction } from "@/features/auth/actions";
 import { dismissWelcomeAction } from "@/features/onboarding/actions";
@@ -25,14 +26,21 @@ import type { Clinic, UserProfile } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const nav = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  disabled?: boolean;
+};
+
+const nav: NavItem[] = [
   { href: "/dashboard", label: "Painel", icon: LayoutDashboard },
   { href: "/clinicas", label: "Clínicas", icon: Building2 },
   { href: "/usuarios", label: "Usuários", icon: Users },
   { href: "/assinatura", label: "Assinatura", icon: CreditCard },
   { href: "/auditoria", label: "Auditoria", icon: ShieldCheck },
   { href: "/perfil", label: "Meu perfil", icon: UserCircle },
-  { href: "/agenda", label: "Agenda", icon: CalendarDays, disabled: true },
+  { href: "/agenda", label: "Agenda", icon: CalendarDays },
 ];
 
 const WELCOME_SESSION_KEY = "clinicore.welcome.seen";

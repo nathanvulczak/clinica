@@ -2,9 +2,9 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/env";
 
-const protectedPrefixes = ["/dashboard", "/clinicas", "/assinatura", "/usuarios", "/auditoria", "/perfil"];
+const protectedPrefixes = ["/dashboard", "/clinicas", "/assinatura", "/usuarios", "/auditoria", "/perfil", "/agenda"];
 const authPrefixes = ["/login", "/cadastro"];
-const subscriptionRequiredPrefixes = ["/dashboard", "/clinicas", "/usuarios", "/auditoria"];
+const subscriptionRequiredPrefixes = ["/dashboard", "/clinicas", "/usuarios", "/auditoria", "/agenda"];
 
 function hasValidSupabasePublicConfig() {
   const url = getSupabaseUrl();
