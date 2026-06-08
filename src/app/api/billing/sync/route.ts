@@ -22,8 +22,14 @@ export async function GET(request: NextRequest) {
     if (!hasBillableAccess(subscription)) {
       return NextResponse.redirect(new URL("/assinatura?billing=subscription_not_found", request.url));
     }
-  } catch {
-    return NextResponse.redirect(new URL("/assinatura?billing=sync_failed", request.url));
+  } catch (error) {
+    const url = new URL("/assinatura", request.url);
+    url.searchParams.set("billing", "sync_failed");
+    url.searchParams.set(
+      "details",
+      error instanceof Error ? error.message.slice(0, 180) : "Erro desconhecido na sincronização.",
+    );
+    return NextResponse.redirect(url);
   }
 
   return NextResponse.redirect(new URL("/assinatura?billing=synced", request.url));

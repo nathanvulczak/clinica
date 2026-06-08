@@ -10,7 +10,7 @@ import { getCurrentSubscription } from "@/repositories/subscriptions";
 export default async function AssinaturaPage({
   searchParams,
 }: {
-  searchParams: Promise<{ billing?: string; target?: string }>;
+  searchParams: Promise<{ billing?: string; target?: string; details?: string }>;
 }) {
   const params = await searchParams;
   const subscription = await getCurrentSubscription();
@@ -31,7 +31,7 @@ export default async function AssinaturaPage({
           </div>
         }
       />
-      <BillingNotice billing={params.billing} target={params.target} />
+      <BillingNotice billing={params.billing} target={params.target} details={params.details} />
       <Card className="mb-6">
         <CardHeader>
           <CardTitle>Plano atual</CardTitle>
@@ -63,7 +63,7 @@ export default async function AssinaturaPage({
   );
 }
 
-function BillingNotice({ billing, target }: { billing?: string; target?: string }) {
+function BillingNotice({ billing, target, details }: { billing?: string; target?: string; details?: string }) {
   if (!billing) {
     return null;
   }
@@ -76,7 +76,7 @@ function BillingNotice({ billing, target }: { billing?: string; target?: string 
     portal_failed: "Não foi possível abrir o portal Stripe. Confira se o Customer Portal está configurado na Stripe.",
     subscription_not_found: "Não encontramos uma assinatura ativa na Stripe para este cliente. Refazer o checkout pode corrigir o vínculo.",
     missing_session: "Sessão de checkout ausente. Refaça a assinatura.",
-    sync_failed: "Pagamento concluído, mas não foi possível sincronizar automaticamente. Confira o webhook Stripe ou tente atualizar a página.",
+    sync_failed: "Pagamento concluído, mas não foi possível sincronizar automaticamente.",
     synced: "Assinatura sincronizada com a Stripe.",
   };
 
@@ -84,6 +84,7 @@ function BillingNotice({ billing, target }: { billing?: string; target?: string 
     <div className="mb-6 rounded-lg border bg-card p-4 text-sm">
       <Badge className="mb-2">Billing</Badge>
       <p className="text-muted-foreground">{messages[billing] ?? "Status de assinatura atualizado."}</p>
+      {details ? <p className="mt-2 text-xs text-muted-foreground">Detalhe técnico: {details}</p> : null}
     </div>
   );
 }

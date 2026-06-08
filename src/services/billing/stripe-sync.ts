@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import { getStripePriceEnvName } from "@/config/plans";
 import { getStripe } from "@/lib/stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { hasBillableAccess } from "@/services/billing/access";
 import type { PlanSlug, SubscriptionStatus } from "@/types/domain";
 
 const planSlugs: PlanSlug[] = ["singular", "duo", "master"];
@@ -59,7 +60,7 @@ function isUsableSubscriptionId(subscriptionId?: string | null) {
 
 export async function upsertSubscriptionFromStripe(subscription: Stripe.Subscription, fallbackUserId?: string) {
   const admin = createSupabaseAdminClient();
-  const userId = subscription.metadata.user_id || fallbackUserId;
+  const userId = fallbackUserId || subscription.metadata.user_id;
   const periods = getSubscriptionPeriods(subscription);
   const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id;
 
@@ -219,10 +220,11 @@ export async function resolveActiveStripeSubscription({
     status: "all",
   });
 
+  const orderedSubscriptions = [...subscriptions.data].sort((left, right) => right.created - left.created);
   const activeSubscription =
-    subscriptions.data.find((subscription) => subscription.status === "active") ??
-    subscriptions.data.find((subscription) => subscription.status === "trialing") ??
-    subscriptions.data.find((subscription) => subscription.status === "past_due") ??
+    orderedSubscriptions.find((subscription) => subscription.status === "active") ??
+    orderedSubscriptions.find((subscription) => subscription.status === "trialing") ??
+    orderedSubscriptions.find((subscription) => subscription.status === "past_due") ??
     null;
 
   if (activeSubscription) {
@@ -255,16 +257,34 @@ export async function syncUserSubscriptionFromStripe({
 
   if (email) {
     const customers = await stripe.customers.list({ email, limit: 10 });
-    customers.data.forEach((customer) => customerIds.add(customer.id));
+    customers.data
+      .sort((left, right) => right.created - left.created)
+      .forEach((customer) => customerIds.add(customer.id));
   }
 
+  let lastError: unknown = null;
+
   for (const customerId of customerIds) {
-    await resolveActiveStripeSubscription({
-      customerId,
-      storedSubscriptionId:
-        customerId === storedSubscription?.stripe_customer_id ? storedSubscription?.stripe_subscription_id : null,
-      ownerUserId,
-    });
+    try {
+      await resolveActiveStripeSubscription({
+        customerId,
+        storedSubscriptionId:
+          customerId === storedSubscription?.stripe_customer_id ? storedSubscription?.stripe_subscription_id : null,
+        ownerUserId,
+      });
+
+      const { data: currentSubscription } = await admin
+        .from("subscriptions")
+        .select("plan_slug, status, current_period_end, stripe_customer_id, stripe_subscription_id, cancel_at_period_end")
+        .eq("owner_user_id", ownerUserId)
+        .maybeSingle();
+
+      if (hasBillableAccess(currentSubscription)) {
+        return currentSubscription;
+      }
+    } catch (error) {
+      lastError = error;
+    }
   }
 
   const { data } = await admin
@@ -272,6 +292,10 @@ export async function syncUserSubscriptionFromStripe({
     .select("plan_slug, status, current_period_end, stripe_customer_id, stripe_subscription_id, cancel_at_period_end")
     .eq("owner_user_id", ownerUserId)
     .maybeSingle();
+
+  if (!data && lastError instanceof Error) {
+    throw lastError;
+  }
 
   return data;
 }
