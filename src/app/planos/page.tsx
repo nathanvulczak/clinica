@@ -67,6 +67,7 @@ export default async function PlanosPage({
     stripe_checkout_failed: "A Stripe recusou a sessão de checkout. Confira se o price_id existe nessa conta Stripe.",
     stripe_portal_failed: "Não foi possível abrir o portal Stripe. Confira a configuração do Customer Portal.",
     stripe_subscription_sync_failed: "Não foi possível sincronizar a assinatura com a Stripe.",
+    billing_reference_failed: "Não foi possível preparar os planos no banco. Confira se a migration inicial foi aplicada.",
   };
 
   return (

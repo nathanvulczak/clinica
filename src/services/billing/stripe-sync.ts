@@ -3,6 +3,7 @@ import { getStripePriceEnvName } from "@/config/plans";
 import { getStripe } from "@/lib/stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { hasBillableAccess } from "@/services/billing/access";
+import { ensureBillingReferenceData } from "@/services/billing/reference-data";
 import type { PlanSlug, SubscriptionStatus } from "@/types/domain";
 
 const planSlugs: PlanSlug[] = ["singular", "duo", "master"];
@@ -59,6 +60,8 @@ function isUsableSubscriptionId(subscriptionId?: string | null) {
 }
 
 export async function upsertSubscriptionFromStripe(subscription: Stripe.Subscription, fallbackUserId?: string) {
+  await ensureBillingReferenceData();
+
   const admin = createSupabaseAdminClient();
   const userId = fallbackUserId || subscription.metadata.user_id;
   const periods = getSubscriptionPeriods(subscription);

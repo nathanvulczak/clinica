@@ -4,6 +4,7 @@ import { getStripePriceEnvName, PLAN_LIMITS } from "@/config/plans";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getStripe } from "@/lib/stripe";
+import { ensureBillingReferenceData } from "@/services/billing/reference-data";
 import { resolveActiveStripeSubscription } from "@/services/billing/stripe-sync";
 import type { PlanSlug } from "@/types/domain";
 
@@ -54,6 +55,12 @@ export async function GET(request: NextRequest) {
   }
 
   const admin = createSupabaseAdminClient();
+  try {
+    await ensureBillingReferenceData();
+  } catch {
+    return redirectWithBillingError(request, "billing_reference_failed", plan);
+  }
+
   const { data: existingSubscription } = await admin
     .from("subscriptions")
     .select("stripe_customer_id, stripe_subscription_id, plan_slug, status")
