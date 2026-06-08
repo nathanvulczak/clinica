@@ -1,16 +1,17 @@
 -- CliniCore - Reset de dados de teste.
 -- Use apenas em ambiente de desenvolvimento/teste.
 -- Mantém estrutura, planos, catálogo de permissões e role_permissions globais.
--- Remove usuários, clínicas, assinaturas, invoices, auditoria, convites e avatars.
+-- Remove usuários, clínicas, assinaturas, invoices, auditoria e convites.
 --
 -- Importante: isto não apaga clientes/assinaturas no painel da Stripe.
 -- Para um teste 100% limpo, cancele/remova também os clientes de teste na Stripe
 -- ou use um novo e-mail de teste.
+--
+-- Este SQL também não apaga arquivos do Supabase Storage, porque o Supabase
+-- bloqueia delete direto em storage.objects. Para limpar avatars, use a tela
+-- Storage do Supabase ou a Storage API.
 
 begin;
-
-delete from storage.objects
-where bucket_id = 'avatars';
 
 delete from public.member_permissions;
 delete from public.clinic_invitations;

@@ -59,6 +59,17 @@ function isUsableSubscriptionId(subscriptionId?: string | null) {
   return Boolean(subscriptionId?.startsWith("sub_"));
 }
 
+async function profileExists(userId?: string | null) {
+  if (!userId) {
+    return false;
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin.from("profiles").select("id").eq("id", userId).maybeSingle();
+
+  return Boolean(data);
+}
+
 export async function upsertSubscriptionFromStripe(subscription: Stripe.Subscription, fallbackUserId?: string) {
   await ensureBillingReferenceData();
 
@@ -80,6 +91,10 @@ export async function upsertSubscriptionFromStripe(subscription: Stripe.Subscrip
   }
 
   if (!ownerUserId) {
+    return null;
+  }
+
+  if (!(await profileExists(ownerUserId))) {
     return null;
   }
 
@@ -261,6 +276,7 @@ export async function syncUserSubscriptionFromStripe({
   if (email) {
     const customers = await stripe.customers.list({ email, limit: 10 });
     customers.data
+      .filter((customer) => customer.metadata?.user_id === ownerUserId)
       .sort((left, right) => right.created - left.created)
       .forEach((customer) => customerIds.add(customer.id));
   }
