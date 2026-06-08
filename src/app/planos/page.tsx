@@ -1,35 +1,63 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PlanCards } from "@/features/billing/components/plan-cards";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { PlanSlug, SubscriptionStatus } from "@/types/domain";
+import { hasBillableAccess } from "@/services/billing/access";
+import { syncUserSubscriptionFromStripe } from "@/services/billing/stripe-sync";
+import type { PlanSlug, SubscriptionStatus, SubscriptionSummary } from "@/types/domain";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+
+type PlanosSearchParams = {
+  selected?: string;
+  signup?: string;
+  reason?: string;
+  checkout?: string;
+  checkout_error?: string;
+  details?: string;
+};
 
 export default async function PlanosPage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    selected?: string;
-    signup?: string;
-    reason?: string;
-    checkout?: string;
-    checkout_error?: string;
-  }>;
+  searchParams: Promise<PlanosSearchParams>;
 }) {
   const params = await searchParams;
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data: subscription } = user
-    ? await supabase
-        .from("subscriptions")
-        .select("plan_slug, status")
-        .eq("owner_user_id", user.id)
-        .maybeSingle()
-    : { data: null };
+
+  let subscription: SubscriptionSummary | null = null;
+
+  if (user) {
+    const { data } = await supabase
+      .from("subscriptions")
+      .select("plan_slug, status, current_period_end, stripe_customer_id, stripe_subscription_id, cancel_at_period_end")
+      .eq("owner_user_id", user.id)
+      .maybeSingle();
+
+    subscription = data as SubscriptionSummary | null;
+
+    if (!hasBillableAccess(subscription)) {
+      try {
+        subscription = (await syncUserSubscriptionFromStripe({
+          ownerUserId: user.id,
+          email: user.email,
+        })) as SubscriptionSummary | null;
+      } catch {
+        // The page still renders checkout options if Stripe repair is unavailable.
+      }
+    }
+
+    if (params.reason === "subscription_required" && hasBillableAccess(subscription)) {
+      redirect("/clinicas/nova?checkout=recovered");
+    }
+  }
 
   const checkoutErrorMessages: Record<string, string> = {
+    missing_session: "Sessão de pagamento ausente. Escolha um plano para iniciar novamente.",
+    sync_failed: "Pagamento confirmado, mas a sincronização automática falhou. Tente entrar novamente ou use o botão Sincronizar em Assinatura.",
     missing_stripe_secret_key: "Configure STRIPE_SECRET_KEY na Vercel e faça redeploy.",
     missing_supabase_service_role_key: "Configure SUPABASE_SERVICE_ROLE_KEY na Vercel e faça redeploy.",
     missing_stripe_price_singular: "Configure STRIPE_PRICE_SINGULAR na Vercel e faça redeploy.",
@@ -53,13 +81,16 @@ export default async function PlanosPage({
           {params.checkout_error ? (
             <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
               {checkoutErrorMessages[params.checkout_error] ?? "Não foi possível iniciar o checkout."}
+              {params.details ? (
+                <p className="mt-2 text-xs opacity-80">Detalhe técnico: {decodeURIComponent(params.details)}</p>
+              ) : null}
             </div>
           ) : null}
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
             {!user
               ? "Para assinar, primeiro crie sua conta ou entre com um usuário existente. Depois disso o checkout será aberto com segurança."
               : params.reason === "subscription_required"
-                ? "Para acessar o sistema, conclua a assinatura de um plano. Se o pagamento falhar ou for cancelado, você continuará retornando para esta tela."
+                ? "Estamos verificando sua assinatura. Se o pagamento já foi aprovado, a sincronização será recuperada automaticamente; caso contrário, escolha um plano."
                 : params.checkout === "cancelled"
                   ? "Checkout cancelado. Nenhum plano foi assinado; escolha um plano para continuar."
                   : params.signup

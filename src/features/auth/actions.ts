@@ -7,6 +7,7 @@ import { signInSchema, signUpSchema } from "@/features/auth/validation";
 import { getAppUrl } from "@/lib/env";
 import { isPlaceholderValue } from "@/lib/validators";
 import { hasBillableAccess } from "@/services/billing/access";
+import { syncUserSubscriptionFromStripe } from "@/services/billing/stripe-sync";
 import { logAuditEvent } from "@/services/audit/audit-service";
 
 type AuthState = {
@@ -96,7 +97,20 @@ export async function signInAction(_state: AuthState, formData: FormData): Promi
     redirect(next);
   }
 
-  if (!hasBillableAccess(subscription)) {
+  let repairedSubscription = subscription;
+
+  if (user && !hasBillableAccess(repairedSubscription)) {
+    try {
+      repairedSubscription = await syncUserSubscriptionFromStripe({
+        ownerUserId: user.id,
+        email: user.email,
+      });
+    } catch {
+      repairedSubscription = subscription;
+    }
+  }
+
+  if (!hasBillableAccess(repairedSubscription)) {
     redirect("/planos?reason=subscription_required");
   }
 

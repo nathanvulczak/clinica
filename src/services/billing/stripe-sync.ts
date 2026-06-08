@@ -92,7 +92,11 @@ export async function upsertSubscriptionFromStripe(subscription: Stripe.Subscrip
     updated_by: ownerUserId,
   };
 
-  await admin.from("subscriptions").upsert(payload, { onConflict: "owner_user_id" });
+  const { error } = await admin.from("subscriptions").upsert(payload, { onConflict: "owner_user_id" });
+
+  if (error) {
+    throw new Error(`Falha ao salvar assinatura no Supabase: ${error.message}`);
+  }
 
   return payload;
 }
@@ -118,7 +122,7 @@ export async function saveInvoiceFromStripe(invoice: Stripe.Invoice) {
 
   if (!subscription?.owner_user_id) return;
 
-  await admin.from("invoices").upsert(
+  const { error } = await admin.from("invoices").upsert(
     {
       owner_user_id: subscription.owner_user_id,
       stripe_customer_id: customerId,
@@ -136,9 +140,14 @@ export async function saveInvoiceFromStripe(invoice: Stripe.Invoice) {
     },
     { onConflict: "stripe_invoice_id" },
   );
+
+  if (error) {
+    throw new Error(`Falha ao salvar invoice no Supabase: ${error.message}`);
+  }
 }
 
 export async function syncCheckoutSession(sessionId: string, userId?: string) {
+  const admin = createSupabaseAdminClient();
   const stripe = getStripe();
   const session = await stripe.checkout.sessions.retrieve(sessionId, {
     expand: ["subscription"],
@@ -153,7 +162,31 @@ export async function syncCheckoutSession(sessionId: string, userId?: string) {
       ? await stripe.subscriptions.retrieve(session.subscription)
       : session.subscription;
 
-  return upsertSubscriptionFromStripe(subscription, userId || session.client_reference_id || undefined);
+  let ownerUserId = userId || session.client_reference_id || session.metadata?.user_id || undefined;
+
+  if (!ownerUserId && session.customer_details?.email) {
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("email", session.customer_details.email)
+      .maybeSingle();
+
+    ownerUserId = profile?.id;
+  }
+
+  const syncedSubscription = await upsertSubscriptionFromStripe(subscription, ownerUserId);
+
+  if (syncedSubscription && typeof session.customer === "string") {
+    await admin
+      .from("subscriptions")
+      .update({
+        stripe_customer_id: session.customer,
+        updated_by: syncedSubscription.owner_user_id,
+      })
+      .eq("owner_user_id", syncedSubscription.owner_user_id);
+  }
+
+  return syncedSubscription;
 }
 
 export async function resolveActiveStripeSubscription({
@@ -197,4 +230,48 @@ export async function resolveActiveStripeSubscription({
   }
 
   return activeSubscription;
+}
+
+export async function syncUserSubscriptionFromStripe({
+  ownerUserId,
+  email,
+}: {
+  ownerUserId: string;
+  email?: string | null;
+}) {
+  const admin = createSupabaseAdminClient();
+  const stripe = getStripe();
+  const { data: storedSubscription } = await admin
+    .from("subscriptions")
+    .select("stripe_customer_id, stripe_subscription_id")
+    .eq("owner_user_id", ownerUserId)
+    .maybeSingle();
+
+  const customerIds = new Set<string>();
+
+  if (storedSubscription?.stripe_customer_id) {
+    customerIds.add(storedSubscription.stripe_customer_id);
+  }
+
+  if (email) {
+    const customers = await stripe.customers.list({ email, limit: 10 });
+    customers.data.forEach((customer) => customerIds.add(customer.id));
+  }
+
+  for (const customerId of customerIds) {
+    await resolveActiveStripeSubscription({
+      customerId,
+      storedSubscriptionId:
+        customerId === storedSubscription?.stripe_customer_id ? storedSubscription?.stripe_subscription_id : null,
+      ownerUserId,
+    });
+  }
+
+  const { data } = await admin
+    .from("subscriptions")
+    .select("plan_slug, status, current_period_end, stripe_customer_id, stripe_subscription_id, cancel_at_period_end")
+    .eq("owner_user_id", ownerUserId)
+    .maybeSingle();
+
+  return data;
 }
