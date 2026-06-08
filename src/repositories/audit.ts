@@ -121,7 +121,7 @@ export async function listClinicAuditLogs(
   let clinicQuery = admin
     .from("audit_logs")
     .select(
-      "id, clinic_id, user_id, action_type, module, record_table, record_id, old_values, new_values, ip_address, user_agent, level, notes, created_at, user:profiles(id, full_name, email, platform_role)",
+      "id, clinic_id, user_id, action_type, module, record_table, record_id, old_values, new_values, ip_address, user_agent, level, notes, created_at, user:profiles!audit_logs_user_id_fkey(id, full_name, email, platform_role)",
     )
     .eq("clinic_id", clinicId)
     .is("deleted_at", null)
@@ -158,7 +158,7 @@ export async function listClinicAuditLogs(
     let globalQuery = admin
       .from("audit_logs")
       .select(
-        "id, clinic_id, user_id, action_type, module, record_table, record_id, old_values, new_values, ip_address, user_agent, level, notes, created_at, user:profiles(id, full_name, email, platform_role)",
+        "id, clinic_id, user_id, action_type, module, record_table, record_id, old_values, new_values, ip_address, user_agent, level, notes, created_at, user:profiles!audit_logs_user_id_fkey(id, full_name, email, platform_role)",
       )
       .is("clinic_id", null)
       .in("user_id", filters.user_id && filters.user_id !== "all" ? [filters.user_id] : memberUserIds)

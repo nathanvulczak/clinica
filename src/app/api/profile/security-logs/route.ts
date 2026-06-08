@@ -2,6 +2,42 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+const ignoredFields = new Set(["id", "created_at", "updated_at", "deleted_at", "created_by", "updated_by", "metadata"]);
+
+const fieldLabels: Record<string, string> = {
+  full_name: "nome completo",
+  phone: "telefone",
+  cpf: "CPF",
+  email: "e-mail",
+  avatar_url: "imagem de perfil",
+  app_preferences: "preferências",
+  platform_role: "tipo de perfil",
+  legal_name: "razão social/responsável",
+  trade_name: "nome da clínica",
+  document: "CPF/CNPJ",
+  city: "cidade",
+  state: "UF",
+  role: "perfil de acesso",
+  status: "status",
+  joined_at: "entrada na clínica",
+  plan_slug: "plano",
+  current_period_end: "fim do ciclo",
+  cancel_at_period_end: "cancelamento no fim do ciclo",
+};
+
+function getChangedFields(log: {
+  old_values: Record<string, unknown> | null;
+  new_values: Record<string, unknown> | null;
+}) {
+  const keys = new Set([...Object.keys(log.old_values ?? {}), ...Object.keys(log.new_values ?? {})]);
+
+  return [...keys]
+    .filter((key) => !ignoredFields.has(key))
+    .filter((key) => JSON.stringify(log.old_values?.[key] ?? null) !== JSON.stringify(log.new_values?.[key] ?? null))
+    .map((key) => fieldLabels[key] ?? key)
+    .slice(0, 6);
+}
+
 export async function GET(request: NextRequest) {
   const supabase = await createSupabaseServerClient();
   const {
@@ -20,7 +56,7 @@ export async function GET(request: NextRequest) {
 
   let query = admin
     .from("audit_logs")
-    .select("id, action_type, created_at, notes, level, module, record_table")
+    .select("id, action_type, created_at, notes, level, module, record_table, old_values, new_values")
     .eq("user_id", user.id)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
@@ -44,5 +80,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ logs: [] }, { status: 200 });
   }
 
-  return NextResponse.json({ logs: data ?? [] });
+  return NextResponse.json({
+    logs: (data ?? []).map((log) => ({
+      id: log.id,
+      action_type: log.action_type,
+      created_at: log.created_at,
+      notes: log.notes,
+      level: log.level,
+      module: log.module,
+      record_table: log.record_table,
+      changed_fields: getChangedFields({
+        old_values: log.old_values as Record<string, unknown> | null,
+        new_values: log.new_values as Record<string, unknown> | null,
+      }),
+    })),
+  });
 }

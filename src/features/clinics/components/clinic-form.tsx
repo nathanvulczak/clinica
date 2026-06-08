@@ -2,30 +2,33 @@
 
 import { useActionState, useState } from "react";
 import { Building2 } from "lucide-react";
-import { createClinicAction } from "@/features/clinics/actions";
+import { createClinicAction, updateClinicAction } from "@/features/clinics/actions";
 import { formatCpfOrCnpj, formatPhone, normalizeEmail } from "@/lib/formatters";
 import { isValidCpfOrCnpj, isValidEmail } from "@/lib/validators";
+import type { Clinic } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function ClinicForm() {
-  const [state, formAction, pending] = useActionState(createClinicAction, {});
-  const [document, setDocument] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
+export function ClinicForm({ clinic }: { clinic?: Clinic }) {
+  const isEditing = Boolean(clinic);
+  const [state, formAction, pending] = useActionState(isEditing ? updateClinicAction : createClinicAction, {});
+  const [document, setDocument] = useState(clinic?.document ? formatCpfOrCnpj(clinic.document) : "");
+  const [phone, setPhone] = useState(clinic?.phone ? formatPhone(clinic.phone) : "");
+  const [email, setEmail] = useState(clinic?.email ?? "");
   const showDocumentError = document.length > 0 && document.length >= 14 && !isValidCpfOrCnpj(document);
   const showEmailError = email.length > 0 && !isValidEmail(email);
 
   return (
     <form action={formAction} className="grid gap-4">
+      {clinic?.id ? <input type="hidden" name="clinic_id" value={clinic.id} /> : null}
       <div className="grid gap-2">
         <Label htmlFor="trade_name">Nome da clínica</Label>
-        <Input id="trade_name" name="trade_name" required />
+        <Input id="trade_name" name="trade_name" defaultValue={clinic?.trade_name ?? ""} required />
       </div>
       <div className="grid gap-2">
         <Label htmlFor="legal_name">Razão social ou responsável</Label>
-        <Input id="legal_name" name="legal_name" required />
+        <Input id="legal_name" name="legal_name" defaultValue={clinic?.legal_name ?? ""} required />
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="grid gap-2">
@@ -66,7 +69,7 @@ export function ClinicForm() {
       <div className="grid gap-2 sm:grid-cols-[1fr_96px]">
         <div className="grid gap-2">
           <Label htmlFor="city">Cidade</Label>
-          <Input id="city" name="city" />
+          <Input id="city" name="city" defaultValue={clinic?.city ?? ""} />
         </div>
         <div className="grid gap-2">
           <Label htmlFor="state">UF</Label>
@@ -74,6 +77,7 @@ export function ClinicForm() {
             id="state"
             name="state"
             maxLength={2}
+            defaultValue={clinic?.state ?? ""}
             onChange={(event) => {
               event.target.value = event.target.value.toUpperCase().replace(/[^A-Z]/g, "");
             }}
@@ -83,7 +87,7 @@ export function ClinicForm() {
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
       <Button disabled={pending || showDocumentError || showEmailError}>
         <Building2 />
-        {pending ? "Salvando..." : "Cadastrar clínica"}
+        {pending ? "Salvando..." : isEditing ? "Salvar alterações" : "Cadastrar clínica"}
       </Button>
     </form>
   );

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Building2 } from "lucide-react";
+import { Building2, Pencil } from "lucide-react";
 import { PLAN_LIMITS } from "@/config/plans";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { PageHeader } from "@/components/app/page-header";
@@ -42,7 +42,15 @@ export default async function ClinicasPage() {
                   <Building2 className="size-5 text-primary" />
                   {clinic.trade_name}
                 </span>
-                {clinic.id === activeClinic?.id ? <Badge>Ativa</Badge> : null}
+                <span className="flex items-center gap-2">
+                  {clinic.id === activeClinic?.id ? <Badge>Ativa</Badge> : null}
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/clinicas/${clinic.id}/editar`}>
+                      <Pencil />
+                      Editar
+                    </Link>
+                  </Button>
+                </span>
               </CardTitle>
             </CardHeader>
             <CardContent className="grid gap-2 text-sm text-muted-foreground">

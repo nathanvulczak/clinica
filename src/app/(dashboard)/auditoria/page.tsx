@@ -25,6 +25,7 @@ const actionLabels: Record<string, string> = {
   member_updated: "Usuário atualizado",
   member_role_updated: "Perfil de usuário alterado",
   member_suspended: "Usuário suspenso",
+  clinic_updated: "Clínica atualizada",
   profile_updated: "Perfil atualizado",
   avatar_uploaded: "Imagem de perfil alterada",
   preferences_updated: "Preferências alteradas",
@@ -57,6 +58,35 @@ const tableLabels: Record<string, string> = {
 
 const actionTypes = Object.keys(actionLabels);
 const levels = ["all", "info", "warning", "critical", "security"];
+const ignoredAuditFields = new Set(["id", "created_at", "updated_at", "deleted_at", "created_by", "updated_by", "metadata"]);
+
+const fieldLabels: Record<string, string> = {
+  legal_name: "Razão social/responsável",
+  trade_name: "Nome da clínica",
+  document: "CPF/CNPJ",
+  email: "E-mail",
+  phone: "Telefone",
+  city: "Cidade",
+  state: "UF",
+  role: "Perfil de acesso",
+  status: "Status",
+  joined_at: "Entrada na clínica",
+  invited_by: "Convidado por",
+  full_name: "Nome completo",
+  cpf: "CPF",
+  platform_role: "Perfil global",
+  avatar_url: "Imagem de perfil",
+  app_preferences: "Preferências",
+  plan_slug: "Plano",
+  current_period_start: "Início do ciclo",
+  current_period_end: "Fim do ciclo",
+  cancel_at_period_end: "Cancelamento no fim do ciclo",
+  stripe_customer_id: "Cliente Stripe",
+  stripe_subscription_id: "Assinatura Stripe",
+  amount_due: "Valor cobrado",
+  amount_paid: "Valor pago",
+  hosted_invoice_url: "Link da fatura",
+};
 
 function formatJson(value: Record<string, unknown> | null) {
   if (!value) {
@@ -64,6 +94,47 @@ function formatJson(value: Record<string, unknown> | null) {
   }
 
   return JSON.stringify(value, null, 2);
+}
+
+function formatAuditValue(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return "Não informado";
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "Sim" : "Não";
+  }
+
+  if (typeof value === "string") {
+    if (/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+      return formatDateTimeBr(value);
+    }
+
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return String(value);
+  }
+
+  return JSON.stringify(value);
+}
+
+function getAuditChanges(log: {
+  old_values: Record<string, unknown> | null;
+  new_values: Record<string, unknown> | null;
+}) {
+  const keys = new Set([...Object.keys(log.old_values ?? {}), ...Object.keys(log.new_values ?? {})]);
+
+  return [...keys]
+    .filter((key) => !ignoredAuditFields.has(key))
+    .map((key) => ({
+      key,
+      label: fieldLabels[key] ?? key,
+      oldValue: formatAuditValue(log.old_values?.[key]),
+      newValue: formatAuditValue(log.new_values?.[key]),
+    }))
+    .filter((change) => change.oldValue !== change.newValue);
 }
 
 export default async function AuditoriaPage({
@@ -190,47 +261,72 @@ export default async function AuditoriaPage({
                 <span>Alterações</span>
               </div>
               <div className="min-w-[1120px] divide-y">
-                {logs.map((log) => (
-                  <div key={log.id} className="grid grid-cols-[170px_180px_180px_1fr_180px] gap-3 px-4 py-3 text-sm">
-                    <span className="text-muted-foreground">{formatDateTimeBr(log.created_at)}</span>
-                    <div className="grid gap-1">
-                      <span className="font-medium">{actionLabels[log.action_type] ?? log.action_type}</span>
-                      <Badge>{log.level}</Badge>
-                    </div>
-                    <div>
-                      <p className="font-medium">{log.user?.full_name ?? "Sistema"}</p>
-                      <p className="text-xs text-muted-foreground">{log.user?.email ?? log.user_id ?? "sem usuário"}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium">
-                        {tableLabels[log.record_table ?? ""] ?? moduleLabels[log.module ?? ""] ?? "Registro do sistema"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{log.notes ?? "Evento auditado."}</p>
-                      {log.record_id ? <p className="text-xs text-muted-foreground">ID: {log.record_id}</p> : null}
-                      {log.ip_address ? <p className="text-xs text-muted-foreground">IP: {log.ip_address}</p> : null}
-                    </div>
-                    <details className="text-xs">
-                      <summary className="cursor-pointer font-medium text-primary">Ver dados</summary>
-                      <div className="mt-2 grid gap-2">
-                        <div>
-                          <p className="mb-1 font-medium">Dado anterior</p>
-                          <pre className="max-h-44 overflow-auto rounded-md bg-muted p-3 text-[11px] leading-5">
-                            {formatJson(log.old_values)}
-                          </pre>
-                        </div>
-                        <div>
-                          <p className="mb-1 font-medium">Substituído por</p>
-                          <pre className="max-h-44 overflow-auto rounded-md bg-muted p-3 text-[11px] leading-5">
-                            {formatJson(log.new_values)}
-                          </pre>
-                        </div>
-                        {log.user_agent ? (
-                          <p className="text-muted-foreground">Dispositivo: {log.user_agent}</p>
-                        ) : null}
+                {logs.map((log) => {
+                  const changes = getAuditChanges(log);
+
+                  return (
+                    <div key={log.id} className="grid grid-cols-[170px_180px_180px_1fr_180px] gap-3 px-4 py-3 text-sm">
+                      <span className="text-muted-foreground">{formatDateTimeBr(log.created_at)}</span>
+                      <div className="grid gap-1">
+                        <span className="font-medium">{actionLabels[log.action_type] ?? log.action_type}</span>
+                        <Badge>{log.level}</Badge>
                       </div>
-                    </details>
-                  </div>
-                ))}
+                      <div>
+                        <p className="font-medium">{log.user?.full_name ?? "Sistema"}</p>
+                        <p className="text-xs text-muted-foreground">{log.user?.email ?? log.user_id ?? "sem usuário"}</p>
+                      </div>
+                      <div>
+                        <p className="font-medium">
+                          {tableLabels[log.record_table ?? ""] ?? moduleLabels[log.module ?? ""] ?? "Registro do sistema"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{log.notes ?? "Evento auditado."}</p>
+                        {log.record_id ? <p className="text-xs text-muted-foreground">ID: {log.record_id}</p> : null}
+                        {log.ip_address ? <p className="text-xs text-muted-foreground">IP: {log.ip_address}</p> : null}
+                      </div>
+                      <details className="text-xs">
+                        <summary className="cursor-pointer font-medium text-primary">Ver dados</summary>
+                        <div className="mt-2 grid gap-3">
+                          {changes.length > 0 ? (
+                            <div className="overflow-hidden rounded-md border">
+                              <div className="grid grid-cols-[130px_1fr_1fr] bg-muted px-3 py-2 font-medium">
+                                <span>Campo</span>
+                                <span>Antes</span>
+                                <span>Depois</span>
+                              </div>
+                              {changes.map((change) => (
+                                <div key={change.key} className="grid grid-cols-[130px_1fr_1fr] gap-2 border-t px-3 py-2">
+                                  <span className="font-medium">{change.label}</span>
+                                  <span className="break-words text-muted-foreground">{change.oldValue}</span>
+                                  <span className="break-words">{change.newValue}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-muted-foreground">Nenhuma alteração de campo relevante foi registrada.</p>
+                          )}
+                          <details>
+                            <summary className="cursor-pointer text-muted-foreground">Ver JSON técnico</summary>
+                            <div className="mt-2 grid gap-2">
+                              <div>
+                                <p className="mb-1 font-medium">Dado anterior</p>
+                                <pre className="max-h-44 overflow-auto rounded-md bg-muted p-3 text-[11px] leading-5">
+                                  {formatJson(log.old_values)}
+                                </pre>
+                              </div>
+                              <div>
+                                <p className="mb-1 font-medium">Substituído por</p>
+                                <pre className="max-h-44 overflow-auto rounded-md bg-muted p-3 text-[11px] leading-5">
+                                  {formatJson(log.new_values)}
+                                </pre>
+                              </div>
+                            </div>
+                          </details>
+                          {log.user_agent ? <p className="text-muted-foreground">Dispositivo: {log.user_agent}</p> : null}
+                        </div>
+                      </details>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

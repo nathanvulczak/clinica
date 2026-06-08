@@ -1,12 +1,14 @@
 "use server";
 
 import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { PLAN_LIMITS } from "@/config/plans";
 import { ACTIVE_CLINIC_COOKIE } from "@/features/clinics/context";
 import { clinicSchema } from "@/features/clinics/validation";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { ensureOwnerMembership } from "@/repositories/clinics";
 import { getCurrentSubscription } from "@/repositories/subscriptions";
 import { logAuditEvent } from "@/services/audit/audit-service";
 import type { PlanSlug } from "@/types/domain";
@@ -87,27 +89,7 @@ export async function createClinicAction(_state: ClinicState, formData: FormData
   }
 
   if (data?.id) {
-    await admin.from("clinic_members").upsert(
-      {
-        clinic_id: data.id,
-        user_id: user.id,
-        role: "clinic_owner",
-        status: "active",
-        joined_at: new Date().toISOString(),
-        created_by: user.id,
-        updated_by: user.id,
-      },
-      { onConflict: "clinic_id,user_id" },
-    );
-
-    await admin
-      .from("profiles")
-      .update({
-        platform_role: "clinic_owner",
-        updated_by: user.id,
-      })
-      .eq("id", user.id)
-      .eq("platform_role", "professional");
+    await ensureOwnerMembership(data.id, user.id);
 
     await logAuditEvent({
       clinicId: data.id,
@@ -133,5 +115,122 @@ export async function createClinicAction(_state: ClinicState, formData: FormData
     });
   }
 
+  redirect("/clinicas");
+}
+
+export async function updateClinicAction(_state: ClinicState, formData: FormData): Promise<ClinicState> {
+  const clinicId = String(formData.get("clinic_id") ?? "");
+  const parsed = clinicSchema.safeParse({
+    legal_name: formData.get("legal_name"),
+    trade_name: formData.get("trade_name"),
+    document: formData.get("document"),
+    email: formData.get("email"),
+    phone: formData.get("phone"),
+    city: formData.get("city"),
+    state: formData.get("state"),
+  });
+
+  if (!clinicId) {
+    return { error: "Clínica não identificada." };
+  }
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: previous, error: previousError } = await admin
+    .from("clinics")
+    .select("id, legal_name, trade_name, document, email, phone, city, state, created_by")
+    .eq("id", clinicId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (previousError || !previous) {
+    return { error: "Clínica não encontrada." };
+  }
+
+  let canEdit = previous.created_by === user.id;
+
+  if (canEdit) {
+    await ensureOwnerMembership(clinicId, user.id);
+  } else {
+    const { data } = await supabase.rpc("user_has_permission", {
+      clinic_uuid: clinicId,
+      permission_module: "clinics",
+      permission_action: "edit",
+    });
+
+    canEdit = data === true;
+  }
+
+  if (!canEdit) {
+    await logAuditEvent({
+      clinicId,
+      userId: user.id,
+      actionType: "access_denied",
+      module: "clinics",
+      recordTable: "clinics",
+      recordId: clinicId,
+      level: "security",
+      notes: "Tentativa de editar clínica sem permissão.",
+    });
+
+    return { error: "Você não possui permissão para editar esta clínica." };
+  }
+
+  const nextData = {
+    legal_name: parsed.data.legal_name,
+    trade_name: parsed.data.trade_name,
+    document: parsed.data.document,
+    email: parsed.data.email || null,
+    phone: parsed.data.phone,
+    city: parsed.data.city || null,
+    state: parsed.data.state?.toUpperCase() || null,
+  };
+
+  const { error } = await admin
+    .from("clinics")
+    .update({
+      ...nextData,
+      updated_by: user.id,
+    })
+    .eq("id", clinicId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  await logAuditEvent({
+    clinicId,
+    userId: user.id,
+    actionType: "clinic_updated",
+    module: "clinics",
+    recordTable: "clinics",
+    recordId: clinicId,
+    oldValues: {
+      legal_name: previous.legal_name,
+      trade_name: previous.trade_name,
+      document: previous.document,
+      email: previous.email,
+      phone: previous.phone,
+      city: previous.city,
+      state: previous.state,
+    },
+    newValues: nextData,
+    notes: "Cadastro da clínica atualizado.",
+  });
+
+  revalidatePath("/clinicas");
+  revalidatePath(`/clinicas/${clinicId}/editar`);
   redirect("/clinicas");
 }

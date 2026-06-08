@@ -16,6 +16,7 @@ type SecurityLog = {
   level: string;
   module: string | null;
   record_table: string | null;
+  changed_fields: string[];
 };
 
 const actionLabels: Record<string, string> = {
@@ -31,6 +32,7 @@ const actionLabels: Record<string, string> = {
   member_updated: "Usuário atualizado",
   member_role_updated: "Perfil de usuário alterado",
   member_suspended: "Usuário suspenso",
+  clinic_updated: "Clínica atualizada",
   record_created: "Registro criado",
   record_updated: "Registro atualizado",
   record_deleted: "Registro excluído",
@@ -60,6 +62,7 @@ const actionOptions = [
   ["avatar_uploaded", "Imagem alterada"],
   ["preferences_updated", "Preferências"],
   ["clinic_created", "Clínica criada"],
+  ["clinic_updated", "Clínica atualizada"],
   ["member_invited", "Convite enviado"],
   ["member_added", "Usuário vinculado"],
   ["member_updated", "Usuário atualizado"],
@@ -73,16 +76,51 @@ const actionOptions = [
 ] as const;
 
 function getFriendlyDescription(log: SecurityLog) {
+  const changedFields =
+    log.changed_fields.length > 0 ? ` Campos alterados: ${log.changed_fields.join(", ")}.` : "";
+
   if (log.action_type === "clinic_created") {
     return "A clínica foi cadastrada e seu acesso como proprietário foi registrado.";
   }
 
+  if (log.action_type === "clinic_updated") {
+    return `O cadastro administrativo da clínica foi atualizado.${changedFields}`;
+  }
+
   if (log.action_type === "profile_updated") {
-    return "Seus dados pessoais foram atualizados.";
+    return `Seus dados pessoais foram atualizados.${changedFields}`;
+  }
+
+  if (log.action_type === "preferences_updated") {
+    return "Suas preferências do sistema foram atualizadas.";
+  }
+
+  if (log.action_type === "avatar_uploaded") {
+    return "Sua imagem de perfil foi atualizada.";
+  }
+
+  if (log.action_type === "subscription_changed") {
+    return `Sua assinatura teve alteração registrada.${changedFields}`;
   }
 
   if (log.action_type === "record_updated") {
-    return `${moduleLabels[log.module ?? ""] ?? "Um registro"} teve alteração registrada.`;
+    if (log.record_table === "clinic_members") {
+      return `Seu vínculo, status ou perfil de acesso em uma clínica foi atualizado.${changedFields}`;
+    }
+
+    if (log.record_table === "clinics") {
+      return `O cadastro da clínica foi atualizado.${changedFields}`;
+    }
+
+    if (log.record_table === "profiles") {
+      return `Seu perfil teve alteração registrada.${changedFields}`;
+    }
+
+    if (log.record_table === "subscriptions") {
+      return `Sua assinatura teve alteração registrada.${changedFields}`;
+    }
+
+    return `${moduleLabels[log.module ?? ""] ?? "Um registro"} teve alteração registrada.${changedFields}`;
   }
 
   return log.notes || moduleLabels[log.module ?? ""] || "Evento registrado no sistema.";
