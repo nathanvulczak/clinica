@@ -35,6 +35,31 @@ export const updateMemberRoleSchema = z.object({
   role: memberRoleSchema,
 });
 
+export const memberStatusSchema = z.enum(["active", "invited", "suspended", "removed"]);
+
+export const updateMemberStatusSchema = z.object({
+  member_id: z.string().uuid(),
+  status: memberStatusSchema,
+});
+
+export const updateMemberPermissionSchema = z.object({
+  member_id: z.string().uuid(),
+  module: z.enum([
+    "clinics",
+    "members",
+    "permissions",
+    "billing",
+    "audit",
+    "patients",
+    "medical_records",
+    "schedule",
+    "financial",
+    "reports",
+  ]),
+  action: z.enum(["view", "create", "edit", "delete", "approve", "access_medical_record", "manage", "export"]),
+  enabled: z.enum(["true", "false"]).transform((value) => value === "true"),
+});
+
 export const removeMemberSchema = z.object({
   member_id: z.string().uuid(),
 });

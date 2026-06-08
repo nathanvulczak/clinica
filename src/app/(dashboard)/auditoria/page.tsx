@@ -25,6 +25,8 @@ const actionLabels: Record<string, string> = {
   member_updated: "Usuário atualizado",
   member_role_updated: "Perfil de usuário alterado",
   member_suspended: "Usuário suspenso",
+  member_status_updated: "Status de usuário alterado",
+  member_permission_updated: "Permissão individual alterada",
   clinic_updated: "Clínica atualizada",
   profile_updated: "Perfil atualizado",
   avatar_uploaded: "Imagem de perfil alterada",
@@ -144,6 +146,7 @@ export default async function AuditoriaPage({
 }) {
   const params = await searchParams;
   const { activeClinic } = await getActiveClinicContext();
+  const hasSearched = params.searched === "1";
   const filters: AuditLogFilters = {
     from: params.from,
     to: params.to,
@@ -156,8 +159,9 @@ export default async function AuditoriaPage({
 
   const [members, logs] = await Promise.all([
     listClinicMembers(activeClinic?.id),
-    listClinicAuditLogs(activeClinic?.id, filters),
+    hasSearched ? listClinicAuditLogs(activeClinic?.id, filters) : Promise.resolve([]),
   ]);
+  const accessDeniedCount = logs.filter((log) => log.action_type === "access_denied").length;
 
   return (
     <>
@@ -175,6 +179,7 @@ export default async function AuditoriaPage({
         </CardHeader>
         <CardContent>
           <form className="grid gap-3 lg:grid-cols-[repeat(4,minmax(0,1fr))_auto] lg:items-end">
+            <input type="hidden" name="searched" value="1" />
             <div className="grid gap-2">
               <Label htmlFor="from">De</Label>
               <Input id="from" name="from" type="date" defaultValue={filters.from ?? ""} />
@@ -241,31 +246,71 @@ export default async function AuditoriaPage({
         </CardContent>
       </Card>
 
+      {hasSearched ? (
+        <div className="mb-6 grid gap-4 md:grid-cols-3">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Eventos encontrados</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-semibold">{logs.length}</p>
+              <p className="text-xs text-muted-foreground">no filtro aplicado</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Acessos negados</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-semibold">{accessDeniedCount}</p>
+              <p className="text-xs text-muted-foreground">tentativas bloqueadas ou indevidas</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Clínica auditada</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="truncate text-2xl font-semibold">{activeClinic?.trade_name ?? "Pendente"}</p>
+              <p className="text-xs text-muted-foreground">contexto ativo da consulta</p>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Eventos registrados</CardTitle>
-          <CardDescription>{logs.length} evento(s) encontrados para a clínica ativa.</CardDescription>
+          <CardDescription>
+            {hasSearched
+              ? `${logs.length} evento(s) encontrados para a clínica ativa.`
+              : "Use os filtros acima e clique em Filtrar para consultar os eventos."}
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          {logs.length === 0 ? (
+          {!hasSearched ? (
+            <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+              Nenhum relatório carregado. Os eventos só aparecem após uma busca explícita.
+            </div>
+          ) : logs.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               Nenhum evento encontrado. Se a clínica acabou de ser criada, confirme se as migrations 005 e 006 foram aplicadas no Supabase.
             </p>
           ) : (
-            <div className="overflow-hidden rounded-lg border">
-              <div className="grid min-w-[1120px] grid-cols-[170px_180px_180px_1fr_180px] bg-muted px-4 py-3 text-xs font-medium uppercase text-muted-foreground">
+            <div className="overflow-x-auto rounded-lg border">
+              <div className="grid min-w-[1320px] grid-cols-[160px_180px_210px_minmax(320px,1fr)_420px] bg-muted px-4 py-3 text-xs font-medium uppercase text-muted-foreground">
                 <span>Data</span>
                 <span>Ação</span>
                 <span>Usuário</span>
                 <span>Registro afetado</span>
                 <span>Alterações</span>
               </div>
-              <div className="min-w-[1120px] divide-y">
+              <div className="min-w-[1320px] divide-y">
                 {logs.map((log) => {
                   const changes = getAuditChanges(log);
 
                   return (
-                    <div key={log.id} className="grid grid-cols-[170px_180px_180px_1fr_180px] gap-3 px-4 py-3 text-sm">
+                    <div key={log.id} className="grid grid-cols-[160px_180px_210px_minmax(320px,1fr)_420px] gap-3 px-4 py-3 text-sm">
                       <span className="text-muted-foreground">{formatDateTimeBr(log.created_at)}</span>
                       <div className="grid gap-1">
                         <span className="font-medium">{actionLabels[log.action_type] ?? log.action_type}</span>

@@ -3,11 +3,16 @@ import { InviteMemberForm } from "@/features/members/components/invite-member-fo
 import { MembersTable } from "@/features/members/components/members-table";
 import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { listClinicMembers } from "@/repositories/clinics";
+import { getCurrentUserId, listClinicMembers } from "@/repositories/clinics";
+import { listClinicMemberPermissionOverrides } from "@/repositories/permissions";
 
 export default async function UsuariosPage() {
   const { activeClinic } = await getActiveClinicContext();
-  const members = await listClinicMembers(activeClinic?.id);
+  const [members, currentUserId, permissionOverrides] = await Promise.all([
+    listClinicMembers(activeClinic?.id),
+    getCurrentUserId(),
+    listClinicMemberPermissionOverrides(activeClinic?.id),
+  ]);
 
   return (
     <>
@@ -26,7 +31,11 @@ export default async function UsuariosPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <MembersTable members={members} />
+            <MembersTable
+              members={members}
+              currentUserId={currentUserId}
+              permissionOverrides={permissionOverrides}
+            />
           </CardContent>
         </Card>
         <Card>

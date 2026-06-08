@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Building2, Pencil } from "lucide-react";
 import { PLAN_LIMITS } from "@/config/plans";
 import { getActiveClinicContext } from "@/features/clinics/context";
+import { ClinicStatusToast } from "@/features/clinics/components/clinic-status-toast";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentSubscription } from "@/repositories/subscriptions";
 import type { PlanSlug } from "@/types/domain";
 
-export default async function ClinicasPage() {
+export default async function ClinicasPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ clinic?: string }>;
+}) {
+  const params = await searchParams;
   const [{ clinics, activeClinic }, subscription] = await Promise.all([
     getActiveClinicContext(),
     getCurrentSubscription(),
@@ -19,6 +25,7 @@ export default async function ClinicasPage() {
 
   return (
     <>
+      <ClinicStatusToast status={params.clinic} />
       <PageHeader
         title="Gerenciar clínicas"
         description="Cadastro e operação multi-clínica respeitando limite do plano contratado."

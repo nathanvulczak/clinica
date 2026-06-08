@@ -115,7 +115,7 @@ export async function createClinicAction(_state: ClinicState, formData: FormData
     });
   }
 
-  redirect("/clinicas");
+  redirect("/clinicas?clinic=created");
 }
 
 export async function updateClinicAction(_state: ClinicState, formData: FormData): Promise<ClinicState> {
@@ -232,5 +232,5 @@ export async function updateClinicAction(_state: ClinicState, formData: FormData
 
   revalidatePath("/clinicas");
   revalidatePath(`/clinicas/${clinicId}/editar`);
-  redirect("/clinicas");
+  redirect("/clinicas?clinic=updated");
 }

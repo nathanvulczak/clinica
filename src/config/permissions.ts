@@ -34,3 +34,106 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   financial: "Financeiro",
   professional: "Profissional",
 };
+
+export const MODULE_LABELS: Record<PermissionModule, string> = {
+  clinics: "Clínicas",
+  members: "Usuários",
+  permissions: "Permissões",
+  billing: "Assinatura",
+  audit: "Auditoria",
+  patients: "Pacientes",
+  medical_records: "Prontuário",
+  schedule: "Agenda",
+  financial: "Financeiro",
+  reports: "Relatórios",
+};
+
+export const ACTION_LABELS: Record<PermissionAction, string> = {
+  view: "Visualizar",
+  create: "Criar",
+  edit: "Editar",
+  delete: "Excluir",
+  approve: "Aprovar",
+  access_medical_record: "Acessar prontuário",
+  manage: "Gerenciar",
+  export: "Exportar",
+};
+
+export const ROLE_PRESET_DESCRIPTIONS: Record<AppRole, string> = {
+  platform_admin: "Acesso administrativo global da plataforma.",
+  clinic_owner: "Controle total da clínica, assinatura, usuários, permissões e auditoria.",
+  clinic_admin: "Administração operacional da clínica, usuários e rotinas internas.",
+  doctor: "Atendimento clínico, pacientes e prontuário conforme permissões da clínica.",
+  nurse: "Apoio assistencial, triagem e registros clínicos autorizados.",
+  receptionist: "Agenda, cadastro inicial de pacientes e rotina de recepção.",
+  financial: "Cobranças, pagamentos, financeiro da clínica e relatórios financeiros.",
+  professional: "Acesso básico ao ambiente e recursos liberados individualmente.",
+};
+
+export const CRITICAL_PERMISSION_OPTIONS: Array<{
+  module: PermissionModule;
+  action: PermissionAction;
+  label: string;
+  description: string;
+}> = [
+  {
+    module: "members",
+    action: "manage",
+    label: "Gerenciar usuários",
+    description: "Permite cadastrar, suspender e alterar perfis de membros.",
+  },
+  {
+    module: "permissions",
+    action: "manage",
+    label: "Gerenciar permissões",
+    description: "Permite liberar permissões individuais para outros usuários.",
+  },
+  {
+    module: "audit",
+    action: "view",
+    label: "Ver auditoria",
+    description: "Permite consultar logs e rastreabilidade da clínica.",
+  },
+  {
+    module: "audit",
+    action: "export",
+    label: "Exportar auditoria",
+    description: "Prepara acesso para exportações futuras de logs.",
+  },
+  {
+    module: "billing",
+    action: "view",
+    label: "Ver assinatura",
+    description: "Permite consultar plano, status e pagamentos.",
+  },
+  {
+    module: "billing",
+    action: "manage",
+    label: "Gerenciar assinatura",
+    description: "Permite acessar fluxos de alteração de plano.",
+  },
+  {
+    module: "schedule",
+    action: "manage",
+    label: "Gerenciar agenda",
+    description: "Prepara acesso para agenda e bloqueios de horários.",
+  },
+  {
+    module: "patients",
+    action: "create",
+    label: "Cadastrar pacientes",
+    description: "Prepara acesso para criação de pacientes.",
+  },
+  {
+    module: "medical_records",
+    action: "access_medical_record",
+    label: "Acessar prontuário",
+    description: "Permissão sensível para dados clínicos protegidos.",
+  },
+  {
+    module: "financial",
+    action: "manage",
+    label: "Gerenciar financeiro",
+    description: "Prepara acesso para contas, recebimentos e fluxo de caixa.",
+  },
+];

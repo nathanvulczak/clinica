@@ -7,8 +7,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
   inviteMemberSchema,
-  removeMemberSchema,
+  updateMemberPermissionSchema,
   updateMemberRoleSchema,
+  updateMemberStatusSchema,
 } from "@/features/members/validation";
 import { logAuditEvent } from "@/services/audit/audit-service";
 
@@ -22,6 +23,17 @@ async function canManageMembers(clinicId: string) {
   const { data } = await supabase.rpc("user_has_permission", {
     clinic_uuid: clinicId,
     permission_module: "members",
+    permission_action: "manage",
+  });
+
+  return data === true;
+}
+
+async function canManagePermissions(clinicId: string) {
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase.rpc("user_has_permission", {
+    clinic_uuid: clinicId,
+    permission_module: "permissions",
     permission_action: "manage",
   });
 
@@ -189,14 +201,17 @@ export async function inviteMemberAction(
   return { success: existingProfile ? "Usuário cadastrado e vinculado à clínica." : "Usuário convidado por e-mail." };
 }
 
-export async function updateMemberRoleAction(formData: FormData) {
+export async function updateMemberRoleAction(
+  _state: MemberActionState,
+  formData: FormData,
+): Promise<MemberActionState> {
   const parsed = updateMemberRoleSchema.safeParse({
     member_id: formData.get("member_id"),
     role: formData.get("role"),
   });
 
   if (!parsed.success) {
-    return;
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   }
 
   const supabase = await createSupabaseServerClient();
@@ -205,27 +220,44 @@ export async function updateMemberRoleAction(formData: FormData) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return;
+    return { error: "Sessão expirada. Faça login novamente." };
   }
 
   const admin = createSupabaseAdminClient();
   const { data: previous } = await admin
     .from("clinic_members")
-    .select("clinic_id, role")
+    .select("clinic_id, user_id, role, status")
     .eq("id", parsed.data.member_id)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (!previous || !(await canManageMembers(previous.clinic_id))) {
-    return;
+    return { error: "Você não possui permissão para alterar membros desta clínica." };
   }
 
-  await admin
+  if (previous.role === "clinic_owner") {
+    return { error: "O proprietário principal da clínica não pode ter o papel alterado por esta tela." };
+  }
+
+  if (parsed.data.role === "clinic_owner") {
+    return { error: "A elevação para proprietário exige um fluxo administrativo específico." };
+  }
+
+  if (previous.role === parsed.data.role) {
+    return { success: "Nenhuma alteração necessária." };
+  }
+
+  const { error } = await admin
     .from("clinic_members")
     .update({
       role: parsed.data.role,
       updated_by: user.id,
     })
     .eq("id", parsed.data.member_id);
+
+  if (error) {
+    return { error: "Não foi possível alterar o perfil do usuário." };
+  }
 
   await logAuditEvent({
     clinicId: previous.clinic_id,
@@ -239,15 +271,20 @@ export async function updateMemberRoleAction(formData: FormData) {
   });
 
   revalidatePath("/usuarios");
+  return { success: "Perfil do usuário atualizado." };
 }
 
-export async function suspendMemberAction(formData: FormData) {
-  const parsed = removeMemberSchema.safeParse({
+export async function updateMemberStatusAction(
+  _state: MemberActionState,
+  formData: FormData,
+): Promise<MemberActionState> {
+  const parsed = updateMemberStatusSchema.safeParse({
     member_id: formData.get("member_id"),
+    status: formData.get("status"),
   });
 
   if (!parsed.success) {
-    return;
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   }
 
   const supabase = await createSupabaseServerClient();
@@ -256,7 +293,7 @@ export async function suspendMemberAction(formData: FormData) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return;
+    return { error: "Sessão expirada. Faça login novamente." };
   }
 
   const admin = createSupabaseAdminClient();
@@ -264,35 +301,174 @@ export async function suspendMemberAction(formData: FormData) {
     .from("clinic_members")
     .select("clinic_id, user_id, role, status")
     .eq("id", parsed.data.member_id)
+    .is("deleted_at", null)
     .maybeSingle();
 
   if (!previous || !(await canManageMembers(previous.clinic_id))) {
-    return;
+    return { error: "Você não possui permissão para alterar membros desta clínica." };
   }
 
   if (previous.user_id === user.id || previous.role === "clinic_owner") {
-    return;
+    return { error: "Você não pode alterar o próprio status nem suspender o proprietário da clínica." };
   }
 
-  await admin
+  if (previous.status === parsed.data.status) {
+    return { success: "Nenhuma alteração necessária." };
+  }
+
+  const { error } = await admin
     .from("clinic_members")
     .update({
-      status: "suspended",
+      status: parsed.data.status,
+      deleted_at: parsed.data.status === "removed" ? new Date().toISOString() : null,
       updated_by: user.id,
     })
     .eq("id", parsed.data.member_id);
 
+  if (error) {
+    return { error: "Não foi possível alterar o status do usuário." };
+  }
+
   await logAuditEvent({
     clinicId: previous.clinic_id,
     userId: user.id,
-    actionType: "member_suspended",
+    actionType: parsed.data.status === "suspended" ? "member_suspended" : "member_status_updated",
     module: "members",
     recordTable: "clinic_members",
     recordId: parsed.data.member_id,
     oldValues: { status: previous.status },
-    newValues: { status: "suspended" },
-    level: "warning",
+    newValues: { status: parsed.data.status },
+    level: parsed.data.status === "suspended" || parsed.data.status === "removed" ? "warning" : "info",
   });
 
   revalidatePath("/usuarios");
+  return { success: "Status do usuário atualizado." };
+}
+
+export async function updateMemberPermissionAction(
+  _state: MemberActionState,
+  formData: FormData,
+): Promise<MemberActionState> {
+  const parsed = updateMemberPermissionSchema.safeParse({
+    member_id: formData.get("member_id"),
+    module: formData.get("module"),
+    action: formData.get("action"),
+    enabled: formData.get("enabled"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Sessão expirada. Faça login novamente." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: member } = await admin
+    .from("clinic_members")
+    .select("id, clinic_id, user_id, role")
+    .eq("id", parsed.data.member_id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!member || !(await canManagePermissions(member.clinic_id))) {
+    return { error: "Você não possui permissão para gerenciar permissões nesta clínica." };
+  }
+
+  if (member.role === "clinic_owner") {
+    return { error: "O proprietário já possui acesso total por definição." };
+  }
+
+  const { data: previous } = await admin
+    .from("member_permissions")
+    .select("id, allowed")
+    .eq("clinic_id", member.clinic_id)
+    .eq("member_id", member.id)
+    .eq("module", parsed.data.module)
+    .eq("action", parsed.data.action)
+    .maybeSingle();
+
+  if (parsed.data.enabled) {
+    const { data: permission, error } = await admin
+      .from("member_permissions")
+      .upsert(
+        {
+          clinic_id: member.clinic_id,
+          member_id: member.id,
+          module: parsed.data.module,
+          action: parsed.data.action,
+          allowed: true,
+          reason: "Permissão individual liberada pelo painel de usuários.",
+          deleted_at: null,
+          created_by: user.id,
+          updated_by: user.id,
+        },
+        { onConflict: "clinic_id,member_id,module,action" },
+      )
+      .select("id")
+      .single();
+
+    if (error) {
+      return { error: "Não foi possível liberar a permissão." };
+    }
+
+    await logAuditEvent({
+      clinicId: member.clinic_id,
+      userId: user.id,
+      actionType: "member_permission_updated",
+      module: "permissions",
+      recordTable: "member_permissions",
+      recordId: permission.id,
+      oldValues: previous ? { allowed: previous.allowed } : null,
+      newValues: {
+        member_id: member.id,
+        module: parsed.data.module,
+        action: parsed.data.action,
+        allowed: true,
+      },
+      level: "security",
+      notes: "Permissão individual liberada para membro da clínica.",
+    });
+  } else if (previous?.id) {
+    const { error } = await admin
+      .from("member_permissions")
+      .update({
+        allowed: false,
+        deleted_at: new Date().toISOString(),
+        updated_by: user.id,
+      })
+      .eq("id", previous.id);
+
+    if (error) {
+      return { error: "Não foi possível remover a permissão." };
+    }
+
+    await logAuditEvent({
+      clinicId: member.clinic_id,
+      userId: user.id,
+      actionType: "member_permission_updated",
+      module: "permissions",
+      recordTable: "member_permissions",
+      recordId: previous.id,
+      oldValues: { allowed: previous.allowed },
+      newValues: {
+        member_id: member.id,
+        module: parsed.data.module,
+        action: parsed.data.action,
+        allowed: false,
+      },
+      level: "security",
+      notes: "Permissão individual removida de membro da clínica.",
+    });
+  }
+
+  revalidatePath("/usuarios");
+  revalidatePath("/auditoria");
+  return { success: parsed.data.enabled ? "Permissão individual liberada." : "Permissão individual removida." };
 }

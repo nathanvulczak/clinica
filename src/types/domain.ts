@@ -77,6 +77,29 @@ export type ClinicMember = {
   } | null;
 };
 
+export type MemberPermissionOverride = {
+  id: string;
+  clinic_id: string;
+  member_id: string;
+  module: PermissionModule;
+  action: PermissionAction;
+  allowed: boolean;
+  reason: string | null;
+};
+
+export type InvoiceSummary = {
+  id: string;
+  stripe_invoice_id: string;
+  status: string | null;
+  amount_due: number;
+  amount_paid: number;
+  currency: string;
+  hosted_invoice_url: string | null;
+  invoice_pdf: string | null;
+  paid_at: string | null;
+  created_at: string;
+};
+
 export type UserProfile = {
   id: string;
   full_name: string;

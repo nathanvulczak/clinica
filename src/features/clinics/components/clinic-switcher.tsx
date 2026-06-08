@@ -4,6 +4,7 @@ import { useRef, useTransition } from "react";
 import { Building2 } from "lucide-react";
 import { setActiveClinicAction } from "@/features/clinics/context-actions";
 import type { Clinic } from "@/types/domain";
+import { useToast } from "@/components/ui/toast";
 import { Select } from "@/components/ui/select";
 
 export function ClinicSwitcher({
@@ -17,6 +18,7 @@ export function ClinicSwitcher({
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [, startTransition] = useTransition();
+  const { toast } = useToast();
 
   if (clinics.length === 0) {
     return (
@@ -37,7 +39,12 @@ export function ClinicSwitcher({
           defaultValue={activeClinicId}
           className={collapsed ? "w-10 appearance-none px-0 text-transparent" : "pl-9"}
           title="Selecionar clínica ativa"
-          onChange={() => {
+          onChange={(event) => {
+            const clinicName = clinics.find((clinic) => clinic.id === event.target.value)?.trade_name;
+            toast({
+              title: "Clínica ativa",
+              description: clinicName ? `${clinicName} agora é o contexto ativo.` : "Contexto atualizado.",
+            });
             startTransition(() => formRef.current?.requestSubmit());
           }}
         >

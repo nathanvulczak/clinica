@@ -32,6 +32,8 @@ const actionLabels: Record<string, string> = {
   member_updated: "Usuário atualizado",
   member_role_updated: "Perfil de usuário alterado",
   member_suspended: "Usuário suspenso",
+  member_status_updated: "Status de usuário alterado",
+  member_permission_updated: "Permissão individual alterada",
   clinic_updated: "Clínica atualizada",
   record_created: "Registro criado",
   record_updated: "Registro atualizado",
@@ -68,6 +70,8 @@ const actionOptions = [
   ["member_updated", "Usuário atualizado"],
   ["member_role_updated", "Perfil alterado"],
   ["member_suspended", "Usuário suspenso"],
+  ["member_status_updated", "Status alterado"],
+  ["member_permission_updated", "Permissão alterada"],
   ["record_created", "Registro criado"],
   ["record_updated", "Registro atualizado"],
   ["record_deleted", "Registro excluído"],
@@ -101,6 +105,14 @@ function getFriendlyDescription(log: SecurityLog) {
 
   if (log.action_type === "subscription_changed") {
     return `Sua assinatura teve alteração registrada.${changedFields}`;
+  }
+
+  if (log.action_type === "member_permission_updated") {
+    return `Uma permissão individual vinculada ao usuário foi alterada.${changedFields}`;
+  }
+
+  if (log.action_type === "member_status_updated" || log.action_type === "member_suspended") {
+    return `O status de acesso de um usuário na clínica foi alterado.${changedFields}`;
   }
 
   if (log.action_type === "record_updated") {

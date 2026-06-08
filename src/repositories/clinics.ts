@@ -4,7 +4,7 @@ import type { Clinic, ClinicMember } from "@/types/domain";
 
 const CLINIC_SELECT = "id, legal_name, trade_name, document, email, phone, city, state, created_at, created_by";
 
-async function getCurrentUserId() {
+export async function getCurrentUserId() {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
