@@ -1,8 +1,9 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
+import Image from "next/image";
 import { useActionState, useEffect, useRef, useState } from "react";
-import { LoaderCircle, ShieldCheck, UserRound, X } from "lucide-react";
+import { LoaderCircle, ShieldCheck, Trash2, UserRound, X } from "lucide-react";
 import {
   CRITICAL_PERMISSION_OPTIONS,
   MODULE_LABELS,
@@ -10,6 +11,7 @@ import {
   ROLE_PRESET_DESCRIPTIONS,
 } from "@/config/permissions";
 import {
+  deleteMemberAccountAction,
   updateMemberPermissionsAction,
   updateMemberRoleAction,
   updateMemberStatusAction,
@@ -112,8 +114,11 @@ function MemberRow({
   const [roleConfirmOpen, setRoleConfirmOpen] = useState(false);
   const [statusConfirmOpen, setStatusConfirmOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [roleState, roleAction, rolePending] = useActionState(updateMemberRoleAction, {});
   const [statusState, statusAction, statusPending] = useActionState(updateMemberStatusAction, {});
+  const [deleteState, deleteAction, deletePending] = useActionState(deleteMemberAccountAction, {});
+  const deleteFormRef = useRef<HTMLFormElement>(null);
   const isOwner = member.role === "clinic_owner";
   const isSelf = member.user_id === currentUserId;
   const memberActionsDisabled = !canManageMembers || isOwner || isSelf;
@@ -128,13 +133,27 @@ function MemberRow({
     showActionToast(statusState, toast, "O status foi registrado na auditoria.");
   }, [statusState, toast]);
 
+  useEffect(() => {
+    showActionToast(deleteState, toast, "A exclusão definitiva foi registrada na auditoria.");
+  }, [deleteState, toast]);
+
   return (
     <article className="rounded-lg border bg-card p-4 shadow-sm">
       <div className="grid gap-4">
         <header className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
           <div className="flex min-w-0 gap-3">
-            <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <UserRound className="size-5" />
+            <div className="relative flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-md bg-primary/10 text-primary">
+              {member.profile?.avatar_url ? (
+                <Image
+                  src={member.profile.avatar_url}
+                  alt={`Foto de ${member.profile.full_name}`}
+                  fill
+                  sizes="44px"
+                  className="object-cover"
+                />
+              ) : (
+                <UserRound className="size-5" />
+              )}
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -173,6 +192,29 @@ function MemberRow({
               <ShieldCheck />
               Permissões
             </Button>
+            <form ref={deleteFormRef} action={deleteAction}>
+              <input type="hidden" name="member_id" value={member.id} />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!canManageMembers || isOwner || isSelf || deletePending}
+                className="text-destructive hover:text-destructive"
+                onClick={() => setDeleteConfirmOpen(true)}
+              >
+                {deletePending ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
+                Excluir
+              </Button>
+              <ConfirmDialog
+                open={deleteConfirmOpen}
+                onOpenChange={setDeleteConfirmOpen}
+                title="Excluir definitivamente este usuário?"
+                description="A exclusão só será concluída se a conta não possuir clínicas, consultas, cadastros ou outros registros vinculados. Caso existam vínculos, suspenda o acesso."
+                confirmLabel="Excluir usuário"
+                destructive
+                onConfirm={() => deleteFormRef.current?.requestSubmit()}
+              />
+            </form>
           </div>
         </header>
 

@@ -22,6 +22,7 @@ const actionLabels: Record<string, string> = {
   clinic_created: "Clínica cadastrada",
   member_invited: "Convite enviado",
   member_invite_accepted: "Convite aceito",
+  member_account_deleted: "Conta de usuário excluída",
   member_added: "Usuário vinculado",
   member_updated: "Usuário atualizado",
   member_role_updated: "Perfil de usuário alterado",
@@ -185,6 +186,8 @@ const fieldLabels: Record<string, string> = {
   start_time: "Horário inicial",
   end_time: "Horário final",
   permissions: "Permissões individuais",
+  personal_data_anonymized: "Dados pessoais anonimizados",
+  deleted: "Conta excluída",
 };
 
 function formatJson(value: Record<string, unknown> | null) {

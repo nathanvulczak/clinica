@@ -9,6 +9,7 @@ import { getActiveClinicContext } from "@/features/clinics/context";
 import {
   acceptInviteSchema,
   inviteMemberSchema,
+  removeMemberSchema,
   updateMemberPermissionSchema,
   updateMemberPermissionsSchema,
   updateMemberRoleSchema,
@@ -42,6 +43,82 @@ async function canManagePermissions(clinicId: string) {
   });
 
   return data === true;
+}
+
+async function hasProtectedMemberReferences({
+  memberId,
+  userId,
+  currentMembershipId,
+}: {
+  memberId: string;
+  userId: string;
+  currentMembershipId: string;
+}) {
+  const admin = createSupabaseAdminClient();
+
+  const userReferenceTables = [
+    "permission_catalog",
+    "role_permissions",
+    "member_permissions",
+    "patients",
+    "clinic_services",
+    "clinic_rooms",
+    "registration_preferences",
+    "appointment_workflow_events",
+    "clinic_invitations",
+  ];
+  const memberReferenceTables = [
+    "clinic_professional_profiles",
+    "professional_availability_rules",
+    "schedule_professional_settings",
+    "schedule_blocks",
+  ];
+
+  const checks = [
+    admin.from("clinic_members").select("id").eq("user_id", userId).neq("id", currentMembershipId).limit(1),
+    admin.from("clinics").select("id").or(`created_by.eq.${userId},updated_by.eq.${userId}`).limit(1),
+    admin
+      .from("subscriptions")
+      .select("id")
+      .or(`owner_user_id.eq.${userId},created_by.eq.${userId},updated_by.eq.${userId}`)
+      .limit(1),
+    admin
+      .from("invoices")
+      .select("id")
+      .or(`owner_user_id.eq.${userId},created_by.eq.${userId},updated_by.eq.${userId}`)
+      .limit(1),
+    admin
+      .from("billing_events")
+      .select("id")
+      .or(`owner_user_id.eq.${userId},created_by.eq.${userId},updated_by.eq.${userId}`)
+      .limit(1),
+    admin
+      .from("clinic_members")
+      .select("id")
+      .neq("id", currentMembershipId)
+      .or(`invited_by.eq.${userId},created_by.eq.${userId},updated_by.eq.${userId}`)
+      .limit(1),
+    admin
+      .from("appointments")
+      .select("id")
+      .or(
+        `professional_member_id.eq.${memberId},scheduled_by.eq.${userId},created_by.eq.${userId},updated_by.eq.${userId}`,
+      )
+      .limit(1),
+    ...userReferenceTables.map((table) =>
+      admin
+        .from(table)
+        .select("id")
+        .or(`created_by.eq.${userId},updated_by.eq.${userId}`)
+        .limit(1),
+    ),
+    ...memberReferenceTables.map((table) =>
+      admin.from(table).select("id").eq("professional_member_id", memberId).limit(1),
+    ),
+  ];
+
+  const results = await Promise.all(checks);
+  return results.some((result) => Boolean(result.error) || Boolean(result.data?.length));
 }
 
 export async function inviteMemberAction(
@@ -708,4 +785,151 @@ export async function updateMemberPermissionsAction(
   revalidatePath("/usuarios");
   revalidatePath("/auditoria");
   return { success: "Permissões individuais atualizadas." };
+}
+
+export async function deleteMemberAccountAction(
+  _state: MemberActionState,
+  formData: FormData,
+): Promise<MemberActionState> {
+  const parsed = removeMemberSchema.safeParse({
+    member_id: formData.get("member_id"),
+  });
+
+  if (!parsed.success) {
+    return { error: "Usuário não identificado." };
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Sessão expirada. Faça login novamente." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: member } = await admin
+    .from("clinic_members")
+    .select("id, clinic_id, user_id, role, status, profile:profiles!clinic_members_user_id_fkey(full_name, email, avatar_url)")
+    .eq("id", parsed.data.member_id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!member || !(await canManageMembers(member.clinic_id))) {
+    return { error: "Você não possui permissão para excluir usuários desta clínica." };
+  }
+
+  if (member.user_id === user.id) {
+    return { error: "Você não pode excluir a própria conta por esta tela." };
+  }
+
+  if (member.role === "clinic_owner") {
+    return { error: "O proprietário da clínica não pode ser excluído." };
+  }
+
+  if (
+    await hasProtectedMemberReferences({
+      memberId: member.id,
+      userId: member.user_id,
+      currentMembershipId: member.id,
+    })
+  ) {
+    return {
+      error:
+        "Este usuário possui vínculos ou registros no sistema. Para preservar o histórico, altere o status para Suspenso.",
+    };
+  }
+
+  const profile = member.profile as unknown as {
+    full_name?: string | null;
+    email?: string | null;
+    avatar_url?: string | null;
+  } | null;
+
+  if (profile?.avatar_url) {
+    const { data: avatarFiles } = await admin.storage.from("avatars").list(member.user_id);
+    const paths = (avatarFiles ?? []).map((file) => `${member.user_id}/${file.name}`);
+
+    if (paths.length > 0) {
+      await admin.storage.from("avatars").remove(paths);
+    }
+  }
+
+  const { error: deleteError } = await admin.auth.admin.deleteUser(member.user_id, true);
+
+  if (deleteError) {
+    return {
+      error:
+        "A conta não pôde ser excluída porque ainda existe uma referência protegida. Suspenda o acesso e revise a auditoria.",
+    };
+  }
+
+  const deletedAt = new Date().toISOString();
+  const [{ error: membershipError }, { error: profileError }] = await Promise.all([
+    admin
+      .from("clinic_members")
+      .update({
+        status: "removed",
+        deleted_at: deletedAt,
+        updated_by: user.id,
+      })
+      .eq("id", member.id),
+    admin
+      .from("profiles")
+      .update({
+        full_name: "Usuário excluído",
+        cpf: null,
+        phone: null,
+        email: null,
+        avatar_url: null,
+        app_preferences: {},
+        deleted_at: deletedAt,
+        updated_by: user.id,
+      })
+      .eq("id", member.user_id),
+  ]);
+
+  if (membershipError || profileError) {
+    return {
+      error:
+        "O acesso foi bloqueado, mas a anonimização cadastral precisa ser revisada por um administrador.",
+    };
+  }
+
+  await admin
+    .from("member_permissions")
+    .update({
+      allowed: false,
+      deleted_at: deletedAt,
+      updated_by: user.id,
+    })
+    .eq("member_id", member.id);
+
+  await logAuditEvent({
+    clinicId: member.clinic_id,
+    userId: user.id,
+    actionType: "member_account_deleted",
+    module: "members",
+    recordTable: "clinic_members",
+    recordId: member.id,
+    oldValues: {
+      user_id: member.user_id,
+      full_name: profile?.full_name ?? null,
+      email: profile?.email ?? null,
+      role: member.role,
+      status: member.status,
+    },
+    newValues: {
+      status: "removed",
+      deleted_at: deletedAt,
+      personal_data_anonymized: true,
+    },
+    level: "critical",
+    notes: "Conta sem vínculos operacionais excluída e dados pessoais anonimizados.",
+  });
+
+  revalidatePath("/usuarios");
+  revalidatePath("/auditoria");
+  return { success: "Usuário excluído e dados pessoais anonimizados." };
 }

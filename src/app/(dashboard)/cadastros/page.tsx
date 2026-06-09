@@ -4,7 +4,6 @@ import {
   BriefcaseBusiness,
   HeartPulse,
   LockKeyhole,
-  Search,
   Settings2,
   Stethoscope,
   UserRound,
@@ -16,19 +15,19 @@ import {
   AvailabilityForm,
   DeleteRegistrationButton,
   ExportRegistrationButton,
-  PatientForm,
   ProfessionalProfileForm,
   RegistrationPreferencesForm,
   RoomForm,
   ServiceForm,
 } from "@/features/registrations/components/registration-forms";
+import { PatientsPanel } from "@/features/registrations/components/patients-panel";
 import {
   DeleteScheduleBlockButton,
   ProfessionalSettingsForm,
   ScheduleBlockForm,
 } from "@/features/schedule/components/schedule-forms";
 import { formatDateTimeBr, getTodayInputDate } from "@/lib/dates";
-import { formatCpf, formatPhone } from "@/lib/formatters";
+import { formatPhone } from "@/lib/formatters";
 import { formatCurrencyBRL } from "@/lib/utils";
 import {
   getRegistrationAccess,
@@ -46,7 +45,6 @@ import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 
 const sections = [
   { id: "patients", label: "Pacientes", icon: HeartPulse },
@@ -203,85 +201,18 @@ export default async function CadastrosPage({
           </div>
 
           {section === "patients" ? (
-            <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_520px]">
-              <Card>
-                <CardHeader>
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <CardTitle>Pacientes</CardTitle>
-                      <CardDescription>Dados administrativos, contato, convênio e alertas controlados.</CardDescription>
-                    </div>
-                    <ExportRegistrationButton resource="patients" disabled={!access.canExportPatients} />
-                  </div>
-                </CardHeader>
-                <CardContent className="grid gap-4">
-                  <form className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                    <input type="hidden" name="section" value="patients" />
-                    <Input name="q" defaultValue={query} placeholder="Buscar por nome, nome social ou CPF" />
-                    <Button variant="outline">
-                      <Search />
-                      Buscar
-                    </Button>
-                  </form>
-
-                  {patients.length === 0 ? (
-                    <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                      Nenhum paciente encontrado para sua permissão e filtros atuais.
-                    </div>
-                  ) : (
-                    <div className="grid gap-3">
-                      {patients.map((patient) => (
-                        <article key={patient.id} className="overflow-hidden rounded-lg border bg-card">
-                          <div className="flex flex-col gap-3 p-4 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="font-medium">{patient.social_name || patient.full_name}</p>
-                                {!patient.active ? <Badge>Inativo</Badge> : null}
-                                {patient.consent_lgpd_at ? <Badge>LGPD</Badge> : null}
-                              </div>
-                              {patient.social_name ? (
-                                <p className="mt-1 text-xs text-muted-foreground">Nome civil: {patient.full_name}</p>
-                              ) : null}
-                              <p className="mt-2 text-sm text-muted-foreground">
-                                {patient.cpf ? formatCpf(patient.cpf) : "CPF não informado"} •{" "}
-                                {patient.phone ? formatPhone(patient.phone) : "telefone não informado"}
-                              </p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {patient.email ?? "E-mail não informado"}
-                              </p>
-                            </div>
-                            <DeleteRegistrationButton
-                              id={patient.id}
-                              resource="patient"
-                              label="paciente"
-                              disabled={!access.canDeletePatients}
-                            />
-                          </div>
-                          <details className="border-t bg-background">
-                            <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
-                              Visualizar e editar cadastro
-                            </summary>
-                            <div className="border-t p-4">
-                              <PatientForm patient={patient} disabled={!access.canEditPatients} />
-                            </div>
-                          </details>
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card className="h-fit">
-                <CardHeader>
-                  <CardTitle>Novo paciente</CardTitle>
-                  <CardDescription>O paciente ficará disponível imediatamente na Agenda.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <PatientForm disabled={!access.canCreatePatients} />
-                </CardContent>
-              </Card>
-            </div>
+            <Card>
+              <CardContent className="pt-6">
+                <PatientsPanel
+                  patients={patients}
+                  query={query}
+                  canCreate={access.canCreatePatients}
+                  canEdit={access.canEditPatients}
+                  canDelete={access.canDeletePatients}
+                  canExport={access.canExportPatients}
+                />
+              </CardContent>
+            </Card>
           ) : null}
 
           {section === "services" ? (

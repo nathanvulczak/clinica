@@ -175,7 +175,7 @@ export async function listClinicMembers(clinicId?: string): Promise<ClinicMember
   const { data, error } = await admin
     .from("clinic_members")
     .select(
-      "id, clinic_id, user_id, role, status, joined_at, created_at, profile:profiles!clinic_members_user_id_fkey(full_name, email, phone)",
+      "id, clinic_id, user_id, role, status, joined_at, created_at, profile:profiles!clinic_members_user_id_fkey(full_name, email, phone, avatar_url)",
     )
     .eq("clinic_id", clinicId)
     .is("deleted_at", null)

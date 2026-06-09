@@ -68,55 +68,49 @@ textarea {
   letter-spacing: 0;
 }
 
-@keyframes welcome-wave {
-  0% {
-    transform: translate3d(-8%, 8%, 0) rotate(0deg) scale(1);
-  }
-
-  50% {
-    transform: translate3d(6%, -6%, 0) rotate(8deg) scale(1.08);
-  }
-
-  100% {
-    transform: translate3d(-8%, 8%, 0) rotate(0deg) scale(1);
-  }
+.welcome-screen {
+  opacity: 0;
+  transition: opacity 1500ms ease;
 }
 
-.welcome-wave {
-  position: absolute;
-  width: 76vw;
-  height: 34vh;
-  border-radius: 999px;
-  filter: blur(42px);
-  opacity: 0.42;
-  animation: welcome-wave 14s ease-in-out infinite;
-  will-change: transform;
+.welcome-screen-visible {
+  opacity: 1;
 }
 
-.welcome-wave-one {
-  top: 7%;
-  left: -18%;
-  background: #0f766e;
+.welcome-screen-leaving {
+  opacity: 0;
+  pointer-events: none;
 }
 
-.welcome-wave-two {
-  right: -22%;
-  bottom: 14%;
-  background: #38bdf8;
-  animation-duration: 18s;
-  animation-delay: -5s;
+.welcome-background {
+  background:
+    radial-gradient(circle at 14% 20%, rgb(15 118 110 / 20%), transparent 34%),
+    radial-gradient(circle at 86% 72%, rgb(56 189 248 / 16%), transparent 36%),
+    radial-gradient(circle at 48% 110%, rgb(245 158 11 / 12%), transparent 32%),
+    var(--background);
 }
 
-.welcome-wave-three {
-  left: 18%;
-  bottom: -12%;
-  background: #f59e0b;
-  animation-duration: 20s;
-  animation-delay: -9s;
+.welcome-content {
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 1500ms ease,
+    transform 1500ms ease;
+}
+
+.welcome-screen-visible .welcome-content {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.welcome-screen-leaving .welcome-content {
+  opacity: 0;
+  transform: translateY(-6px);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .welcome-wave {
-    animation: none;
+  .welcome-screen,
+  .welcome-content {
+    transition-duration: 1ms;
   }
 }

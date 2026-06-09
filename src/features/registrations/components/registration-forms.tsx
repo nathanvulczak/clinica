@@ -74,11 +74,15 @@ function FormMessage({ state }: { state: RegistrationActionState }) {
 export function PatientForm({
   patient,
   disabled,
+  onCompleted,
 }: {
   patient?: PatientSummary;
   disabled?: boolean;
+  onCompleted?: () => void;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction, pending] = useActionState(savePatientAction, {});
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [cpf, setCpf] = useState(patient?.cpf ? formatCpf(patient.cpf) : "");
   const [phone, setPhone] = useState(patient?.phone ? formatPhone(patient.phone) : "");
   const [emergencyPhone, setEmergencyPhone] = useState(
@@ -94,8 +98,14 @@ export function PatientForm({
     "O cadastro foi validado, vinculado à clínica ativa e registrado na auditoria.",
   );
 
+  useEffect(() => {
+    if (state.success) {
+      onCompleted?.();
+    }
+  }, [onCompleted, state.success]);
+
   return (
-    <form action={formAction} className="grid gap-5">
+    <form ref={formRef} action={formAction} className="grid gap-5">
       {patient?.id ? <input type="hidden" name="id" value={patient.id} /> : null}
 
       <fieldset className="grid gap-4">
@@ -433,10 +443,26 @@ export function PatientForm({
 
       <input type="hidden" name="nationality" value={patient?.nationality ?? "Brasileira"} />
       <FormMessage state={state} />
-      <Button disabled={disabled || pending}>
+      <Button
+        type="button"
+        disabled={disabled || pending}
+        onClick={() => setConfirmOpen(true)}
+      >
         <Save />
         {pending ? "Salvando..." : patient ? "Salvar paciente" : "Cadastrar paciente"}
       </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={patient ? "Salvar alterações do paciente?" : "Cadastrar novo paciente?"}
+        description={
+          patient
+            ? "Os dados anteriores e os novos valores ficarão registrados na auditoria."
+            : "O paciente ficará disponível na agenda da clínica após a confirmação."
+        }
+        confirmLabel={patient ? "Salvar alterações" : "Cadastrar paciente"}
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
     </form>
   );
 }

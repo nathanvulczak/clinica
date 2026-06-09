@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   Activity,
   Building2,
@@ -61,6 +61,9 @@ export function AppShell({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
+  const [welcomePhase, setWelcomePhase] = useState<"entering" | "visible" | "leaving">("entering");
+  const welcomeTimerRef = useRef<number | null>(null);
+  const [, startWelcomeTransition] = useTransition();
 
   useEffect(() => {
     const saved = window.localStorage.getItem("clinicore.sidebar.collapsed");
@@ -73,10 +76,39 @@ export function AppShell({
 
   useEffect(() => {
     const alreadySeen = window.sessionStorage.getItem(WELCOME_SESSION_KEY) === "true";
-    setShowWelcome(!profile?.app_preferences?.hide_welcome && !alreadySeen);
+    const shouldShow = !profile?.app_preferences?.hide_welcome && !alreadySeen;
+    setShowWelcome(shouldShow);
+
+    if (shouldShow) {
+      setWelcomePhase("entering");
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => setWelcomePhase("visible"));
+      });
+    }
+
+    return () => {
+      if (welcomeTimerRef.current) {
+        window.clearTimeout(welcomeTimerRef.current);
+      }
+    };
   }, [profile?.app_preferences?.hide_welcome]);
 
   const firstName = useMemo(() => profile?.full_name?.split(" ")[0] ?? "bem-vindo", [profile]);
+
+  function closeWelcome(hidePermanently = false) {
+    window.sessionStorage.setItem(WELCOME_SESSION_KEY, "true");
+    setWelcomePhase("leaving");
+
+    welcomeTimerRef.current = window.setTimeout(() => {
+      setShowWelcome(false);
+
+      if (hidePermanently) {
+        startWelcomeTransition(() => {
+          void dismissWelcomeAction();
+        });
+      }
+    }, 1500);
+  }
 
   return (
     <div
@@ -218,13 +250,16 @@ export function AppShell({
       </div>
 
       {showWelcome ? (
-        <div className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-background px-4">
-          <div className="welcome-wave welcome-wave-one" />
-          <div className="welcome-wave welcome-wave-two" />
-          <div className="welcome-wave welcome-wave-three" />
-          <div className="absolute inset-0 bg-background/62 backdrop-blur-3xl" />
+        <div
+          className={cn(
+            "welcome-screen fixed inset-0 z-50 grid place-items-center overflow-hidden bg-background px-4",
+            welcomePhase === "visible" && "welcome-screen-visible",
+            welcomePhase === "leaving" && "welcome-screen-leaving",
+          )}
+        >
+          <div className="welcome-background absolute inset-0" />
           <div className="absolute inset-x-0 top-0 h-1 bg-primary" />
-          <section className="relative z-10 grid w-full max-w-xl gap-8 text-center">
+          <section className="welcome-content relative z-10 grid w-full max-w-xl gap-8 text-center">
             <div className="mx-auto flex size-16 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
               <Activity className="size-8" />
             </div>
@@ -240,28 +275,21 @@ export function AppShell({
             <div className="mx-auto grid w-full max-w-xs gap-3">
               <Button
                 type="button"
-                onClick={() => {
-                  window.sessionStorage.setItem(WELCOME_SESSION_KEY, "true");
-                  setShowWelcome(false);
-                }}
+                onClick={() => closeWelcome()}
                 size="lg"
               >
                 <Sparkles />
                 Entrar no sistema
               </Button>
-              <form action={dismissWelcomeAction}>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full text-xs text-muted-foreground"
-                  onClick={() => {
-                    window.sessionStorage.setItem(WELCOME_SESSION_KEY, "true");
-                    setShowWelcome(false);
-                  }}
-                >
-                  Não mostrar novamente
-                </Button>
-              </form>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full text-xs text-muted-foreground"
+                onClick={() => closeWelcome(true)}
+              >
+                Não mostrar novamente
+              </Button>
             </div>
           </section>
         </div>

@@ -29,6 +29,7 @@ const actionLabels: Record<string, string> = {
   clinic_created: "Clínica cadastrada",
   member_invited: "Convite enviado",
   member_invite_accepted: "Convite aceito",
+  member_account_deleted: "Conta de usuário excluída",
   member_added: "Usuário vinculado",
   member_updated: "Usuário atualizado",
   member_role_updated: "Perfil de usuário alterado",
@@ -92,6 +93,7 @@ const actionOptions = [
   ["clinic_updated", "Clínica atualizada"],
   ["member_invited", "Convite enviado"],
   ["member_invite_accepted", "Convite aceito"],
+  ["member_account_deleted", "Conta excluída"],
   ["member_added", "Usuário vinculado"],
   ["member_updated", "Usuário atualizado"],
   ["member_role_updated", "Perfil alterado"],
@@ -210,6 +212,10 @@ function getFriendlyDescription(log: SecurityLog) {
 
   if (log.action_type === "member_invite_accepted") {
     return "O convite foi aceito e o acesso à clínica foi ativado com senha própria.";
+  }
+
+  if (log.action_type === "member_account_deleted") {
+    return "Uma conta sem vínculos operacionais foi excluída e seus dados pessoais foram anonimizados.";
   }
 
   if (log.action_type === "member_status_updated" || log.action_type === "member_suspended") {
