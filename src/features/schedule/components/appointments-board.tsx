@@ -45,12 +45,14 @@ export function AppointmentsBoard({
   blocks,
   professionals,
   canManage,
+  canUpdateStatus,
   confirmationUrlBase,
 }: {
   appointments: AppointmentSummary[];
   blocks: ScheduleBlock[];
   professionals: ScheduleProfessional[];
   canManage: boolean;
+  canUpdateStatus: boolean;
   confirmationUrlBase: string;
 }) {
   return (
@@ -102,6 +104,14 @@ export function AppointmentsBoard({
                       </p>
                     </div>
                     <div>
+                      <p className="text-xs font-medium uppercase text-muted-foreground">Serviço</p>
+                      <p className="mt-1">{appointment.service?.name ?? appointment.appointment_type}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase text-muted-foreground">Consultório</p>
+                      <p className="mt-1">{appointment.room?.name ?? "A definir"}</p>
+                    </div>
+                    <div>
                       <p className="text-xs font-medium uppercase text-muted-foreground">Telefone</p>
                       <p className="mt-1">{appointment.patient?.phone ?? "Não informado"}</p>
                     </div>
@@ -121,7 +131,7 @@ export function AppointmentsBoard({
                   />
                 </div>
 
-                <AppointmentStatusForm appointment={appointment} disabled={!canManage} />
+                <AppointmentStatusForm appointment={appointment} disabled={!canUpdateStatus} />
               </div>
             </article>
           ))

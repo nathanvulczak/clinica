@@ -13,7 +13,11 @@ import {
 import { addMinutesIso, localDateTimeToIso } from "@/lib/dates";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { canManageSchedule, userHasClinicPermission } from "@/repositories/schedule";
+import {
+  canManageSchedule,
+  getScheduleAccess,
+  userHasClinicPermission,
+} from "@/repositories/schedule";
 import { logAuditEvent } from "@/services/audit/audit-service";
 
 export type ScheduleActionState = {
@@ -23,7 +27,7 @@ export type ScheduleActionState = {
 
 const PATIENT_CONFIRMABLE_STATUSES = ["scheduled", "confirmed"];
 
-async function getScheduleActionContext() {
+async function getAuthenticatedScheduleContext() {
   const [{ activeClinic }, supabase] = await Promise.all([
     getActiveClinicContext(),
     createSupabaseServerClient(),
@@ -40,6 +44,18 @@ async function getScheduleActionContext() {
   if (!user) {
     redirect("/login");
   }
+
+  return { activeClinic, user };
+}
+
+async function getScheduleActionContext() {
+  const context = await getAuthenticatedScheduleContext();
+
+  if ("error" in context) {
+    return context;
+  }
+
+  const { activeClinic, user } = context;
 
   if (!(await canManageSchedule(activeClinic.id))) {
     await logAuditEvent({
@@ -112,6 +128,31 @@ async function findBlockConflict(
   return data?.[0] ?? null;
 }
 
+async function findRoomConflict(
+  clinicId: string,
+  roomId: string | null,
+  startsAt: string,
+  endsAt: string,
+) {
+  if (!roomId) {
+    return null;
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin
+    .from("appointments")
+    .select("id, starts_at, ends_at, status")
+    .eq("clinic_id", clinicId)
+    .eq("room_id", roomId)
+    .is("deleted_at", null)
+    .in("status", [...OPERATIONAL_APPOINTMENT_STATUSES])
+    .lt("starts_at", endsAt)
+    .gt("ends_at", startsAt)
+    .limit(1);
+
+  return data?.[0] ?? null;
+}
+
 export async function createAppointmentAction(
   _state: ScheduleActionState,
   formData: FormData,
@@ -123,6 +164,8 @@ export async function createAppointmentAction(
     patient_phone: formData.get("patient_phone"),
     patient_email: formData.get("patient_email"),
     professional_member_id: formData.get("professional_member_id"),
+    service_id: formData.get("service_id"),
+    room_id: formData.get("room_id"),
     appointment_date: formData.get("appointment_date"),
     start_time: formData.get("start_time"),
     duration_minutes: formData.get("duration_minutes"),
@@ -154,9 +197,10 @@ export async function createAppointmentAction(
 
   const startsAt = localDateTimeToIso(parsed.data.appointment_date, parsed.data.start_time);
   const endsAt = addMinutesIso(startsAt, parsed.data.duration_minutes);
-  const [appointmentConflict, blockConflict] = await Promise.all([
+  const [appointmentConflict, blockConflict, roomConflict] = await Promise.all([
     findAppointmentConflict(activeClinic.id, parsed.data.professional_member_id, startsAt, endsAt),
     findBlockConflict(activeClinic.id, parsed.data.professional_member_id, startsAt, endsAt),
+    findRoomConflict(activeClinic.id, parsed.data.room_id, startsAt, endsAt),
   ]);
 
   if (appointmentConflict) {
@@ -165,6 +209,40 @@ export async function createAppointmentAction(
 
   if (blockConflict) {
     return { error: "Este horário está bloqueado na agenda do profissional." };
+  }
+
+  if (roomConflict) {
+    return { error: "O consultório selecionado já está ocupado nesse intervalo." };
+  }
+
+  if (parsed.data.service_id) {
+    const { data: service } = await admin
+      .from("clinic_services")
+      .select("id")
+      .eq("id", parsed.data.service_id)
+      .eq("clinic_id", activeClinic.id)
+      .eq("active", true)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (!service) {
+      return { error: "Serviço não encontrado na clínica ativa." };
+    }
+  }
+
+  if (parsed.data.room_id) {
+    const { data: room } = await admin
+      .from("clinic_rooms")
+      .select("id")
+      .eq("id", parsed.data.room_id)
+      .eq("clinic_id", activeClinic.id)
+      .eq("active", true)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (!room) {
+      return { error: "Consultório não encontrado na clínica ativa." };
+    }
   }
 
   let patientId = parsed.data.patient_id;
@@ -229,6 +307,8 @@ export async function createAppointmentAction(
       clinic_id: activeClinic.id,
       patient_id: patientId,
       professional_member_id: parsed.data.professional_member_id,
+      service_id: parsed.data.service_id,
+      room_id: parsed.data.room_id,
       scheduled_by: user.id,
       starts_at: startsAt,
       ends_at: endsAt,
@@ -243,10 +323,14 @@ export async function createAppointmentAction(
     .single();
 
   if (error || !appointment) {
-    const isConflict = error?.message.toLowerCase().includes("appointments_no_active_overlap");
+    const errorMessage = error?.message.toLowerCase() ?? "";
+    const isProfessionalConflict = errorMessage.includes("appointments_no_active_overlap");
+    const isRoomConflict = errorMessage.includes("appointments_no_active_room_overlap");
     return {
-      error: isConflict
+      error: isProfessionalConflict
         ? "Outro compromisso foi criado nesse mesmo intervalo. Atualize a agenda e tente outro horário."
+        : isRoomConflict
+          ? "O consultório acabou de ser ocupado nesse intervalo. Selecione outro espaço."
         : "Não foi possível criar o agendamento.",
     };
   }
@@ -270,6 +354,8 @@ export async function createAppointmentAction(
     newValues: {
       patient_id: patientId,
       professional_member_id: parsed.data.professional_member_id,
+      service_id: parsed.data.service_id,
+      room_id: parsed.data.room_id,
       starts_at: startsAt,
       ends_at: endsAt,
       status: "scheduled",
@@ -296,7 +382,7 @@ export async function updateAppointmentStatusAction(
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   }
 
-  const context = await getScheduleActionContext();
+  const context = await getAuthenticatedScheduleContext();
 
   if ("error" in context) {
     return { error: context.error };
@@ -306,7 +392,7 @@ export async function updateAppointmentStatusAction(
   const admin = createSupabaseAdminClient();
   const { data: previous } = await admin
     .from("appointments")
-    .select("id, clinic_id, status, confirmed_at, cancellation_reason")
+    .select("id, clinic_id, professional_member_id, status, confirmed_at, cancellation_reason")
     .eq("id", parsed.data.appointment_id)
     .eq("clinic_id", activeClinic.id)
     .is("deleted_at", null)
@@ -314,6 +400,28 @@ export async function updateAppointmentStatusAction(
 
   if (!previous) {
     return { error: "Agendamento não encontrado na clínica ativa." };
+  }
+
+  const access = await getScheduleAccess(activeClinic.id);
+
+  if (
+    !access.canManage &&
+    (!access.canOperateOwn ||
+      !access.currentMemberId ||
+      previous.professional_member_id !== access.currentMemberId)
+  ) {
+    await logAuditEvent({
+      clinicId: activeClinic.id,
+      userId: user.id,
+      actionType: "access_denied",
+      module: "schedule",
+      recordTable: "appointments",
+      recordId: parsed.data.appointment_id,
+      level: "security",
+      notes: "Tentativa de atualizar consulta de outro profissional.",
+    });
+
+    return { error: "Você só pode atualizar consultas vinculadas ao seu próprio perfil." };
   }
 
   if (previous.status === parsed.data.status) {

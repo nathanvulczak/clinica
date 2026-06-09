@@ -125,6 +125,30 @@ export const CRITICAL_PERMISSION_OPTIONS: Array<{
     description: "Permite criar consultas, bloquear horários e alterar etapas do fluxo.",
   },
   {
+    module: "schedule",
+    action: "create",
+    label: "Criar cadastros da agenda",
+    description: "Permite cadastrar serviços, consultórios e disponibilidade.",
+  },
+  {
+    module: "schedule",
+    action: "edit",
+    label: "Editar agenda e cadastros",
+    description: "Permite editar serviços, consultórios, disponibilidade e consultas próprias.",
+  },
+  {
+    module: "schedule",
+    action: "delete",
+    label: "Excluir cadastros da agenda",
+    description: "Permite excluir serviços, consultórios e disponibilidade por soft delete.",
+  },
+  {
+    module: "schedule",
+    action: "export",
+    label: "Exportar cadastros operacionais",
+    description: "Permite exportar serviços e consultórios em CSV.",
+  },
+  {
     module: "patients",
     action: "view",
     label: "Visualizar pacientes",
@@ -135,6 +159,24 @@ export const CRITICAL_PERMISSION_OPTIONS: Array<{
     action: "create",
     label: "Cadastrar pacientes",
     description: "Prepara acesso para criação de pacientes.",
+  },
+  {
+    module: "patients",
+    action: "edit",
+    label: "Editar pacientes",
+    description: "Permite alterar dados administrativos de pacientes.",
+  },
+  {
+    module: "patients",
+    action: "delete",
+    label: "Excluir pacientes",
+    description: "Permite remover pacientes por soft delete com auditoria.",
+  },
+  {
+    module: "patients",
+    action: "export",
+    label: "Exportar pacientes",
+    description: "Permite exportar os pacientes visíveis ao usuário em CSV.",
   },
   {
     module: "medical_records",

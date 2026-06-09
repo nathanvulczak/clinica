@@ -40,3 +40,22 @@ export function formatPhone(value: string) {
 export function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
 }
+
+export function formatPostalCode(value: string) {
+  return onlyDigits(value)
+    .slice(0, 8)
+    .replace(/^(\d{5})(\d)/, "$1-$2");
+}
+
+export function formatCurrencyInput(value: string) {
+  const digits = onlyDigits(value);
+
+  if (!digits) {
+    return "";
+  }
+
+  return new Intl.NumberFormat("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(digits) / 100);
+}

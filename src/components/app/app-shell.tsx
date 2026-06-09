@@ -9,6 +9,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
   CreditCard,
   LayoutDashboard,
   LogOut,
@@ -36,6 +37,7 @@ type NavItem = {
 const nav: NavItem[] = [
   { href: "/dashboard", label: "Painel", icon: LayoutDashboard },
   { href: "/clinicas", label: "Clínicas", icon: Building2 },
+  { href: "/cadastros", label: "Cadastros", icon: ClipboardList },
   { href: "/usuarios", label: "Usuários", icon: Users },
   { href: "/assinatura", label: "Assinatura", icon: CreditCard },
   { href: "/auditoria", label: "Auditoria", icon: ShieldCheck },

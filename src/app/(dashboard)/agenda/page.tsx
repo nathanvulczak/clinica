@@ -1,16 +1,21 @@
 import { Activity, CalendarDays, ClipboardCheck, LockKeyhole, UserRound } from "lucide-react";
 import { APPOINTMENT_STATUS_LABELS, APPOINTMENT_STATUSES } from "@/config/schedule";
 import { getActiveClinicContext } from "@/features/clinics/context";
+import {
+  getCalendarRange,
+  type CalendarViewMode,
+} from "@/features/schedule/calendar";
 import { AppointmentsBoard } from "@/features/schedule/components/appointments-board";
+import { ScheduleCalendar } from "@/features/schedule/components/schedule-calendar";
 import {
   AppointmentForm,
   ProfessionalSettingsForm,
   ScheduleBlockForm,
 } from "@/features/schedule/components/schedule-forms";
 import { getTodayInputDate } from "@/lib/dates";
+import { listClinicRooms, listClinicServices } from "@/repositories/registrations";
 import {
-  canManageSchedule,
-  canViewSchedule,
+  getScheduleAccess,
   listAppointments,
   listScheduleBlocks,
   listSchedulePatients,
@@ -35,6 +40,10 @@ function normalizeStatus(value?: string): AppointmentStatus | "all" {
   return "all";
 }
 
+function normalizeView(value?: string): CalendarViewMode {
+  return value === "week" || value === "month" ? value : "day";
+}
+
 export default async function AgendaPage({
   searchParams,
 }: {
@@ -43,22 +52,39 @@ export default async function AgendaPage({
   const params = await searchParams;
   const { activeClinic } = await getActiveClinicContext();
   const date = params.date || getTodayInputDate();
-  const professionalId = params.professional_id || "all";
+  const view = normalizeView(params.view);
+  const range = getCalendarRange(date, view);
   const status = normalizeStatus(params.status);
   const confirmationUrlBase = `${getAppUrl()}/confirmar-consulta`;
-  const hasScheduleAccess = await canViewSchedule(activeClinic?.id);
-  const canManage = await canManageSchedule(activeClinic?.id);
+  const scheduleAccess = await getScheduleAccess(activeClinic?.id);
+  const professionalId = scheduleAccess.canManage
+    ? params.professional_id || "all"
+    : scheduleAccess.currentMemberId || "all";
 
-  const [professionals, patients, settings, appointments, blocks] =
-    activeClinic && hasScheduleAccess
+  const [professionals, patients, settings, appointments, blocks, services, rooms] =
+    activeClinic && scheduleAccess.canView
       ? await Promise.all([
-          listScheduleProfessionals(activeClinic.id),
+          listScheduleProfessionals(activeClinic.id, {
+            scopeToCurrentUser: true,
+            access: scheduleAccess,
+          }),
           listSchedulePatients(activeClinic.id),
           listScheduleSettings(activeClinic.id),
-          listAppointments(activeClinic.id, { date, professionalId, status }),
-          listScheduleBlocks(activeClinic.id, { date, professionalId }),
+          listAppointments(activeClinic.id, {
+            startDate: range.startDate,
+            endDate: range.endDate,
+            professionalId,
+            status,
+          }),
+          listScheduleBlocks(activeClinic.id, {
+            startDate: range.startDate,
+            endDate: range.endDate,
+            professionalId,
+          }),
+          listClinicServices(activeClinic.id),
+          listClinicRooms(activeClinic.id),
         ])
-      : [[], [], [], [], []];
+      : [[], [], [], [], [], [], []];
 
   const confirmedCount = appointments.filter((appointment) =>
     ["confirmed", "checked_in", "in_triage", "in_progress"].includes(appointment.status),
@@ -81,7 +107,7 @@ export default async function AgendaPage({
             <CardDescription>Cadastre ou selecione uma clínica para liberar a agenda.</CardDescription>
           </CardHeader>
         </Card>
-      ) : !hasScheduleAccess ? (
+      ) : !scheduleAccess.canView ? (
         <Card>
           <CardHeader>
             <CardTitle>Acesso restrito</CardTitle>
@@ -105,6 +131,7 @@ export default async function AgendaPage({
             </CardHeader>
             <CardContent>
               <form className="grid gap-3 lg:grid-cols-[160px_minmax(220px,1fr)_220px_auto] lg:items-end">
+                <input type="hidden" name="view" value={view} />
                 <div className="grid gap-2">
                   <Label htmlFor="date">Data</Label>
                   <Input id="date" name="date" type="date" defaultValue={date} />
@@ -112,7 +139,7 @@ export default async function AgendaPage({
                 <div className="grid gap-2">
                   <Label htmlFor="professional_id">Profissional</Label>
                   <Select id="professional_id" name="professional_id" defaultValue={professionalId}>
-                    <option value="all">Todos</option>
+                    {scheduleAccess.canManage ? <option value="all">Todos</option> : null}
                     {professionals.map((professional) => (
                       <option key={professional.id} value={professional.id}>
                         {professional.profile?.full_name ?? "Profissional sem nome"}
@@ -136,6 +163,28 @@ export default async function AgendaPage({
                   Filtrar
                 </Button>
               </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Calendário da clínica</CardTitle>
+              <CardDescription>
+                {scheduleAccess.canManage
+                  ? "Visão ampla conforme os filtros da clínica ativa."
+                  : "Sua visualização está restrita aos pacientes vinculados à sua agenda."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ScheduleCalendar
+                date={date}
+                view={view}
+                days={range.days}
+                appointments={appointments}
+                blocks={blocks}
+                professionalId={professionalId}
+                status={status}
+              />
             </CardContent>
           </Card>
 
@@ -190,14 +239,19 @@ export default async function AgendaPage({
           ) : null}
 
           <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_430px]">
-            <Card>
+            {view === "day" ? (
+              <Card>
               <CardHeader>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <CardTitle>Eventos do dia</CardTitle>
                     <CardDescription>Fluxo de confirmação, chegada, atendimento e cobrança.</CardDescription>
                   </div>
-                  <Badge>{canManage ? "Edição liberada" : "Somente leitura"}</Badge>
+                  <Badge>
+                    {scheduleAccess.canManage || scheduleAccess.canOperateOwn
+                      ? "Etapas liberadas"
+                      : "Somente leitura"}
+                  </Badge>
                 </div>
               </CardHeader>
               <CardContent>
@@ -205,11 +259,28 @@ export default async function AgendaPage({
                   appointments={appointments}
                   blocks={blocks}
                   professionals={professionals}
-                  canManage={canManage}
+                  canManage={scheduleAccess.canManage}
+                  canUpdateStatus={scheduleAccess.canManage || scheduleAccess.canOperateOwn}
                   confirmationUrlBase={confirmationUrlBase}
                 />
               </CardContent>
-            </Card>
+              </Card>
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Resumo do período</CardTitle>
+                  <CardDescription>
+                    Selecione um dia no calendário para abrir os detalhes, contatos e fluxo operacional.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                    A visão {view === "week" ? "semanal" : "mensal"} mantém o calendário leve. Clique em um
+                    compromisso ou dia para operar a consulta.
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <div className="grid gap-6">
               <Card>
@@ -224,8 +295,10 @@ export default async function AgendaPage({
                   <AppointmentForm
                     professionals={professionals}
                     patients={patients}
+                    services={services}
+                    rooms={rooms}
                     defaultDate={date}
-                    disabled={!canManage}
+                    disabled={!scheduleAccess.canManage}
                   />
                 </CardContent>
               </Card>
@@ -239,7 +312,11 @@ export default async function AgendaPage({
                   <CardDescription>Reserve intervalos indisponíveis, férias, almoço ou rotinas administrativas.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ScheduleBlockForm professionals={professionals} defaultDate={date} disabled={!canManage} />
+                  <ScheduleBlockForm
+                    professionals={professionals}
+                    defaultDate={date}
+                    disabled={!scheduleAccess.canManage}
+                  />
                 </CardContent>
               </Card>
 
@@ -255,7 +332,7 @@ export default async function AgendaPage({
                   <ProfessionalSettingsForm
                     professionals={professionals}
                     settings={settings}
-                    disabled={!canManage}
+                    disabled={!scheduleAccess.canManage}
                   />
                 </CardContent>
               </Card>

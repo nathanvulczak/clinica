@@ -131,11 +131,92 @@ export type PatientSummary = {
   id: string;
   clinic_id: string;
   full_name: string;
+  social_name: string | null;
   cpf: string | null;
+  rg: string | null;
+  issuing_authority: string | null;
   birth_date: string | null;
+  sex_at_birth: string | null;
+  gender_identity: string | null;
+  marital_status: string | null;
+  occupation: string | null;
+  nationality: string | null;
   phone: string | null;
   email: string | null;
+  preferred_contact: string | null;
+  postal_code: string | null;
+  address_line: string | null;
+  address_number: string | null;
+  address_complement: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  state: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_relationship: string | null;
+  emergency_contact_phone: string | null;
+  health_plan_name: string | null;
+  health_plan_number: string | null;
+  health_plan_valid_until: string | null;
+  clinical_alerts: string | null;
+  consent_lgpd_at: string | null;
+  active: boolean;
   notes: string | null;
+};
+
+export type ClinicService = {
+  id: string;
+  clinic_id: string;
+  code: string | null;
+  name: string;
+  category: string | null;
+  description: string | null;
+  duration_minutes: number;
+  price_cents: number;
+  color: string;
+  requires_authorization: boolean;
+  active: boolean;
+};
+
+export type ClinicRoom = {
+  id: string;
+  clinic_id: string;
+  code: string | null;
+  name: string;
+  room_type: string;
+  floor: string | null;
+  capacity: number;
+  resources: string[];
+  notes: string | null;
+  active: boolean;
+};
+
+export type ProfessionalAvailabilityRule = {
+  id: string;
+  clinic_id: string;
+  professional_member_id: string;
+  room_id: string | null;
+  service_id: string | null;
+  recurrence_type: "weekly" | "specific_date";
+  weekday: number | null;
+  specific_date: string | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  start_time: string;
+  end_time: string;
+  slot_minutes: number;
+  active: boolean;
+  notes: string | null;
+};
+
+export type RegistrationPreferences = {
+  id?: string;
+  clinic_id: string;
+  require_patient_cpf: boolean;
+  require_patient_email: boolean;
+  default_service_duration: number;
+  default_export_format: "csv";
+  patient_display_name: "full_name" | "social_name";
+  show_inactive_records: boolean;
 };
 
 export type ScheduleProfessional = {
@@ -176,6 +257,8 @@ export type AppointmentSummary = {
   clinic_id: string;
   patient_id: string;
   professional_member_id: string;
+  service_id: string | null;
+  room_id: string | null;
   scheduled_by: string | null;
   starts_at: string;
   ends_at: string;
@@ -189,4 +272,6 @@ export type AppointmentSummary = {
   notes: string | null;
   patient: PatientSummary | null;
   professional: ScheduleProfessional | null;
+  service: ClinicService | null;
+  room: ClinicRoom | null;
 };

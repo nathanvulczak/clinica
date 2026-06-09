@@ -14,7 +14,13 @@ import {
   upsertProfessionalScheduleSettingsAction,
 } from "@/features/schedule/actions";
 import { formatCpf, formatPhone, normalizeEmail } from "@/lib/formatters";
-import type { PatientSummary, ScheduleProfessional, ScheduleSettings } from "@/types/domain";
+import type {
+  ClinicRoom,
+  ClinicService,
+  PatientSummary,
+  ScheduleProfessional,
+  ScheduleSettings,
+} from "@/types/domain";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,11 +54,15 @@ function useScheduleToast(state: { success?: string; error?: string }, successDe
 export function AppointmentForm({
   professionals,
   patients,
+  services,
+  rooms,
   defaultDate,
   disabled,
 }: {
   professionals: ScheduleProfessional[];
   patients: PatientSummary[];
+  services: ClinicService[];
+  rooms: ClinicRoom[];
   defaultDate: string;
   disabled?: boolean;
 }) {
@@ -61,6 +71,8 @@ export function AppointmentForm({
   const [cpf, setCpf] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [serviceId, setServiceId] = useState("none");
+  const [duration, setDuration] = useState(30);
 
   useScheduleToast(state, "O compromisso entrou no fluxo da agenda e foi registrado na auditoria.");
 
@@ -141,6 +153,45 @@ export function AppointmentForm({
         </Select>
       </div>
 
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label htmlFor="service_id">Serviço</Label>
+          <Select
+            id="service_id"
+            name="service_id"
+            value={serviceId}
+            disabled={!canSubmit || pending}
+            onChange={(event) => {
+              const nextServiceId = event.target.value;
+              setServiceId(nextServiceId);
+              const service = services.find((item) => item.id === nextServiceId);
+
+              if (service) {
+                setDuration(service.duration_minutes);
+              }
+            }}
+          >
+            <option value="none">Sem serviço definido</option>
+            {services.map((service) => (
+              <option key={service.id} value={service.id}>
+                {service.name} • {service.duration_minutes} min
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="room_id">Consultório</Label>
+          <Select id="room_id" name="room_id" defaultValue="none" disabled={!canSubmit || pending}>
+            <option value="none">Definir posteriormente</option>
+            {rooms.map((room) => (
+              <option key={room.id} value={room.id}>
+                {room.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-[1fr_140px_140px]">
         <div className="grid gap-2">
           <Label htmlFor="appointment_date">Data</Label>
@@ -159,13 +210,16 @@ export function AppointmentForm({
         </div>
         <div className="grid gap-2">
           <Label htmlFor="duration_minutes">Duração</Label>
-          <Select id="duration_minutes" name="duration_minutes" defaultValue="30" disabled={!canSubmit || pending}>
-            {APPOINTMENT_DURATIONS.map((duration) => (
-              <option key={duration} value={duration}>
-                {duration} min
-              </option>
-            ))}
-          </Select>
+          <Input
+            id="duration_minutes"
+            name="duration_minutes"
+            type="number"
+            min={5}
+            max={720}
+            value={duration}
+            onChange={(event) => setDuration(Number(event.target.value))}
+            disabled={!canSubmit || pending}
+          />
         </div>
       </div>
 

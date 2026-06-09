@@ -284,8 +284,8 @@ begin
       when module_name in (
         'medical_records'::public.permission_module,
         'patients'::public.permission_module
-      ) then 'security'
-      else 'info'
+      ) then 'security'::public.audit_level
+      else 'info'::public.audit_level
     end,
     format('Alteração automática registrada em %s.', tg_table_name),
     actor_uuid,

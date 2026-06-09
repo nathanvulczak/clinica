@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  APPOINTMENT_DURATIONS,
   APPOINTMENT_STATUSES,
   SCHEDULE_BLOCK_TYPES,
 } from "@/config/schedule";
@@ -45,11 +44,11 @@ export const createAppointmentSchema = z
     patient_phone: optionalPhone,
     patient_email: optionalEmail,
     professional_member_id: z.string().uuid("Selecione o profissional."),
+    service_id: z.string().optional().transform((value) => (value && value !== "none" ? value : null)),
+    room_id: z.string().optional().transform((value) => (value && value !== "none" ? value : null)),
     appointment_date: dateInputSchema,
     start_time: timeInputSchema,
-    duration_minutes: z.coerce
-      .number()
-      .refine((value) => APPOINTMENT_DURATIONS.includes(value), "Selecione uma duração válida."),
+    duration_minutes: z.coerce.number().int().min(5).max(720),
     appointment_type: z.string().trim().min(2, "Informe o tipo de compromisso."),
     channel: z.string().trim().min(2, "Informe o canal do atendimento."),
     notes: optionalText,

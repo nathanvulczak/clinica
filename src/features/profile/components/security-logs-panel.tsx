@@ -44,6 +44,20 @@ const actionLabels: Record<string, string> = {
   patient_appointment_confirmed: "Paciente confirmou consulta",
   schedule_block_created: "Bloqueio de agenda criado",
   schedule_settings_updated: "Agenda do profissional atualizada",
+  patient_created: "Paciente cadastrado",
+  patient_updated: "Paciente atualizado",
+  patient_deleted: "Paciente excluído",
+  service_created: "Serviço cadastrado",
+  service_updated: "Serviço atualizado",
+  service_deleted: "Serviço excluído",
+  room_created: "Consultório cadastrado",
+  room_updated: "Consultório atualizado",
+  room_deleted: "Consultório excluído",
+  availability_created: "Disponibilidade cadastrada",
+  availability_updated: "Disponibilidade atualizada",
+  availability_deleted: "Disponibilidade excluída",
+  registration_preferences_updated: "Preferências de cadastro alteradas",
+  registration_exported: "Cadastros exportados",
   access_denied: "Tentativa de acesso negada",
 };
 
@@ -86,6 +100,16 @@ const actionOptions = [
   ["patient_appointment_confirmed", "Paciente confirmou"],
   ["schedule_block_created", "Bloqueio de agenda"],
   ["schedule_settings_updated", "Agenda do profissional"],
+  ["patient_created", "Paciente cadastrado"],
+  ["patient_updated", "Paciente atualizado"],
+  ["patient_deleted", "Paciente excluído"],
+  ["service_created", "Serviço cadastrado"],
+  ["service_updated", "Serviço atualizado"],
+  ["room_created", "Consultório cadastrado"],
+  ["room_updated", "Consultório atualizado"],
+  ["availability_created", "Disponibilidade cadastrada"],
+  ["availability_updated", "Disponibilidade atualizada"],
+  ["registration_exported", "Exportação de cadastros"],
   ["access_denied", "Acesso negado"],
 ] as const;
 
@@ -135,6 +159,30 @@ function getFriendlyDescription(log: SecurityLog) {
 
   if (log.action_type === "schedule_settings_updated") {
     return `A configuração de agenda de um profissional foi atualizada.${changedFields}`;
+  }
+
+  if (log.action_type.startsWith("patient_")) {
+    return `Um cadastro de paciente foi alterado com rastreabilidade.${changedFields}`;
+  }
+
+  if (log.action_type.startsWith("service_")) {
+    return `Um serviço da clínica foi alterado.${changedFields}`;
+  }
+
+  if (log.action_type.startsWith("room_")) {
+    return `Um consultório da clínica foi alterado.${changedFields}`;
+  }
+
+  if (log.action_type.startsWith("availability_")) {
+    return `Uma regra de disponibilidade profissional foi alterada.${changedFields}`;
+  }
+
+  if (log.action_type === "registration_preferences_updated") {
+    return `As preferências de cadastro da clínica foram atualizadas.${changedFields}`;
+  }
+
+  if (log.action_type === "registration_exported") {
+    return "Uma exportação de cadastros foi gerada.";
   }
 
   if (log.action_type === "member_permission_updated") {

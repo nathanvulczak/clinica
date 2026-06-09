@@ -22,6 +22,10 @@ begin
     'appointments',
     'schedule_blocks',
     'schedule_professional_settings',
+    'professional_availability_rules',
+    'registration_preferences',
+    'clinic_rooms',
+    'clinic_services',
     'patients'
   ]
   loop
