@@ -224,10 +224,31 @@ export type ScheduleProfessional = {
   clinic_id: string;
   user_id: string;
   role: AppRole;
+  status?: ClinicMember["status"];
   profile: {
     full_name: string;
     email: string | null;
+    phone?: string | null;
+    cpf?: string | null;
   } | null;
+};
+
+export type ProfessionalOperationalProfile = {
+  id?: string;
+  clinic_id: string;
+  professional_member_id: string;
+  specialty: string | null;
+  council_type: string | null;
+  council_number: string | null;
+  council_state: string | null;
+  rqe: string | null;
+  bio: string | null;
+  appointment_color: string;
+  default_service_id: string | null;
+  default_room_id: string | null;
+  telemedicine_enabled: boolean;
+  accepts_new_patients: boolean;
+  active: boolean;
 };
 
 export type ScheduleSettings = {

@@ -6,6 +6,7 @@ import {
   deleteRegistrationAction,
   saveAvailabilityAction,
   savePatientAction,
+  saveProfessionalProfileAction,
   saveRegistrationPreferencesAction,
   saveRoomAction,
   saveServiceAction,
@@ -23,6 +24,7 @@ import type {
   ClinicService,
   PatientSummary,
   ProfessionalAvailabilityRule,
+  ProfessionalOperationalProfile,
   RegistrationPreferences,
   ScheduleProfessional,
 } from "@/types/domain";
@@ -671,33 +673,221 @@ export function RoomForm({ room, disabled }: { room?: ClinicRoom; disabled?: boo
   );
 }
 
+export function ProfessionalProfileForm({
+  professional,
+  professionalProfile,
+  services,
+  rooms,
+  disabled,
+}: {
+  professional: ScheduleProfessional;
+  professionalProfile?: ProfessionalOperationalProfile;
+  services: ClinicService[];
+  rooms: ClinicRoom[];
+  disabled?: boolean;
+}) {
+  const [state, formAction, pending] = useActionState(saveProfessionalProfileAction, {});
+  const canSubmit = !disabled && !pending;
+
+  useRegistrationToast(
+    state,
+    "Especialidade, registro profissional e padrões operacionais foram atualizados.",
+  );
+
+  return (
+    <form action={formAction} className="grid gap-4">
+      <input type="hidden" name="professional_member_id" value={professional.id} />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label htmlFor={`specialty-${professional.id}`}>Especialidade principal</Label>
+          <Input
+            id={`specialty-${professional.id}`}
+            name="specialty"
+            defaultValue={professionalProfile?.specialty ?? ""}
+            placeholder="Ex.: Cardiologia"
+            disabled={!canSubmit}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`rqe-${professional.id}`}>RQE / qualificação</Label>
+          <Input
+            id={`rqe-${professional.id}`}
+            name="rqe"
+            defaultValue={professionalProfile?.rqe ?? ""}
+            disabled={!canSubmit}
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-[1fr_1.2fr_100px]">
+        <div className="grid gap-2">
+          <Label htmlFor={`council-type-${professional.id}`}>Conselho</Label>
+          <Input
+            id={`council-type-${professional.id}`}
+            name="council_type"
+            defaultValue={professionalProfile?.council_type ?? ""}
+            placeholder="CRM, CRO, COREN, CRP..."
+            disabled={!canSubmit}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`council-number-${professional.id}`}>Número</Label>
+          <Input
+            id={`council-number-${professional.id}`}
+            name="council_number"
+            defaultValue={professionalProfile?.council_number ?? ""}
+            disabled={!canSubmit}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`council-state-${professional.id}`}>UF</Label>
+          <Input
+            id={`council-state-${professional.id}`}
+            name="council_state"
+            maxLength={2}
+            defaultValue={professionalProfile?.council_state ?? ""}
+            className="uppercase"
+            disabled={!canSubmit}
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label htmlFor={`default-service-${professional.id}`}>Serviço padrão</Label>
+          <Select
+            id={`default-service-${professional.id}`}
+            name="default_service_id"
+            defaultValue={professionalProfile?.default_service_id ?? "none"}
+            disabled={!canSubmit}
+          >
+            <option value="none">Sem serviço padrão</option>
+            {services.map((service) => (
+              <option key={service.id} value={service.id}>
+                {service.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`default-room-${professional.id}`}>Consultório padrão</Label>
+          <Select
+            id={`default-room-${professional.id}`}
+            name="default_room_id"
+            defaultValue={professionalProfile?.default_room_id ?? "none"}
+            disabled={!canSubmit}
+          >
+            <option value="none">Sem consultório padrão</option>
+            {rooms.map((room) => (
+              <option key={room.id} value={room.id}>
+                {room.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid gap-2">
+        <Label htmlFor={`appointment-color-${professional.id}`}>Cor na agenda</Label>
+        <div className="flex items-center gap-3">
+          <Input
+            id={`appointment-color-${professional.id}`}
+            name="appointment_color"
+            type="color"
+            defaultValue={professionalProfile?.appointment_color ?? "#0f766e"}
+            className="h-10 w-16 p-1"
+            disabled={!canSubmit}
+          />
+          <span className="text-sm text-muted-foreground">
+            Identifica visualmente os compromissos deste profissional.
+          </span>
+        </div>
+      </div>
+
+      <div className="grid gap-2">
+        <Label htmlFor={`professional-bio-${professional.id}`}>Apresentação profissional</Label>
+        <textarea
+          id={`professional-bio-${professional.id}`}
+          name="bio"
+          defaultValue={professionalProfile?.bio ?? ""}
+          className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          disabled={!canSubmit}
+        />
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        <label className="flex items-center gap-3 rounded-md border bg-background p-3 text-sm">
+          <input
+            type="checkbox"
+            name="telemedicine_enabled"
+            defaultChecked={professionalProfile?.telemedicine_enabled ?? false}
+            disabled={!canSubmit}
+          />
+          Teleatendimento
+        </label>
+        <label className="flex items-center gap-3 rounded-md border bg-background p-3 text-sm">
+          <input
+            type="checkbox"
+            name="accepts_new_patients"
+            defaultChecked={professionalProfile?.accepts_new_patients ?? true}
+            disabled={!canSubmit}
+          />
+          Aceita novos pacientes
+        </label>
+        <label className="flex items-center gap-3 rounded-md border bg-background p-3 text-sm">
+          <input
+            type="checkbox"
+            name="active"
+            defaultChecked={professionalProfile?.active ?? true}
+            disabled={!canSubmit}
+          />
+          Ativo na operação
+        </label>
+      </div>
+
+      <FormMessage state={state} />
+      <Button disabled={!canSubmit}>
+        <Save />
+        {pending ? "Salvando..." : "Salvar ficha profissional"}
+      </Button>
+    </form>
+  );
+}
+
 export function AvailabilityForm({
   availability,
   professionals,
   rooms,
   services,
+  fixedProfessionalId,
   disabled,
 }: {
   availability?: ProfessionalAvailabilityRule;
   professionals: ScheduleProfessional[];
   rooms: ClinicRoom[];
   services: ClinicService[];
+  fixedProfessionalId?: string;
   disabled?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(saveAvailabilityAction, {});
   const [recurrenceType, setRecurrenceType] = useState<"weekly" | "specific_date">(
     availability?.recurrence_type ?? "weekly",
   );
+  const fieldId = availability?.id ?? fixedProfessionalId ?? "new";
 
   useRegistrationToast(state, "A regra já pode ser usada para organizar a Agenda da clínica.");
 
   return (
     <form action={formAction} className="grid gap-4">
       {availability?.id ? <input type="hidden" name="id" value={availability.id} /> : null}
+      {fixedProfessionalId ? (
+        <input type="hidden" name="professional_member_id" value={fixedProfessionalId} />
+      ) : (
       <div className="grid gap-2">
-        <Label htmlFor={`availability-professional-${availability?.id ?? "new"}`}>Profissional</Label>
+        <Label htmlFor={`availability-professional-${fieldId}`}>Profissional</Label>
         <Select
-          id={`availability-professional-${availability?.id ?? "new"}`}
+          id={`availability-professional-${fieldId}`}
           name="professional_member_id"
           defaultValue={availability?.professional_member_id ?? professionals[0]?.id}
           disabled={disabled || pending}
@@ -710,11 +900,12 @@ export function AvailabilityForm({
           ))}
         </Select>
       </div>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-2">
-          <Label htmlFor={`availability-room-${availability?.id ?? "new"}`}>Consultório</Label>
+          <Label htmlFor={`availability-room-${fieldId}`}>Consultório</Label>
           <Select
-            id={`availability-room-${availability?.id ?? "new"}`}
+            id={`availability-room-${fieldId}`}
             name="room_id"
             defaultValue={availability?.room_id ?? "none"}
             disabled={disabled || pending}
@@ -728,9 +919,9 @@ export function AvailabilityForm({
           </Select>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor={`availability-service-${availability?.id ?? "new"}`}>Serviço preferencial</Label>
+          <Label htmlFor={`availability-service-${fieldId}`}>Serviço preferencial</Label>
           <Select
-            id={`availability-service-${availability?.id ?? "new"}`}
+            id={`availability-service-${fieldId}`}
             name="service_id"
             defaultValue={availability?.service_id ?? "none"}
             disabled={disabled || pending}
@@ -746,9 +937,9 @@ export function AvailabilityForm({
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-2">
-          <Label htmlFor={`recurrence-${availability?.id ?? "new"}`}>Recorrência</Label>
+          <Label htmlFor={`recurrence-${fieldId}`}>Recorrência</Label>
           <Select
-            id={`recurrence-${availability?.id ?? "new"}`}
+            id={`recurrence-${fieldId}`}
             name="recurrence_type"
             value={recurrenceType}
             onChange={(event) => setRecurrenceType(event.target.value as "weekly" | "specific_date")}
@@ -760,9 +951,9 @@ export function AvailabilityForm({
         </div>
         {recurrenceType === "weekly" ? (
           <div className="grid gap-2">
-            <Label htmlFor={`weekday-${availability?.id ?? "new"}`}>Dia da semana</Label>
+            <Label htmlFor={`weekday-${fieldId}`}>Dia da semana</Label>
             <Select
-              id={`weekday-${availability?.id ?? "new"}`}
+              id={`weekday-${fieldId}`}
               name="weekday"
               defaultValue={String(availability?.weekday ?? 1)}
               disabled={disabled || pending}
@@ -776,9 +967,9 @@ export function AvailabilityForm({
           </div>
         ) : (
           <div className="grid gap-2">
-            <Label htmlFor={`specific-${availability?.id ?? "new"}`}>Data</Label>
+            <Label htmlFor={`specific-${fieldId}`}>Data</Label>
             <Input
-              id={`specific-${availability?.id ?? "new"}`}
+              id={`specific-${fieldId}`}
               name="specific_date"
               type="date"
               defaultValue={availability?.specific_date ?? ""}
@@ -789,9 +980,9 @@ export function AvailabilityForm({
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-2">
-          <Label htmlFor={`valid-from-${availability?.id ?? "new"}`}>Válido a partir de</Label>
+          <Label htmlFor={`valid-from-${fieldId}`}>Válido a partir de</Label>
           <Input
-            id={`valid-from-${availability?.id ?? "new"}`}
+            id={`valid-from-${fieldId}`}
             name="valid_from"
             type="date"
             defaultValue={availability?.valid_from ?? ""}
@@ -799,9 +990,9 @@ export function AvailabilityForm({
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor={`valid-until-${availability?.id ?? "new"}`}>Válido até</Label>
+          <Label htmlFor={`valid-until-${fieldId}`}>Válido até</Label>
           <Input
-            id={`valid-until-${availability?.id ?? "new"}`}
+            id={`valid-until-${fieldId}`}
             name="valid_until"
             type="date"
             defaultValue={availability?.valid_until ?? ""}
@@ -811,9 +1002,9 @@ export function AvailabilityForm({
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="grid gap-2">
-          <Label htmlFor={`availability-start-${availability?.id ?? "new"}`}>Início</Label>
+          <Label htmlFor={`availability-start-${fieldId}`}>Início</Label>
           <Input
-            id={`availability-start-${availability?.id ?? "new"}`}
+            id={`availability-start-${fieldId}`}
             name="start_time"
             type="time"
             defaultValue={availability?.start_time?.slice(0, 5) ?? "08:00"}
@@ -821,9 +1012,9 @@ export function AvailabilityForm({
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor={`availability-end-${availability?.id ?? "new"}`}>Fim</Label>
+          <Label htmlFor={`availability-end-${fieldId}`}>Fim</Label>
           <Input
-            id={`availability-end-${availability?.id ?? "new"}`}
+            id={`availability-end-${fieldId}`}
             name="end_time"
             type="time"
             defaultValue={availability?.end_time?.slice(0, 5) ?? "18:00"}
@@ -831,9 +1022,9 @@ export function AvailabilityForm({
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor={`availability-slot-${availability?.id ?? "new"}`}>Intervalo</Label>
+          <Label htmlFor={`availability-slot-${fieldId}`}>Intervalo</Label>
           <Input
-            id={`availability-slot-${availability?.id ?? "new"}`}
+            id={`availability-slot-${fieldId}`}
             name="slot_minutes"
             type="number"
             min={5}
@@ -844,9 +1035,9 @@ export function AvailabilityForm({
         </div>
       </div>
       <div className="grid gap-2">
-        <Label htmlFor={`availability-notes-${availability?.id ?? "new"}`}>Observações</Label>
+        <Label htmlFor={`availability-notes-${fieldId}`}>Observações</Label>
         <Input
-          id={`availability-notes-${availability?.id ?? "new"}`}
+          id={`availability-notes-${fieldId}`}
           name="notes"
           defaultValue={availability?.notes ?? ""}
           disabled={disabled || pending}

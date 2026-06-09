@@ -15,6 +15,10 @@ const protectedPrefixes = [
 const authPrefixes = ["/login", "/cadastro"];
 const subscriptionRequiredPrefixes = ["/dashboard", "/clinicas", "/cadastros", "/usuarios", "/auditoria", "/agenda"];
 
+function matchesRoute(pathname: string, route: string) {
+  return pathname === route || pathname.startsWith(`${route}/`);
+}
+
 function hasValidSupabasePublicConfig() {
   const url = getSupabaseUrl();
   const anonKey = getSupabaseAnonKey();
@@ -66,9 +70,11 @@ export async function updateSession(request: NextRequest) {
   });
 
   const pathname = request.nextUrl.pathname;
-  const isProtected = protectedPrefixes.some((prefix) => pathname.startsWith(prefix));
-  const isAuthPage = authPrefixes.some((prefix) => pathname.startsWith(prefix));
-  const requiresSubscription = subscriptionRequiredPrefixes.some((prefix) => pathname.startsWith(prefix));
+  const isProtected = protectedPrefixes.some((prefix) => matchesRoute(pathname, prefix));
+  const isAuthPage = authPrefixes.some((prefix) => matchesRoute(pathname, prefix));
+  const requiresSubscription = subscriptionRequiredPrefixes.some((prefix) =>
+    matchesRoute(pathname, prefix),
+  );
 
   if (!hasValidSupabasePublicConfig()) {
     if (isProtected) {
@@ -116,8 +122,10 @@ export async function updateSession(request: NextRequest) {
 
   if (isProtected && !user) {
     const redirectUrl = request.nextUrl.clone();
+    const nextPath = `${pathname}${request.nextUrl.search}`;
     redirectUrl.pathname = "/login";
-    redirectUrl.searchParams.set("next", pathname);
+    redirectUrl.search = "";
+    redirectUrl.searchParams.set("next", nextPath);
     return NextResponse.redirect(redirectUrl);
   }
 

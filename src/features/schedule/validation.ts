@@ -71,6 +71,7 @@ export const updateAppointmentStatusSchema = z.object({
 
 export const createScheduleBlockSchema = z
   .object({
+    id: z.string().uuid().optional(),
     professional_member_id: z.string().uuid("Selecione o profissional."),
     block_date: dateInputSchema,
     start_time: timeInputSchema,
@@ -82,6 +83,10 @@ export const createScheduleBlockSchema = z
     message: "O fim do bloqueio deve ser depois do início.",
     path: ["end_time"],
   });
+
+export const deleteScheduleBlockSchema = z.object({
+  id: z.string().uuid(),
+});
 
 export const upsertProfessionalScheduleSettingsSchema = z
   .object({

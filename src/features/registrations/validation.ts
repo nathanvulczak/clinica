@@ -164,6 +164,33 @@ export const registrationPreferencesSchema = z.object({
   show_inactive_records: z.enum(["on", "off"]).optional().transform((value) => value === "on"),
 });
 
+export const professionalProfileSchema = z.object({
+  professional_member_id: z.string().uuid("Selecione o profissional."),
+  specialty: optionalText,
+  council_type: optionalText,
+  council_number: optionalText,
+  council_state: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim().toUpperCase() ?? "")
+    .refine((value) => !value || /^[A-Z]{2}$/.test(value), "Informe a UF do conselho com 2 letras.")
+    .transform((value) => (value.length > 0 ? value : null)),
+  rqe: optionalText,
+  bio: optionalText,
+  appointment_color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Selecione uma cor válida."),
+  default_service_id: z
+    .string()
+    .optional()
+    .transform((value) => (value && value !== "none" ? value : null)),
+  default_room_id: z
+    .string()
+    .optional()
+    .transform((value) => (value && value !== "none" ? value : null)),
+  telemedicine_enabled: z.enum(["on", "off"]).optional().transform((value) => value === "on"),
+  accepts_new_patients: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
+  active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
+});
+
 export const registrationDeleteSchema = z.object({
   id: z.string().uuid(),
   resource: z.enum(["patient", "service", "room", "availability"]),

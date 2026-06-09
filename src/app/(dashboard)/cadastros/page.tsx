@@ -1,23 +1,33 @@
 import Link from "next/link";
 import {
   Building,
-  CalendarClock,
+  BriefcaseBusiness,
   HeartPulse,
   LockKeyhole,
   Search,
   Settings2,
   Stethoscope,
+  UserRound,
 } from "lucide-react";
+import { ROLE_LABELS } from "@/config/permissions";
+import { SCHEDULE_BLOCK_TYPE_LABELS } from "@/config/schedule";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
   AvailabilityForm,
   DeleteRegistrationButton,
   ExportRegistrationButton,
   PatientForm,
+  ProfessionalProfileForm,
   RegistrationPreferencesForm,
   RoomForm,
   ServiceForm,
 } from "@/features/registrations/components/registration-forms";
+import {
+  DeleteScheduleBlockButton,
+  ProfessionalSettingsForm,
+  ScheduleBlockForm,
+} from "@/features/schedule/components/schedule-forms";
+import { formatDateTimeBr, getTodayInputDate } from "@/lib/dates";
 import { formatCpf, formatPhone } from "@/lib/formatters";
 import { formatCurrencyBRL } from "@/lib/utils";
 import {
@@ -27,8 +37,10 @@ import {
   listClinicRooms,
   listClinicServices,
   listPatients,
+  listProfessionalOperationalProfiles,
+  listProfessionalRegistrationBlocks,
 } from "@/repositories/registrations";
-import { listScheduleProfessionals } from "@/repositories/schedule";
+import { listScheduleProfessionals, listScheduleSettings } from "@/repositories/schedule";
 import type { RegistrationPreferences } from "@/types/domain";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -38,9 +50,9 @@ import { Input } from "@/components/ui/input";
 
 const sections = [
   { id: "patients", label: "Pacientes", icon: HeartPulse },
+  { id: "professionals", label: "Profissionais", icon: BriefcaseBusiness },
   { id: "services", label: "Serviços", icon: Stethoscope },
   { id: "rooms", label: "Consultórios", icon: Building },
-  { id: "availability", label: "Disponibilidade", icon: CalendarClock },
   { id: "preferences", label: "Preferências", icon: Settings2 },
 ] as const;
 
@@ -79,15 +91,27 @@ export default async function CadastrosPage({
     ({ ...defaultPreferences, clinic_id: activeClinic?.id ?? "" } satisfies RegistrationPreferences);
   const includeInactive = preferences.show_inactive_records || params.inactive === "1";
 
-  const [patients, services, rooms, availability, allProfessionals] = activeClinic
+  const [
+    patients,
+    services,
+    rooms,
+    availability,
+    allProfessionals,
+    professionalProfiles,
+    scheduleSettings,
+    professionalBlocks,
+  ] = activeClinic
     ? await Promise.all([
         listPatients(activeClinic.id, { query, includeInactive, access }),
         listClinicServices(activeClinic.id, includeInactive, access),
         listClinicRooms(activeClinic.id, includeInactive, access),
         listAvailabilityRules(activeClinic.id, access),
         listScheduleProfessionals(activeClinic.id),
+        listProfessionalOperationalProfiles(activeClinic.id, access),
+        listScheduleSettings(activeClinic.id),
+        listProfessionalRegistrationBlocks(activeClinic.id, access),
       ])
-    : [[], [], [], [], []];
+    : [[], [], [], [], [], [], [], []];
 
   const professionals = access.canManageSchedule
     ? allProfessionals
@@ -169,11 +193,11 @@ export default async function CadastrosPage({
             </Card>
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">Disponibilidades</CardTitle>
+                <CardTitle className="text-sm font-medium">Profissionais</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-semibold">{availability.length}</p>
-                <p className="text-xs text-muted-foreground">regras semanais ou específicas</p>
+                <p className="text-2xl font-semibold">{professionals.length}</p>
+                <p className="text-xs text-muted-foreground">com ficha operacional acessível</p>
               </CardContent>
             </Card>
           </div>
@@ -397,91 +421,233 @@ export default async function CadastrosPage({
             </div>
           ) : null}
 
-          {section === "availability" ? (
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_460px]">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Disponibilidade profissional</CardTitle>
-                  <CardDescription>
-                    Regras semanais ou datas específicas com consultório e serviço preferencial.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-3">
-                  {availability.length === 0 ? (
-                    <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                      Nenhuma regra de disponibilidade encontrada.
-                    </div>
-                  ) : (
-                    availability.map((rule) => {
-                      const professional = allProfessionals.find(
-                        (item) => item.id === rule.professional_member_id,
-                      );
-                      const room = rooms.find((item) => item.id === rule.room_id);
-                      const service = services.find((item) => item.id === rule.service_id);
+          {section === "professionals" ? (
+            <div className="grid gap-4">
+              {professionals.length === 0 ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Nenhum profissional ativo</CardTitle>
+                    <CardDescription>
+                      Vincule um médico, profissional ou membro de enfermagem em Usuários e permissões.
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              ) : (
+                professionals.map((professional) => {
+                  const professionalProfile = professionalProfiles.find(
+                    (item) => item.professional_member_id === professional.id,
+                  );
+                  const ownAvailability = availability.filter(
+                    (item) => item.professional_member_id === professional.id,
+                  );
+                  const ownBlocks = professionalBlocks.filter(
+                    (item) => item.professional_member_id === professional.id,
+                  );
+                  const canEditOwn =
+                    access.canEditCatalog ||
+                    (access.currentMemberId === professional.id && access.canManageOwnAvailability);
 
-                      return (
-                        <article key={rule.id} className="overflow-hidden rounded-lg border bg-card">
-                          <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="font-medium">
-                                  {professional?.profile?.full_name ?? "Profissional não localizado"}
-                                </p>
-                                <Badge>
-                                  {rule.recurrence_type === "weekly"
-                                    ? weekdayLabel(rule.weekday)
-                                    : rule.specific_date}
-                                </Badge>
-                              </div>
-                              <p className="mt-2 text-sm text-muted-foreground">
-                                {rule.start_time.slice(0, 5)} às {rule.end_time.slice(0, 5)} •{" "}
-                                {rule.slot_minutes} min
-                              </p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {room?.name ?? "Sem consultório fixo"} • {service?.name ?? "Todos os serviços"}
-                              </p>
+                  return (
+                    <article key={professional.id} className="overflow-hidden rounded-lg border bg-card shadow-sm">
+                      <header className="flex flex-col gap-4 p-5 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="flex min-w-0 gap-3">
+                          <div
+                            className="flex size-11 shrink-0 items-center justify-center rounded-md text-white"
+                            style={{ backgroundColor: professionalProfile?.appointment_color ?? "#0f766e" }}
+                          >
+                            <UserRound className="size-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h2 className="font-semibold">
+                                {professional.profile?.full_name ?? "Profissional sem nome"}
+                              </h2>
+                              <Badge>{ROLE_LABELS[professional.role]}</Badge>
+                              {professionalProfile?.active === false ? <Badge>Inativo na operação</Badge> : null}
                             </div>
-                            <DeleteRegistrationButton
-                              id={rule.id}
-                              resource="availability"
-                              label="disponibilidade"
-                              disabled={!access.canDeleteCatalog && !access.canManageOwnAvailability}
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {professionalProfile?.specialty ?? "Especialidade não informada"}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {professional.profile?.email ?? "E-mail não informado"} •{" "}
+                              {professional.profile?.phone
+                                ? formatPhone(professional.profile.phone)
+                                : "telefone não informado"}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-xs">
+                          <Badge>{ownAvailability.length} disponibilidade(s)</Badge>
+                          <Badge>{ownBlocks.length} bloqueio(s)</Badge>
+                        </div>
+                      </header>
+
+                      <details className="border-t bg-background">
+                        <summary className="cursor-pointer px-5 py-4 text-sm font-medium">
+                          Ficha profissional e padrões de atendimento
+                        </summary>
+                        <div className="border-t p-5">
+                          <ProfessionalProfileForm
+                            professional={professional}
+                            professionalProfile={professionalProfile}
+                            services={services}
+                            rooms={rooms}
+                            disabled={!canEditOwn}
+                          />
+                        </div>
+                      </details>
+
+                      <details className="border-t bg-background">
+                        <summary className="cursor-pointer px-5 py-4 text-sm font-medium">
+                          Expediente e preferências da agenda
+                        </summary>
+                        <div className="border-t p-5">
+                          <ProfessionalSettingsForm
+                            professionals={[professional]}
+                            settings={scheduleSettings}
+                            fixedProfessionalId={professional.id}
+                            disabled={!access.canManageSchedule}
+                          />
+                        </div>
+                      </details>
+
+                      <details className="border-t bg-background">
+                        <summary className="cursor-pointer px-5 py-4 text-sm font-medium">
+                          Disponibilidade por dia, serviço e consultório
+                        </summary>
+                        <div className="grid gap-5 border-t p-5 xl:grid-cols-[minmax(0,1fr)_430px]">
+                          <div className="grid gap-3">
+                            {ownAvailability.length === 0 ? (
+                              <div className="rounded-lg border border-dashed p-5 text-sm text-muted-foreground">
+                                Nenhuma disponibilidade específica cadastrada.
+                              </div>
+                            ) : (
+                              ownAvailability.map((rule) => {
+                                const room = rooms.find((item) => item.id === rule.room_id);
+                                const service = services.find((item) => item.id === rule.service_id);
+
+                                return (
+                                  <div key={rule.id} className="overflow-hidden rounded-lg border">
+                                    <div className="flex items-start justify-between gap-3 p-4">
+                                      <div>
+                                        <p className="font-medium">
+                                          {rule.recurrence_type === "weekly"
+                                            ? weekdayLabel(rule.weekday)
+                                            : rule.specific_date}
+                                          , {rule.start_time.slice(0, 5)} às {rule.end_time.slice(0, 5)}
+                                        </p>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                          {room?.name ?? "Sem consultório fixo"} •{" "}
+                                          {service?.name ?? "Todos os serviços"} • {rule.slot_minutes} min
+                                        </p>
+                                      </div>
+                                      <DeleteRegistrationButton
+                                        id={rule.id}
+                                        resource="availability"
+                                        label="disponibilidade"
+                                        disabled={!access.canDeleteCatalog && !access.canManageOwnAvailability}
+                                      />
+                                    </div>
+                                    <details className="border-t">
+                                      <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+                                        Editar disponibilidade
+                                      </summary>
+                                      <div className="border-t p-4">
+                                        <AvailabilityForm
+                                          availability={rule}
+                                          professionals={[professional]}
+                                          fixedProfessionalId={professional.id}
+                                          rooms={rooms}
+                                          services={services}
+                                          disabled={!canEditOwn}
+                                        />
+                                      </div>
+                                    </details>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                          <div className="border-l-0 xl:border-l xl:pl-5">
+                            <h3 className="mb-1 font-medium">Nova disponibilidade</h3>
+                            <p className="mb-4 text-sm text-muted-foreground">
+                              Defina dias, horários e alocação preferencial.
+                            </p>
+                            <AvailabilityForm
+                              professionals={[professional]}
+                              fixedProfessionalId={professional.id}
+                              rooms={rooms}
+                              services={services}
+                              disabled={!canEditOwn}
                             />
                           </div>
-                          <details className="border-t bg-background">
-                            <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
-                              Editar disponibilidade
-                            </summary>
-                            <div className="border-t p-4">
-                              <AvailabilityForm
-                                availability={rule}
-                                professionals={professionals}
-                                rooms={rooms}
-                                services={services}
-                                disabled={!access.canEditCatalog && !access.canManageOwnAvailability}
-                              />
-                            </div>
-                          </details>
-                        </article>
-                      );
-                    })
-                  )}
-                </CardContent>
-              </Card>
-              <Card className="h-fit">
-                <CardHeader>
-                  <CardTitle>Nova disponibilidade</CardTitle>
-                  <CardDescription>Defina quando, onde e como o profissional atende.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <AvailabilityForm
-                    professionals={professionals}
-                    rooms={rooms}
-                    services={services}
-                    disabled={!access.canCreateCatalog && !access.canManageOwnAvailability}
-                  />
-                </CardContent>
-              </Card>
+                        </div>
+                      </details>
+
+                      <details className="border-t bg-background">
+                        <summary className="cursor-pointer px-5 py-4 text-sm font-medium">
+                          Bloqueios, férias e indisponibilidades
+                        </summary>
+                        <div className="grid gap-5 border-t p-5 xl:grid-cols-[minmax(0,1fr)_430px]">
+                          <div className="grid gap-3">
+                            {ownBlocks.length === 0 ? (
+                              <div className="rounded-lg border border-dashed p-5 text-sm text-muted-foreground">
+                                Nenhum bloqueio cadastrado.
+                              </div>
+                            ) : (
+                              ownBlocks.map((block) => (
+                                <div key={block.id} className="overflow-hidden rounded-lg border">
+                                  <div className="flex items-start justify-between gap-3 p-4">
+                                    <div>
+                                      <p className="font-medium">{SCHEDULE_BLOCK_TYPE_LABELS[block.block_type]}</p>
+                                      <p className="mt-1 text-sm text-muted-foreground">
+                                        {formatDateTimeBr(block.starts_at)} até {formatDateTimeBr(block.ends_at)}
+                                      </p>
+                                      {block.reason ? (
+                                        <p className="mt-1 text-xs text-muted-foreground">{block.reason}</p>
+                                      ) : null}
+                                    </div>
+                                    <DeleteScheduleBlockButton
+                                      blockId={block.id}
+                                      disabled={!access.canManageSchedule}
+                                    />
+                                  </div>
+                                  <details className="border-t">
+                                    <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+                                      Editar bloqueio
+                                    </summary>
+                                    <div className="border-t p-4">
+                                      <ScheduleBlockForm
+                                        professionals={[professional]}
+                                        fixedProfessionalId={professional.id}
+                                        defaultDate={getTodayInputDate()}
+                                        block={block}
+                                        disabled={!access.canManageSchedule}
+                                      />
+                                    </div>
+                                  </details>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                          <div className="border-l-0 xl:border-l xl:pl-5">
+                            <h3 className="mb-1 font-medium">Novo bloqueio</h3>
+                            <p className="mb-4 text-sm text-muted-foreground">
+                              Registre intervalos, férias ou períodos administrativos.
+                            </p>
+                            <ScheduleBlockForm
+                              professionals={[professional]}
+                              fixedProfessionalId={professional.id}
+                              defaultDate={getTodayInputDate()}
+                              disabled={!access.canManageSchedule}
+                            />
+                          </div>
+                        </div>
+                      </details>
+                    </article>
+                  );
+                })
+              )}
             </div>
           ) : null}
 

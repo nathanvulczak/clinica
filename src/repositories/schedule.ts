@@ -147,7 +147,9 @@ export async function listScheduleProfessionals(
   const admin = createSupabaseAdminClient();
   let query = admin
     .from("clinic_members")
-    .select("id, clinic_id, user_id, role, profile:profiles!clinic_members_user_id_fkey(full_name, email)")
+    .select(
+      "id, clinic_id, user_id, role, status, profile:profiles!clinic_members_user_id_fkey(full_name, email, phone, cpf)",
+    )
     .eq("clinic_id", clinicId as string)
     .eq("status", "active")
     .is("deleted_at", null)
@@ -320,7 +322,9 @@ export async function listAppointments(
       professionalIds.length
         ? admin
             .from("clinic_members")
-            .select("id, clinic_id, user_id, role, profile:profiles!clinic_members_user_id_fkey(full_name, email)")
+            .select(
+              "id, clinic_id, user_id, role, status, profile:profiles!clinic_members_user_id_fkey(full_name, email, phone, cpf)",
+            )
             .in("id", professionalIds)
         : Promise.resolve({ data: [] }),
       serviceIds.length

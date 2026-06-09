@@ -7,6 +7,7 @@ import { getActiveClinicContext } from "@/features/clinics/context";
 import {
   createAppointmentSchema,
   createScheduleBlockSchema,
+  deleteScheduleBlockSchema,
   updateAppointmentStatusSchema,
   upsertProfessionalScheduleSettingsSchema,
 } from "@/features/schedule/validation";
@@ -113,17 +114,23 @@ async function findBlockConflict(
   professionalMemberId: string,
   startsAt: string,
   endsAt: string,
+  excludeBlockId?: string,
 ) {
   const admin = createSupabaseAdminClient();
-  const { data } = await admin
+  let query = admin
     .from("schedule_blocks")
     .select("id, starts_at, ends_at, reason")
     .eq("clinic_id", clinicId)
     .eq("professional_member_id", professionalMemberId)
     .is("deleted_at", null)
     .lt("starts_at", endsAt)
-    .gt("ends_at", startsAt)
-    .limit(1);
+    .gt("ends_at", startsAt);
+
+  if (excludeBlockId) {
+    query = query.neq("id", excludeBlockId);
+  }
+
+  const { data } = await query.limit(1);
 
   return data?.[0] ?? null;
 }
@@ -485,6 +492,7 @@ export async function createScheduleBlockAction(
   formData: FormData,
 ): Promise<ScheduleActionState> {
   const parsed = createScheduleBlockSchema.safeParse({
+    id: formData.get("id") || undefined,
     professional_member_id: formData.get("professional_member_id"),
     block_date: formData.get("block_date"),
     start_time: formData.get("start_time"),
@@ -518,7 +526,13 @@ export async function createScheduleBlockAction(
   const endsAt = localDateTimeToIso(parsed.data.block_date, parsed.data.end_time);
   const [appointmentConflict, blockConflict] = await Promise.all([
     findAppointmentConflict(activeClinic.id, parsed.data.professional_member_id, startsAt, endsAt),
-    findBlockConflict(activeClinic.id, parsed.data.professional_member_id, startsAt, endsAt),
+    findBlockConflict(
+      activeClinic.id,
+      parsed.data.professional_member_id,
+      startsAt,
+      endsAt,
+      parsed.data.id,
+    ),
   ]);
 
   if (appointmentConflict) {
@@ -529,20 +543,40 @@ export async function createScheduleBlockAction(
     return { error: "Já existe um bloqueio nesse intervalo." };
   }
 
-  const { data: block, error } = await admin
-    .from("schedule_blocks")
-    .insert({
-      clinic_id: activeClinic.id,
-      professional_member_id: parsed.data.professional_member_id,
-      starts_at: startsAt,
-      ends_at: endsAt,
-      block_type: parsed.data.block_type,
-      reason: parsed.data.reason,
-      created_by: user.id,
-      updated_by: user.id,
-    })
-    .select("id")
-    .single();
+  const payload = {
+    professional_member_id: parsed.data.professional_member_id,
+    starts_at: startsAt,
+    ends_at: endsAt,
+    block_type: parsed.data.block_type,
+    reason: parsed.data.reason,
+    updated_by: user.id,
+  };
+  const { data: previous } = parsed.data.id
+    ? await admin
+        .from("schedule_blocks")
+        .select("*")
+        .eq("id", parsed.data.id)
+        .eq("clinic_id", activeClinic.id)
+        .is("deleted_at", null)
+        .maybeSingle()
+    : { data: null };
+
+  if (parsed.data.id && !previous) {
+    return { error: "Bloqueio não encontrado na clínica ativa." };
+  }
+
+  const result = parsed.data.id
+    ? await admin.from("schedule_blocks").update(payload).eq("id", parsed.data.id).select("id").single()
+    : await admin
+        .from("schedule_blocks")
+        .insert({
+          clinic_id: activeClinic.id,
+          ...payload,
+          created_by: user.id,
+        })
+        .select("id")
+        .single();
+  const { data: block, error } = result;
 
   if (error || !block) {
     return { error: "Não foi possível bloquear o horário." };
@@ -551,23 +585,80 @@ export async function createScheduleBlockAction(
   await logAuditEvent({
     clinicId: activeClinic.id,
     userId: user.id,
-    actionType: "schedule_block_created",
+    actionType: parsed.data.id ? "schedule_block_updated" : "schedule_block_created",
     module: "schedule",
     recordTable: "schedule_blocks",
     recordId: block.id,
-    newValues: {
-      professional_member_id: parsed.data.professional_member_id,
-      starts_at: startsAt,
-      ends_at: endsAt,
-      block_type: parsed.data.block_type,
-      reason: parsed.data.reason,
-    },
-    notes: "Bloqueio criado na agenda do profissional.",
+    oldValues: previous,
+    newValues: payload,
+    notes: parsed.data.id
+      ? "Bloqueio atualizado na agenda do profissional."
+      : "Bloqueio criado na agenda do profissional.",
   });
 
   revalidatePath("/agenda");
+  revalidatePath("/cadastros");
   revalidatePath("/auditoria");
-  return { success: "Horário bloqueado na agenda." };
+  return { success: parsed.data.id ? "Bloqueio atualizado." : "Horário bloqueado na agenda." };
+}
+
+export async function deleteScheduleBlockAction(
+  _state: ScheduleActionState,
+  formData: FormData,
+): Promise<ScheduleActionState> {
+  const parsed = deleteScheduleBlockSchema.safeParse({ id: formData.get("id") });
+
+  if (!parsed.success) {
+    return { error: "Bloqueio não identificado." };
+  }
+
+  const context = await getScheduleActionContext();
+
+  if ("error" in context) {
+    return { error: context.error };
+  }
+
+  const { activeClinic, user } = context;
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = await admin
+    .from("schedule_blocks")
+    .select("*")
+    .eq("id", parsed.data.id)
+    .eq("clinic_id", activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!previous) {
+    return { error: "Bloqueio não encontrado na clínica ativa." };
+  }
+
+  const deletedAt = new Date().toISOString();
+  const { error } = await admin
+    .from("schedule_blocks")
+    .update({ deleted_at: deletedAt, updated_by: user.id })
+    .eq("id", parsed.data.id);
+
+  if (error) {
+    return { error: "Não foi possível remover o bloqueio." };
+  }
+
+  await logAuditEvent({
+    clinicId: activeClinic.id,
+    userId: user.id,
+    actionType: "schedule_block_deleted",
+    module: "schedule",
+    recordTable: "schedule_blocks",
+    recordId: parsed.data.id,
+    oldValues: previous,
+    newValues: { deleted_at: deletedAt },
+    level: "warning",
+    notes: "Bloqueio removido por soft delete.",
+  });
+
+  revalidatePath("/agenda");
+  revalidatePath("/cadastros");
+  revalidatePath("/auditoria");
+  return { success: "Bloqueio removido." };
 }
 
 export async function upsertProfessionalScheduleSettingsAction(
@@ -671,6 +762,7 @@ export async function upsertProfessionalScheduleSettingsAction(
   });
 
   revalidatePath("/agenda");
+  revalidatePath("/cadastros");
   revalidatePath("/auditoria");
   return { success: "Configuração da agenda salva." };
 }

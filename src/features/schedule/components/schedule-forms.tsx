@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
-import { Ban, CalendarPlus, Save, SlidersHorizontal } from "lucide-react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { Ban, CalendarPlus, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 import {
   APPOINTMENT_CHANNELS,
   APPOINTMENT_DURATIONS,
@@ -11,6 +11,7 @@ import {
 import {
   createAppointmentAction,
   createScheduleBlockAction,
+  deleteScheduleBlockAction,
   upsertProfessionalScheduleSettingsAction,
 } from "@/features/schedule/actions";
 import { formatCpf, formatPhone, normalizeEmail } from "@/lib/formatters";
@@ -18,11 +19,14 @@ import type {
   ClinicRoom,
   ClinicService,
   PatientSummary,
+  ProfessionalOperationalProfile,
+  ScheduleBlock,
   ScheduleProfessional,
   ScheduleSettings,
 } from "@/types/domain";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -51,11 +55,34 @@ function useScheduleToast(state: { success?: string; error?: string }, successDe
   }, [state.error, state.success, successDescription, toast]);
 }
 
+function dateTimeInputParts(value?: string) {
+  if (!value) {
+    return null;
+  }
+
+  const parts = new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    month: "2-digit",
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+  }).formatToParts(new Date(value));
+  const byType = new Map(parts.map((part) => [part.type, part.value]));
+
+  return {
+    date: `${byType.get("year")}-${byType.get("month")}-${byType.get("day")}`,
+    time: `${byType.get("hour")}:${byType.get("minute")}`,
+  };
+}
+
 export function AppointmentForm({
   professionals,
   patients,
   services,
   rooms,
+  professionalProfiles,
   defaultDate,
   disabled,
 }: {
@@ -63,6 +90,7 @@ export function AppointmentForm({
   patients: PatientSummary[];
   services: ClinicService[];
   rooms: ClinicRoom[];
+  professionalProfiles: ProfessionalOperationalProfile[];
   defaultDate: string;
   disabled?: boolean;
 }) {
@@ -71,8 +99,22 @@ export function AppointmentForm({
   const [cpf, setCpf] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
-  const [serviceId, setServiceId] = useState("none");
-  const [duration, setDuration] = useState(30);
+  const initialProfessionalId = professionals[0]?.id ?? "";
+  const initialProfessionalProfile = professionalProfiles.find(
+    (item) => item.professional_member_id === initialProfessionalId,
+  );
+  const initialService = services.find(
+    (item) => item.id === initialProfessionalProfile?.default_service_id,
+  );
+  const initialRoom = rooms.find(
+    (item) => item.id === initialProfessionalProfile?.default_room_id,
+  );
+  const [professionalId, setProfessionalId] = useState(initialProfessionalId);
+  const [serviceId, setServiceId] = useState(
+    initialService?.id ?? "none",
+  );
+  const [roomId, setRoomId] = useState(initialRoom?.id ?? "none");
+  const [duration, setDuration] = useState(initialService?.duration_minutes ?? 30);
 
   useScheduleToast(state, "O compromisso entrou no fluxo da agenda e foi registrado na auditoria.");
 
@@ -144,7 +186,27 @@ export function AppointmentForm({
 
       <div className="grid gap-2">
         <Label htmlFor="professional_member_id">Profissional</Label>
-        <Select id="professional_member_id" name="professional_member_id" disabled={!canSubmit || pending} required>
+        <Select
+          id="professional_member_id"
+          name="professional_member_id"
+          value={professionalId}
+          disabled={!canSubmit || pending}
+          onChange={(event) => {
+            const nextProfessionalId = event.target.value;
+            const profile = professionalProfiles.find(
+              (item) => item.professional_member_id === nextProfessionalId,
+            );
+            const service = services.find((item) => item.id === profile?.default_service_id);
+            const room = rooms.find((item) => item.id === profile?.default_room_id);
+            const nextServiceId = service?.id ?? "none";
+
+            setProfessionalId(nextProfessionalId);
+            setServiceId(nextServiceId);
+            setRoomId(room?.id ?? "none");
+            setDuration(service?.duration_minutes ?? 30);
+          }}
+          required
+        >
           {professionals.map((professional) => (
             <option key={professional.id} value={professional.id}>
               {professional.profile?.full_name ?? "Profissional sem nome"}
@@ -181,7 +243,13 @@ export function AppointmentForm({
         </div>
         <div className="grid gap-2">
           <Label htmlFor="room_id">Consultório</Label>
-          <Select id="room_id" name="room_id" defaultValue="none" disabled={!canSubmit || pending}>
+          <Select
+            id="room_id"
+            name="room_id"
+            value={roomId}
+            onChange={(event) => setRoomId(event.target.value)}
+            disabled={!canSubmit || pending}
+          >
             <option value="none">Definir posteriormente</option>
             {rooms.map((room) => (
               <option key={room.id} value={room.id}>
@@ -268,53 +336,92 @@ export function AppointmentForm({
 export function ScheduleBlockForm({
   professionals,
   defaultDate,
+  block,
+  fixedProfessionalId,
   disabled,
 }: {
   professionals: ScheduleProfessional[];
   defaultDate: string;
+  block?: ScheduleBlock;
+  fixedProfessionalId?: string;
   disabled?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(createScheduleBlockAction, {});
   const canSubmit = !disabled && professionals.length > 0;
+  const start = dateTimeInputParts(block?.starts_at);
+  const end = dateTimeInputParts(block?.ends_at);
+  const fieldId = block?.id ?? fixedProfessionalId ?? "new";
 
   useScheduleToast(state, "O bloqueio impede agendamentos no intervalo informado.");
 
   return (
     <form action={formAction} className="grid gap-4">
-      <div className="grid gap-2">
-        <Label htmlFor="block_professional_member_id">Profissional</Label>
-        <Select
-          id="block_professional_member_id"
-          name="professional_member_id"
-          disabled={!canSubmit || pending}
-          required
-        >
-          {professionals.map((professional) => (
-            <option key={professional.id} value={professional.id}>
-              {professional.profile?.full_name ?? "Profissional sem nome"}
-            </option>
-          ))}
-        </Select>
-      </div>
+      {block?.id ? <input type="hidden" name="id" value={block.id} /> : null}
+      {fixedProfessionalId ? (
+        <input type="hidden" name="professional_member_id" value={fixedProfessionalId} />
+      ) : (
+        <div className="grid gap-2">
+          <Label htmlFor={`block-professional-${fieldId}`}>Profissional</Label>
+          <Select
+            id={`block-professional-${fieldId}`}
+            name="professional_member_id"
+            defaultValue={block?.professional_member_id}
+            disabled={!canSubmit || pending}
+            required
+          >
+            {professionals.map((professional) => (
+              <option key={professional.id} value={professional.id}>
+                {professional.profile?.full_name ?? "Profissional sem nome"}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="grid gap-2">
-          <Label htmlFor="block_date">Data</Label>
-          <Input id="block_date" name="block_date" type="date" defaultValue={defaultDate} disabled={!canSubmit || pending} required />
+          <Label htmlFor={`block-date-${fieldId}`}>Data</Label>
+          <Input
+            id={`block-date-${fieldId}`}
+            name="block_date"
+            type="date"
+            defaultValue={start?.date ?? defaultDate}
+            disabled={!canSubmit || pending}
+            required
+          />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="block_start_time">Início</Label>
-          <Input id="block_start_time" name="start_time" type="time" defaultValue="12:00" disabled={!canSubmit || pending} required />
+          <Label htmlFor={`block-start-${fieldId}`}>Início</Label>
+          <Input
+            id={`block-start-${fieldId}`}
+            name="start_time"
+            type="time"
+            defaultValue={start?.time ?? "12:00"}
+            disabled={!canSubmit || pending}
+            required
+          />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="block_end_time">Fim</Label>
-          <Input id="block_end_time" name="end_time" type="time" defaultValue="13:00" disabled={!canSubmit || pending} required />
+          <Label htmlFor={`block-end-${fieldId}`}>Fim</Label>
+          <Input
+            id={`block-end-${fieldId}`}
+            name="end_time"
+            type="time"
+            defaultValue={end?.time ?? "13:00"}
+            disabled={!canSubmit || pending}
+            required
+          />
         </div>
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor="block_type">Tipo de bloqueio</Label>
-        <Select id="block_type" name="block_type" defaultValue="unavailable" disabled={!canSubmit || pending}>
+        <Label htmlFor={`block-type-${fieldId}`}>Tipo de bloqueio</Label>
+        <Select
+          id={`block-type-${fieldId}`}
+          name="block_type"
+          defaultValue={block?.block_type ?? "unavailable"}
+          disabled={!canSubmit || pending}
+        >
           {SCHEDULE_BLOCK_TYPES.map((type) => (
             <option key={type} value={type}>
               {SCHEDULE_BLOCK_TYPE_LABELS[type]}
@@ -324,30 +431,84 @@ export function ScheduleBlockForm({
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor="reason">Motivo</Label>
-        <Input id="reason" name="reason" disabled={!canSubmit || pending} />
+        <Label htmlFor={`block-reason-${fieldId}`}>Motivo</Label>
+        <Input
+          id={`block-reason-${fieldId}`}
+          name="reason"
+          defaultValue={block?.reason ?? ""}
+          disabled={!canSubmit || pending}
+        />
       </div>
 
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
       <Button variant="outline" disabled={!canSubmit || pending}>
         <Ban />
-        {pending ? "Bloqueando..." : "Bloquear horário"}
+        {pending ? "Salvando..." : block ? "Salvar bloqueio" : "Bloquear horário"}
       </Button>
     </form>
+  );
+}
+
+export function DeleteScheduleBlockButton({ blockId, disabled }: { blockId: string; disabled?: boolean }) {
+  const { toast } = useToast();
+  const formRef = useRef<HTMLFormElement>(null);
+  const [open, setOpen] = useState(false);
+  const [state, formAction, pending] = useActionState(deleteScheduleBlockAction, {});
+
+  useEffect(() => {
+    if (state.success) {
+      toast({ title: state.success, description: "A remoção foi registrada na auditoria." });
+      setOpen(false);
+    }
+
+    if (state.error) {
+      toast({ title: "Ação não concluída", description: state.error, variant: "destructive" });
+    }
+  }, [state.error, state.success, toast]);
+
+  return (
+    <>
+      <form ref={formRef} action={formAction}>
+        <input type="hidden" name="id" value={blockId} />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          title="Excluir bloqueio"
+          disabled={disabled || pending}
+          onClick={() => setOpen(true)}
+        >
+          <Trash2 />
+        </Button>
+      </form>
+      <ConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        title="Excluir bloqueio?"
+        description="O horário voltará a ficar disponível. A alteração permanecerá registrada na auditoria."
+        confirmLabel="Excluir bloqueio"
+        destructive
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
+    </>
   );
 }
 
 export function ProfessionalSettingsForm({
   professionals,
   settings,
+  fixedProfessionalId,
   disabled,
 }: {
   professionals: ScheduleProfessional[];
   settings: ScheduleSettings[];
+  fixedProfessionalId?: string;
   disabled?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(upsertProfessionalScheduleSettingsAction, {});
-  const [professionalId, setProfessionalId] = useState(professionals[0]?.id ?? "");
+  const [professionalId, setProfessionalId] = useState(
+    fixedProfessionalId ?? professionals[0]?.id ?? "",
+  );
   const selectedSettings = settings.find((item) => item.professional_member_id === professionalId);
   const workingHours = selectedSettings?.working_hours as { days?: string[]; start?: string; end?: string } | undefined;
   const selectedDays = useMemo(() => new Set(workingHours?.days ?? ["1", "2", "3", "4", "5"]), [workingHours?.days]);
@@ -357,6 +518,9 @@ export function ProfessionalSettingsForm({
 
   return (
     <form action={formAction} className="grid gap-4">
+      {fixedProfessionalId ? (
+        <input type="hidden" name="professional_member_id" value={fixedProfessionalId} />
+      ) : (
       <div className="grid gap-2">
         <Label htmlFor="settings_professional_member_id">Profissional</Label>
         <Select
@@ -374,13 +538,14 @@ export function ProfessionalSettingsForm({
           ))}
         </Select>
       </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-2">
-          <Label htmlFor="slot_minutes">Janela padrão</Label>
+          <Label htmlFor={`slot-minutes-${professionalId}`}>Janela padrão</Label>
           <Select
             key={`${professionalId}-slot`}
-            id="slot_minutes"
+            id={`slot-minutes-${professionalId}`}
             name="slot_minutes"
             defaultValue={String(selectedSettings?.slot_minutes ?? 30)}
             disabled={!canSubmit || pending}
@@ -393,10 +558,10 @@ export function ProfessionalSettingsForm({
           </Select>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="buffer_minutes">Intervalo entre atendimentos</Label>
+          <Label htmlFor={`buffer-minutes-${professionalId}`}>Intervalo entre atendimentos</Label>
           <Input
             key={`${professionalId}-buffer`}
-            id="buffer_minutes"
+            id={`buffer-minutes-${professionalId}`}
             name="buffer_minutes"
             type="number"
             min={0}
@@ -409,10 +574,10 @@ export function ProfessionalSettingsForm({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-2">
-          <Label htmlFor="workday_start">Início do expediente</Label>
+          <Label htmlFor={`workday-start-${professionalId}`}>Início do expediente</Label>
           <Input
             key={`${professionalId}-start`}
-            id="workday_start"
+            id={`workday-start-${professionalId}`}
             name="workday_start"
             type="time"
             defaultValue={workingHours?.start ?? "08:00"}
@@ -421,10 +586,10 @@ export function ProfessionalSettingsForm({
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="workday_end">Fim do expediente</Label>
+          <Label htmlFor={`workday-end-${professionalId}`}>Fim do expediente</Label>
           <Input
             key={`${professionalId}-end`}
-            id="workday_end"
+            id={`workday-end-${professionalId}`}
             name="workday_end"
             type="time"
             defaultValue={workingHours?.end ?? "18:00"}
@@ -457,10 +622,10 @@ export function ProfessionalSettingsForm({
       </fieldset>
 
       <div className="grid gap-2">
-        <Label htmlFor="default_location">Local padrão</Label>
+        <Label htmlFor={`default-location-${professionalId}`}>Local padrão</Label>
         <Input
           key={`${professionalId}-location`}
-          id="default_location"
+          id={`default-location-${professionalId}`}
           name="default_location"
           defaultValue={selectedSettings?.default_location ?? ""}
           disabled={!canSubmit || pending}

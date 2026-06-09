@@ -1,4 +1,5 @@
-import { Activity, CalendarDays, ClipboardCheck, LockKeyhole, UserRound } from "lucide-react";
+import Link from "next/link";
+import { Activity, CalendarDays, LockKeyhole } from "lucide-react";
 import { APPOINTMENT_STATUS_LABELS, APPOINTMENT_STATUSES } from "@/config/schedule";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
@@ -9,18 +10,20 @@ import { AppointmentsBoard } from "@/features/schedule/components/appointments-b
 import { ScheduleCalendar } from "@/features/schedule/components/schedule-calendar";
 import {
   AppointmentForm,
-  ProfessionalSettingsForm,
-  ScheduleBlockForm,
 } from "@/features/schedule/components/schedule-forms";
 import { getTodayInputDate } from "@/lib/dates";
-import { listClinicRooms, listClinicServices } from "@/repositories/registrations";
+import {
+  getRegistrationAccess,
+  listClinicRooms,
+  listClinicServices,
+  listProfessionalOperationalProfiles,
+} from "@/repositories/registrations";
 import {
   getScheduleAccess,
   listAppointments,
   listScheduleBlocks,
   listSchedulePatients,
   listScheduleProfessionals,
-  listScheduleSettings,
 } from "@/repositories/schedule";
 import { getAppUrl } from "@/lib/env";
 import type { AppointmentStatus } from "@/types/domain";
@@ -57,11 +60,12 @@ export default async function AgendaPage({
   const status = normalizeStatus(params.status);
   const confirmationUrlBase = `${getAppUrl()}/confirmar-consulta`;
   const scheduleAccess = await getScheduleAccess(activeClinic?.id);
+  const registrationAccess = await getRegistrationAccess(activeClinic?.id);
   const professionalId = scheduleAccess.canManage
     ? params.professional_id || "all"
     : scheduleAccess.currentMemberId || "all";
 
-  const [professionals, patients, settings, appointments, blocks, services, rooms] =
+  const [professionals, patients, appointments, blocks, services, rooms, professionalProfiles] =
     activeClinic && scheduleAccess.canView
       ? await Promise.all([
           listScheduleProfessionals(activeClinic.id, {
@@ -69,7 +73,6 @@ export default async function AgendaPage({
             access: scheduleAccess,
           }),
           listSchedulePatients(activeClinic.id),
-          listScheduleSettings(activeClinic.id),
           listAppointments(activeClinic.id, {
             startDate: range.startDate,
             endDate: range.endDate,
@@ -83,6 +86,7 @@ export default async function AgendaPage({
           }),
           listClinicServices(activeClinic.id),
           listClinicRooms(activeClinic.id),
+          listProfessionalOperationalProfiles(activeClinic.id, registrationAccess),
         ])
       : [[], [], [], [], [], [], []];
 
@@ -297,6 +301,7 @@ export default async function AgendaPage({
                     patients={patients}
                     services={services}
                     rooms={rooms}
+                    professionalProfiles={professionalProfiles}
                     defaultDate={date}
                     disabled={!scheduleAccess.canManage}
                   />
@@ -305,35 +310,16 @@ export default async function AgendaPage({
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <ClipboardCheck className="size-5 text-primary" />
-                    Bloqueio de horário
-                  </CardTitle>
-                  <CardDescription>Reserve intervalos indisponíveis, férias, almoço ou rotinas administrativas.</CardDescription>
+                  <CardTitle className="text-lg">Configuração profissional</CardTitle>
+                  <CardDescription>
+                    Expediente, disponibilidade, consultório padrão e bloqueios ficam centralizados no cadastro
+                    do profissional.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ScheduleBlockForm
-                    professionals={professionals}
-                    defaultDate={date}
-                    disabled={!scheduleAccess.canManage}
-                  />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <UserRound className="size-5 text-primary" />
-                    Agenda do profissional
-                  </CardTitle>
-                  <CardDescription>Configure janelas, expediente e disponibilidade futura por link.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ProfessionalSettingsForm
-                    professionals={professionals}
-                    settings={settings}
-                    disabled={!scheduleAccess.canManage}
-                  />
+                  <Button asChild variant="outline" className="w-full">
+                    <Link href="/cadastros?section=professionals">Abrir cadastros de profissionais</Link>
+                  </Button>
                 </CardContent>
               </Card>
             </div>

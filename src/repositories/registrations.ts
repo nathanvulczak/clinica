@@ -6,8 +6,10 @@ import type {
   ClinicRoom,
   ClinicService,
   PatientSummary,
+  ProfessionalOperationalProfile,
   ProfessionalAvailabilityRule,
   RegistrationPreferences,
+  ScheduleBlock,
 } from "@/types/domain";
 
 const PATIENT_SELECT =
@@ -310,6 +312,64 @@ export async function getRegistrationPreferences(
   }
 
   return data as RegistrationPreferences | null;
+}
+
+export async function listProfessionalOperationalProfiles(
+  clinicId?: string | null,
+  access?: RegistrationAccess,
+): Promise<ProfessionalOperationalProfile[]> {
+  if (!(await canReadClinic(clinicId)) || !access?.canViewCatalog) {
+    return [];
+  }
+
+  const admin = createSupabaseAdminClient();
+  let query = admin
+    .from("clinic_professional_profiles")
+    .select(
+      "id, clinic_id, professional_member_id, specialty, council_type, council_number, council_state, rqe, bio, appointment_color, default_service_id, default_room_id, telemedicine_enabled, accepts_new_patients, active",
+    )
+    .eq("clinic_id", clinicId as string)
+    .is("deleted_at", null);
+
+  if (!access.canManageSchedule) {
+    if (!access.currentMemberId) {
+      return [];
+    }
+
+    query = query.eq("professional_member_id", access.currentMemberId);
+  }
+
+  const { data, error } = await query;
+  return error ? [] : (data as ProfessionalOperationalProfile[]);
+}
+
+export async function listProfessionalRegistrationBlocks(
+  clinicId?: string | null,
+  access?: RegistrationAccess,
+): Promise<ScheduleBlock[]> {
+  if (!(await canReadClinic(clinicId)) || !access?.canViewCatalog) {
+    return [];
+  }
+
+  const admin = createSupabaseAdminClient();
+  let query = admin
+    .from("schedule_blocks")
+    .select("id, clinic_id, professional_member_id, starts_at, ends_at, block_type, reason")
+    .eq("clinic_id", clinicId as string)
+    .is("deleted_at", null)
+    .order("starts_at", { ascending: false })
+    .limit(250);
+
+  if (!access.canManageSchedule) {
+    if (!access.currentMemberId) {
+      return [];
+    }
+
+    query = query.eq("professional_member_id", access.currentMemberId);
+  }
+
+  const { data, error } = await query;
+  return error ? [] : (data as ScheduleBlock[]);
 }
 
 export { PATIENT_SELECT };

@@ -6,6 +6,7 @@ import { getActiveClinicContext } from "@/features/clinics/context";
 import {
   availabilitySchema,
   patientSchema,
+  professionalProfileSchema,
   registrationDeleteSchema,
   registrationPreferencesSchema,
   roomSchema,
@@ -725,6 +726,139 @@ export async function saveRegistrationPreferencesAction(
   revalidatePath("/cadastros");
   revalidatePath("/auditoria");
   return { success: "Preferências de cadastro atualizadas." };
+}
+
+export async function saveProfessionalProfileAction(
+  _state: RegistrationActionState,
+  formData: FormData,
+): Promise<RegistrationActionState> {
+  const parsed = professionalProfileSchema.safeParse({
+    professional_member_id: formData.get("professional_member_id"),
+    specialty: formData.get("specialty"),
+    council_type: formData.get("council_type"),
+    council_number: formData.get("council_number"),
+    council_state: formData.get("council_state"),
+    rqe: formData.get("rqe"),
+    bio: formData.get("bio"),
+    appointment_color: formData.get("appointment_color"),
+    default_service_id: formData.get("default_service_id"),
+    default_room_id: formData.get("default_room_id"),
+    telemedicine_enabled: formData.get("telemedicine_enabled") ?? "off",
+    accepts_new_patients: formData.get("accepts_new_patients") ?? "off",
+    active: formData.get("active") ?? "off",
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+
+  const context = await getRegistrationContext();
+
+  if ("error" in context) {
+    return { error: context.error };
+  }
+
+  const { activeClinic, user, access } = context;
+  const ownsProfile = access.currentMemberId === parsed.data.professional_member_id;
+
+  if (!access.canEditCatalog && !(access.canManageOwnAvailability && ownsProfile)) {
+    return { error: "Você não possui permissão para editar este cadastro profissional." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: member } = await admin
+    .from("clinic_members")
+    .select("id, role, status")
+    .eq("id", parsed.data.professional_member_id)
+    .eq("clinic_id", activeClinic.id)
+    .eq("status", "active")
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!member || !["clinic_owner", "clinic_admin", "doctor", "nurse", "professional"].includes(member.role)) {
+    return { error: "Profissional ativo não encontrado na clínica atual." };
+  }
+
+  for (const relation of [
+    { table: "clinic_services", id: parsed.data.default_service_id, label: "Serviço" },
+    { table: "clinic_rooms", id: parsed.data.default_room_id, label: "Consultório" },
+  ]) {
+    if (!relation.id) {
+      continue;
+    }
+
+    const { data: related } = await admin
+      .from(relation.table)
+      .select("id")
+      .eq("id", relation.id)
+      .eq("clinic_id", activeClinic.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (!related) {
+      return { error: `${relation.label} padrão não encontrado na clínica ativa.` };
+    }
+  }
+
+  const { data: previous } = await admin
+    .from("clinic_professional_profiles")
+    .select("*")
+    .eq("clinic_id", activeClinic.id)
+    .eq("professional_member_id", parsed.data.professional_member_id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  const payload = {
+    clinic_id: activeClinic.id,
+    professional_member_id: parsed.data.professional_member_id,
+    specialty: parsed.data.specialty,
+    council_type: parsed.data.council_type,
+    council_number: parsed.data.council_number,
+    council_state: parsed.data.council_state,
+    rqe: parsed.data.rqe,
+    bio: parsed.data.bio,
+    appointment_color: parsed.data.appointment_color,
+    default_service_id: parsed.data.default_service_id,
+    default_room_id: parsed.data.default_room_id,
+    telemedicine_enabled: parsed.data.telemedicine_enabled,
+    accepts_new_patients: parsed.data.accepts_new_patients,
+    active: parsed.data.active,
+    updated_by: user.id,
+  };
+
+  const result = previous
+    ? await admin.from("clinic_professional_profiles").update(payload).eq("id", previous.id).select("id").single()
+    : await admin
+        .from("clinic_professional_profiles")
+        .insert({ ...payload, created_by: user.id })
+        .select("id")
+        .single();
+
+  if (result.error || !result.data) {
+    return {
+      error: databaseErrorMessage(
+        result.error,
+        "Não foi possível salvar a ficha profissional. Confirme se a migration 010 foi aplicada.",
+      ),
+    };
+  }
+
+  await logAuditEvent({
+    clinicId: activeClinic.id,
+    userId: user.id,
+    actionType: previous ? "professional_profile_updated" : "professional_profile_created",
+    module: "schedule",
+    recordTable: "clinic_professional_profiles",
+    recordId: result.data.id,
+    oldValues: previous,
+    newValues: payload,
+    notes: "Ficha operacional do profissional atualizada.",
+  });
+
+  revalidatePath("/cadastros");
+  revalidatePath("/agenda");
+  revalidatePath("/auditoria");
+  return { success: "Cadastro profissional atualizado." };
 }
 
 export async function deleteRegistrationAction(

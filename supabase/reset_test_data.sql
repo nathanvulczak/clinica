@@ -23,6 +23,7 @@ begin
     'schedule_blocks',
     'schedule_professional_settings',
     'professional_availability_rules',
+    'clinic_professional_profiles',
     'registration_preferences',
     'clinic_rooms',
     'clinic_services',

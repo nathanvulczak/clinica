@@ -43,7 +43,11 @@ const actionLabels: Record<string, string> = {
   appointment_status_updated: "Status da consulta alterado",
   patient_appointment_confirmed: "Paciente confirmou consulta",
   schedule_block_created: "Bloqueio de agenda criado",
+  schedule_block_updated: "Bloqueio de agenda atualizado",
+  schedule_block_deleted: "Bloqueio de agenda excluído",
   schedule_settings_updated: "Agenda do profissional atualizada",
+  professional_profile_created: "Ficha profissional cadastrada",
+  professional_profile_updated: "Ficha profissional atualizada",
   patient_created: "Paciente cadastrado",
   patient_updated: "Paciente atualizado",
   patient_deleted: "Paciente excluído",
@@ -99,7 +103,11 @@ const actionOptions = [
   ["appointment_status_updated", "Status da consulta"],
   ["patient_appointment_confirmed", "Paciente confirmou"],
   ["schedule_block_created", "Bloqueio de agenda"],
+  ["schedule_block_updated", "Bloqueio atualizado"],
+  ["schedule_block_deleted", "Bloqueio excluído"],
   ["schedule_settings_updated", "Agenda do profissional"],
+  ["professional_profile_created", "Ficha profissional cadastrada"],
+  ["professional_profile_updated", "Ficha profissional atualizada"],
   ["patient_created", "Paciente cadastrado"],
   ["patient_updated", "Paciente atualizado"],
   ["patient_deleted", "Paciente excluído"],
@@ -153,8 +161,8 @@ function getFriendlyDescription(log: SecurityLog) {
     return "Um paciente confirmou a consulta por link público.";
   }
 
-  if (log.action_type === "schedule_block_created") {
-    return "Um bloqueio de horário foi criado na agenda do profissional.";
+  if (log.action_type.startsWith("schedule_block_")) {
+    return "Um bloqueio de horário do profissional foi alterado.";
   }
 
   if (log.action_type === "schedule_settings_updated") {
@@ -175,6 +183,10 @@ function getFriendlyDescription(log: SecurityLog) {
 
   if (log.action_type.startsWith("availability_")) {
     return `Uma regra de disponibilidade profissional foi alterada.${changedFields}`;
+  }
+
+  if (log.action_type.startsWith("professional_profile_")) {
+    return `A ficha operacional do profissional foi alterada.${changedFields}`;
   }
 
   if (log.action_type === "registration_preferences_updated") {
