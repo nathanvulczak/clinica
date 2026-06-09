@@ -1,16 +1,20 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { getAppUrl } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
+  acceptInviteSchema,
   inviteMemberSchema,
   updateMemberPermissionSchema,
+  updateMemberPermissionsSchema,
   updateMemberRoleSchema,
   updateMemberStatusSchema,
 } from "@/features/members/validation";
+import { CRITICAL_PERMISSION_OPTIONS } from "@/config/permissions";
 import { logAuditEvent } from "@/services/audit/audit-service";
 
 export type MemberActionState = {
@@ -95,11 +99,13 @@ export async function inviteMemberAction(
     .maybeSingle();
 
   let targetUserId = existingProfile?.id as string | undefined;
+  const inviteRedirectUrl = new URL("/auth/callback", getAppUrl());
+  inviteRedirectUrl.searchParams.set(
+    "next",
+    `/aceitar-convite?clinic=${encodeURIComponent(activeClinic.id)}`,
+  );
 
   if (!targetUserId) {
-    const inviteRedirectUrl = new URL("/auth/callback", getAppUrl());
-    inviteRedirectUrl.searchParams.set("next", "/login?invite=accepted");
-
     const { data: invitedUser, error: inviteError } = await admin.auth.admin.inviteUserByEmail(parsed.data.email, {
       redirectTo: inviteRedirectUrl.toString(),
       data: {
@@ -154,6 +160,22 @@ export async function inviteMemberAction(
     .eq("user_id", targetUserId)
     .maybeSingle();
 
+  const { data: targetAuth } = await admin.auth.admin.getUserById(targetUserId);
+  const hasConfirmedAccount = Boolean(targetAuth.user?.email_confirmed_at);
+  const shouldRemainInvited =
+    !existingProfile || previousMembership?.status === "invited" || !hasConfirmedAccount;
+  const nextStatus = shouldRemainInvited ? "invited" : "active";
+
+  if (existingProfile && shouldRemainInvited) {
+    const { error: resendError } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {
+      redirectTo: inviteRedirectUrl.toString(),
+    });
+
+    if (resendError) {
+      return { error: `Não foi possível reenviar o acesso: ${resendError.message}` };
+    }
+  }
+
   const { data: membership, error: memberError } = await admin
     .from("clinic_members")
     .upsert(
@@ -161,8 +183,8 @@ export async function inviteMemberAction(
         clinic_id: activeClinic.id,
         user_id: targetUserId,
         role: parsed.data.role,
-        status: existingProfile ? "active" : "invited",
-        joined_at: existingProfile ? new Date().toISOString() : null,
+        status: nextStatus,
+        joined_at: nextStatus === "active" ? new Date().toISOString() : null,
         invited_by: user.id,
         created_by: user.id,
         updated_by: user.id,
@@ -179,7 +201,7 @@ export async function inviteMemberAction(
   await logAuditEvent({
     clinicId: activeClinic.id,
     userId: user.id,
-    actionType: previousMembership ? "member_updated" : existingProfile ? "member_added" : "member_invited",
+    actionType: previousMembership ? "member_updated" : nextStatus === "active" ? "member_added" : "member_invited",
     module: "members",
     recordTable: "clinic_members",
     recordId: membership.id,
@@ -192,13 +214,101 @@ export async function inviteMemberAction(
     newValues: {
       email: parsed.data.email,
       role: parsed.data.role,
-      status: existingProfile ? "active" : "invited",
+      status: nextStatus,
     },
-    notes: existingProfile ? "Usuário existente vinculado à clínica." : "Usuário convidado e vinculado à clínica.",
+    notes:
+      nextStatus === "active"
+        ? "Usuário existente vinculado à clínica."
+        : existingProfile
+          ? "Acesso pendente reenviado ao usuário convidado."
+          : "Usuário convidado e vinculado à clínica.",
   });
 
   revalidatePath("/usuarios");
-  return { success: existingProfile ? "Usuário cadastrado e vinculado à clínica." : "Usuário convidado por e-mail." };
+  return {
+    success:
+      nextStatus === "active"
+        ? "Usuário cadastrado e vinculado à clínica."
+        : existingProfile
+          ? "Convite pendente reenviado por e-mail."
+          : "Usuário convidado por e-mail.",
+  };
+}
+
+export async function acceptInviteAction(
+  _state: MemberActionState,
+  formData: FormData,
+): Promise<MemberActionState> {
+  const parsed = acceptInviteSchema.safeParse({
+    clinic_id: formData.get("clinic_id"),
+    password: formData.get("password"),
+    password_confirm: formData.get("password_confirm"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "O convite expirou. Solicite um novo convite à clínica." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: membership } = await admin
+    .from("clinic_members")
+    .select("id, clinic_id, role, status")
+    .eq("clinic_id", parsed.data.clinic_id)
+    .eq("user_id", user.id)
+    .in("status", ["invited", "active"])
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!membership) {
+    return { error: "Este convite não está mais disponível para o seu usuário." };
+  }
+
+  const { error: passwordError } = await supabase.auth.updateUser({
+    password: parsed.data.password,
+  });
+
+  if (passwordError) {
+    return { error: `Não foi possível definir a senha: ${passwordError.message}` };
+  }
+
+  const joinedAt = new Date().toISOString();
+  const membershipUpdate =
+    membership.status === "active"
+      ? { status: "active" as const, updated_by: user.id }
+      : { status: "active" as const, joined_at: joinedAt, updated_by: user.id };
+  const { error: membershipError } = await admin
+    .from("clinic_members")
+    .update(membershipUpdate)
+    .eq("id", membership.id);
+
+  if (membershipError) {
+    return { error: "A senha foi definida, mas não foi possível ativar o acesso à clínica." };
+  }
+
+  await logAuditEvent({
+    clinicId: membership.clinic_id,
+    userId: user.id,
+    actionType: "member_invite_accepted",
+    module: "members",
+    recordTable: "clinic_members",
+    recordId: membership.id,
+    oldValues: { status: membership.status },
+    newValues: { status: "active", joined_at: joinedAt },
+    level: "security",
+    notes: "Convite aceito e senha inicial definida pelo usuário.",
+  });
+
+  revalidatePath("/usuarios");
+  redirect("/dashboard?invite=accepted");
 }
 
 export async function updateMemberRoleAction(
@@ -471,4 +581,131 @@ export async function updateMemberPermissionAction(
   revalidatePath("/usuarios");
   revalidatePath("/auditoria");
   return { success: parsed.data.enabled ? "Permissão individual liberada." : "Permissão individual removida." };
+}
+
+export async function updateMemberPermissionsAction(
+  _state: MemberActionState,
+  formData: FormData,
+): Promise<MemberActionState> {
+  const parsed = updateMemberPermissionsSchema.safeParse({
+    member_id: formData.get("member_id"),
+    permissions: formData.getAll("permissions").map(String),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Sessão expirada. Faça login novamente." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: member } = await admin
+    .from("clinic_members")
+    .select("id, clinic_id, user_id, role")
+    .eq("id", parsed.data.member_id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!member || !(await canManagePermissions(member.clinic_id))) {
+    return { error: "Você não possui permissão para gerenciar permissões nesta clínica." };
+  }
+
+  if (member.role === "clinic_owner") {
+    return { error: "O proprietário já possui acesso total por definição." };
+  }
+
+  const allowedKeys = new Set(
+    CRITICAL_PERMISSION_OPTIONS.map((option) => `${option.module}:${option.action}`),
+  );
+  const selectedKeys = new Set(parsed.data.permissions.filter((key) => allowedKeys.has(key)));
+
+  const { data: existingPermissions, error: listError } = await admin
+    .from("member_permissions")
+    .select("id, module, action, allowed, deleted_at")
+    .eq("clinic_id", member.clinic_id)
+    .eq("member_id", member.id);
+
+  if (listError) {
+    return { error: "Não foi possível consultar as permissões atuais." };
+  }
+
+  const currentKeys = new Set(
+    (existingPermissions ?? [])
+      .filter((permission) => permission.allowed && !permission.deleted_at)
+      .map((permission) => `${permission.module}:${permission.action}`),
+  );
+
+  const changed = [...allowedKeys].some(
+    (key) => selectedKeys.has(key) !== currentKeys.has(key),
+  );
+
+  if (!changed) {
+    return { success: "Nenhuma alteração necessária." };
+  }
+
+  for (const option of CRITICAL_PERMISSION_OPTIONS) {
+    const key = `${option.module}:${option.action}`;
+    const shouldEnable = selectedKeys.has(key);
+    const existing = (existingPermissions ?? []).find(
+      (permission) => permission.module === option.module && permission.action === option.action,
+    );
+
+    if (shouldEnable && (!existing?.allowed || existing.deleted_at)) {
+      const { error } = await admin.from("member_permissions").upsert(
+        {
+          clinic_id: member.clinic_id,
+          member_id: member.id,
+          module: option.module,
+          action: option.action,
+          allowed: true,
+          reason: "Permissão individual configurada pelo painel de usuários.",
+          deleted_at: null,
+          created_by: user.id,
+          updated_by: user.id,
+        },
+        { onConflict: "clinic_id,member_id,module,action" },
+      );
+
+      if (error) {
+        return { error: "Não foi possível salvar todas as permissões selecionadas." };
+      }
+    } else if (existing?.allowed && !existing.deleted_at) {
+      const { error } = await admin
+        .from("member_permissions")
+        .update({
+          allowed: false,
+          deleted_at: new Date().toISOString(),
+          updated_by: user.id,
+        })
+        .eq("id", existing.id);
+
+      if (error) {
+        return { error: "Não foi possível remover todas as permissões desmarcadas." };
+      }
+    }
+  }
+
+  await logAuditEvent({
+    clinicId: member.clinic_id,
+    userId: user.id,
+    actionType: "member_permissions_updated",
+    module: "permissions",
+    recordTable: "member_permissions",
+    recordId: member.id,
+    oldValues: { permissions: [...currentKeys].sort() },
+    newValues: { permissions: [...selectedKeys].sort() },
+    level: "security",
+    notes: "Conjunto de permissões individuais do membro atualizado.",
+  });
+
+  revalidatePath("/usuarios");
+  revalidatePath("/auditoria");
+  return { success: "Permissões individuais atualizadas." };
 }

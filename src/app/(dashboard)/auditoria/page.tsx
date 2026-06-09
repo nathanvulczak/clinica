@@ -21,12 +21,14 @@ const actionLabels: Record<string, string> = {
   record_deleted: "Registro excluído",
   clinic_created: "Clínica cadastrada",
   member_invited: "Convite enviado",
+  member_invite_accepted: "Convite aceito",
   member_added: "Usuário vinculado",
   member_updated: "Usuário atualizado",
   member_role_updated: "Perfil de usuário alterado",
   member_suspended: "Usuário suspenso",
   member_status_updated: "Status de usuário alterado",
   member_permission_updated: "Permissão individual alterada",
+  member_permissions_updated: "Permissões individuais atualizadas",
   clinic_updated: "Clínica atualizada",
   profile_updated: "Perfil atualizado",
   avatar_uploaded: "Imagem de perfil alterada",
@@ -182,6 +184,7 @@ const fieldLabels: Record<string, string> = {
   valid_until: "Válido até",
   start_time: "Horário inicial",
   end_time: "Horário final",
+  permissions: "Permissões individuais",
 };
 
 function formatJson(value: Record<string, unknown> | null) {

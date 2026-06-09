@@ -60,6 +60,22 @@ export const updateMemberPermissionSchema = z.object({
   enabled: z.enum(["true", "false"]).transform((value) => value === "true"),
 });
 
+export const updateMemberPermissionsSchema = z.object({
+  member_id: z.string().uuid(),
+  permissions: z.array(z.string()),
+});
+
 export const removeMemberSchema = z.object({
   member_id: z.string().uuid(),
 });
+
+export const acceptInviteSchema = z
+  .object({
+    clinic_id: z.string().uuid("Clínica do convite não identificada."),
+    password: z.string().min(8, "A senha deve ter pelo menos 8 caracteres."),
+    password_confirm: z.string().min(8, "Confirme a senha."),
+  })
+  .refine((data) => data.password === data.password_confirm, {
+    message: "As senhas não conferem.",
+    path: ["password_confirm"],
+  });

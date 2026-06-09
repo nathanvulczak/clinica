@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
-import { UserPlus } from "lucide-react";
+import { LoaderCircle, UserPlus } from "lucide-react";
 import { ROLE_LABELS } from "@/config/permissions";
 import { inviteMemberAction } from "@/features/members/actions";
 import { formatCpf, formatPhone, normalizeEmail } from "@/lib/formatters";
@@ -20,7 +20,13 @@ const inviteRoles = [
   "professional",
 ] as const;
 
-export function InviteMemberForm({ disabled }: { disabled?: boolean }) {
+export function InviteMemberForm({
+  disabled,
+  onCompleted,
+}: {
+  disabled?: boolean;
+  onCompleted?: () => void;
+}) {
   const [state, formAction, pending] = useActionState(inviteMemberAction, {});
   const [cpf, setCpf] = useState("");
   const [phone, setPhone] = useState("");
@@ -30,18 +36,19 @@ export function InviteMemberForm({ disabled }: { disabled?: boolean }) {
   useEffect(() => {
     if (state.success) {
       toast({ title: state.success, description: "O vínculo foi registrado na clínica ativa." });
+      onCompleted?.();
     }
 
     if (state.error) {
       toast({ title: "Cadastro não concluído", description: state.error, variant: "destructive" });
     }
-  }, [state.error, state.success, toast]);
+  }, [onCompleted, state.error, state.success, toast]);
 
   return (
     <form action={formAction} className="grid gap-4">
       <div className="grid gap-2">
         <Label htmlFor="full_name">Nome completo</Label>
-        <Input id="full_name" name="full_name" disabled={disabled} required />
+        <Input id="full_name" name="full_name" disabled={disabled || pending} required />
       </div>
       <div className="grid gap-2">
         <Label htmlFor="email">E-mail</Label>
@@ -51,7 +58,7 @@ export function InviteMemberForm({ disabled }: { disabled?: boolean }) {
           type="email"
           value={email}
           onChange={(event) => setEmail(normalizeEmail(event.target.value))}
-          disabled={disabled}
+          disabled={disabled || pending}
           required
         />
       </div>
@@ -64,7 +71,7 @@ export function InviteMemberForm({ disabled }: { disabled?: boolean }) {
             inputMode="numeric"
             value={cpf}
             onChange={(event) => setCpf(formatCpf(event.target.value))}
-            disabled={disabled}
+            disabled={disabled || pending}
             required
           />
         </div>
@@ -76,13 +83,13 @@ export function InviteMemberForm({ disabled }: { disabled?: boolean }) {
             inputMode="tel"
             value={phone}
             onChange={(event) => setPhone(formatPhone(event.target.value))}
-            disabled={disabled}
+            disabled={disabled || pending}
           />
         </div>
       </div>
       <div className="grid gap-2">
         <Label htmlFor="role">Perfil na clínica</Label>
-        <Select id="role" name="role" defaultValue="professional" disabled={disabled}>
+        <Select id="role" name="role" defaultValue="professional" disabled={disabled || pending}>
           {inviteRoles.map((role) => (
             <option key={role} value={role}>
               {ROLE_LABELS[role]}
@@ -93,7 +100,7 @@ export function InviteMemberForm({ disabled }: { disabled?: boolean }) {
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
       {state.success ? <p className="text-sm text-primary">{state.success}</p> : null}
       <Button disabled={pending || disabled}>
-        <UserPlus />
+        {pending ? <LoaderCircle className="animate-spin" /> : <UserPlus />}
         {pending ? "Cadastrando..." : "Cadastrar usuário"}
       </Button>
     </form>

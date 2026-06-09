@@ -28,12 +28,14 @@ const actionLabels: Record<string, string> = {
   preferences_updated: "Preferências atualizadas",
   clinic_created: "Clínica cadastrada",
   member_invited: "Convite enviado",
+  member_invite_accepted: "Convite aceito",
   member_added: "Usuário vinculado",
   member_updated: "Usuário atualizado",
   member_role_updated: "Perfil de usuário alterado",
   member_suspended: "Usuário suspenso",
   member_status_updated: "Status de usuário alterado",
   member_permission_updated: "Permissão individual alterada",
+  member_permissions_updated: "Permissões individuais atualizadas",
   clinic_updated: "Clínica atualizada",
   record_created: "Registro criado",
   record_updated: "Registro atualizado",
@@ -89,12 +91,14 @@ const actionOptions = [
   ["clinic_created", "Clínica criada"],
   ["clinic_updated", "Clínica atualizada"],
   ["member_invited", "Convite enviado"],
+  ["member_invite_accepted", "Convite aceito"],
   ["member_added", "Usuário vinculado"],
   ["member_updated", "Usuário atualizado"],
   ["member_role_updated", "Perfil alterado"],
   ["member_suspended", "Usuário suspenso"],
   ["member_status_updated", "Status alterado"],
   ["member_permission_updated", "Permissão alterada"],
+  ["member_permissions_updated", "Permissões atualizadas"],
   ["record_created", "Registro criado"],
   ["record_updated", "Registro atualizado"],
   ["record_deleted", "Registro excluído"],
@@ -197,8 +201,15 @@ function getFriendlyDescription(log: SecurityLog) {
     return "Uma exportação de cadastros foi gerada.";
   }
 
-  if (log.action_type === "member_permission_updated") {
+  if (
+    log.action_type === "member_permission_updated" ||
+    log.action_type === "member_permissions_updated"
+  ) {
     return `Uma permissão individual vinculada ao usuário foi alterada.${changedFields}`;
+  }
+
+  if (log.action_type === "member_invite_accepted") {
+    return "O convite foi aceito e o acesso à clínica foi ativado com senha própria.";
   }
 
   if (log.action_type === "member_status_updated" || log.action_type === "member_suspended") {

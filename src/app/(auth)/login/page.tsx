@@ -7,9 +7,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ next?: string; invite?: string }>;
 }) {
   const params = await searchParams;
+  const inviteMessage =
+    params.invite === "expired"
+      ? "O link do convite expirou. Solicite um novo acesso ao administrador da clínica."
+      : params.invite === "invalid"
+        ? "Este convite não está mais disponível ou não pertence ao usuário autenticado."
+        : null;
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
@@ -25,6 +31,11 @@ export default async function LoginPage({
           <CardDescription>Acesse o painel da sua clínica.</CardDescription>
         </CardHeader>
         <CardContent>
+          {inviteMessage ? (
+            <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800">
+              {inviteMessage}
+            </div>
+          ) : null}
           <LoginForm next={params.next} />
           <p className="mt-5 text-center text-sm text-muted-foreground">
             Ainda não tem conta?{" "}

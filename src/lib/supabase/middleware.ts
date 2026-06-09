@@ -11,6 +11,7 @@ const protectedPrefixes = [
   "/auditoria",
   "/perfil",
   "/agenda",
+  "/aceitar-convite",
 ];
 const authPrefixes = ["/login", "/cadastro"];
 const subscriptionRequiredPrefixes = ["/dashboard", "/clinicas", "/cadastros", "/usuarios", "/auditoria", "/agenda"];
@@ -133,19 +134,7 @@ export async function updateSession(request: NextRequest) {
   const shouldCheckSubscription = Boolean(userId && (requiresSubscription || isAuthPage));
 
   if (shouldCheckSubscription) {
-    const { data: subscription } = await supabase
-      .from("subscriptions")
-      .select("status, current_period_end")
-      .eq("owner_user_id", userId as string)
-      .maybeSingle();
-
-    const status = subscription?.status;
-    const canAccess =
-      status === "active" ||
-      status === "trialing" ||
-      (status === "past_due" &&
-        subscription?.current_period_end &&
-        new Date(subscription.current_period_end).getTime() > Date.now());
+    const { data: canAccess } = await supabase.rpc("user_has_billable_access");
 
     if (isAuthPage) {
       const redirectUrl = request.nextUrl.clone();

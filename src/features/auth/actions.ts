@@ -97,6 +97,14 @@ export async function signInAction(_state: AuthState, formData: FormData): Promi
     redirect(next);
   }
 
+  const { data: linkedClinicAccess } = user
+    ? await supabase.rpc("user_has_billable_access")
+    : { data: false };
+
+  if (linkedClinicAccess === true) {
+    redirect(next.startsWith("/") ? next : "/dashboard");
+  }
+
   let repairedSubscription = subscription;
 
   if (user && !hasBillableAccess(repairedSubscription)) {
