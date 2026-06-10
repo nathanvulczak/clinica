@@ -8,6 +8,7 @@ import type {
   AppRole,
   AppointmentStatus,
   AppointmentSummary,
+  AppointmentWorkflowEvent,
   ClinicRoom,
   ClinicService,
   PatientSummary,
@@ -360,6 +361,28 @@ export async function listAppointments(
     service: appointment.service_id ? servicesById.get(appointment.service_id) ?? null : null,
     room: appointment.room_id ? roomsById.get(appointment.room_id) ?? null : null,
   }));
+}
+
+export async function listAppointmentWorkflowEvents(
+  clinicId: string | null | undefined,
+  appointmentIds: string[],
+): Promise<AppointmentWorkflowEvent[]> {
+  const access = await getScheduleAccess(clinicId);
+
+  if (!(await canReadClinic(clinicId)) || !access.canView || appointmentIds.length === 0) {
+    return [];
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin
+    .from("appointment_workflow_events")
+    .select("id, clinic_id, appointment_id, from_status, to_status, notes, created_at")
+    .eq("clinic_id", clinicId as string)
+    .in("appointment_id", appointmentIds)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
+
+  return error ? [] : (data as AppointmentWorkflowEvent[]);
 }
 
 export function isOperationalAppointmentStatus(status: AppointmentStatus) {

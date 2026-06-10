@@ -1,23 +1,25 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Clock, Link2, RefreshCw, UserRound } from "lucide-react";
+import { Clock, MapPin, Stethoscope, UserRound } from "lucide-react";
 import {
-  APPOINTMENT_STATUS_HELP,
   APPOINTMENT_STATUS_LABELS,
-  APPOINTMENT_STATUSES,
   SCHEDULE_BLOCK_TYPE_LABELS,
 } from "@/config/schedule";
-import { updateAppointmentStatusAction } from "@/features/schedule/actions";
-import { formatDateTimeBr, formatTimeBr } from "@/lib/dates";
+import { AppointmentDetailsModal } from "@/features/schedule/components/appointment-details-modal";
+import { formatTimeBr } from "@/lib/dates";
 import { cn } from "@/lib/utils";
-import type { AppointmentSummary, ScheduleBlock, ScheduleProfessional } from "@/types/domain";
-import { useToast } from "@/components/ui/toast";
+import type {
+  AppointmentSummary,
+  AppointmentWorkflowEvent,
+  ClinicRoom,
+  ClinicService,
+  PatientSummary,
+  ProfessionalOperationalProfile,
+  ScheduleBlock,
+  ScheduleProfessional,
+  ScheduleSettings,
+} from "@/types/domain";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
 
 function professionalName(professionals: ScheduleProfessional[], professionalId: string) {
   return (
@@ -44,6 +46,12 @@ export function AppointmentsBoard({
   appointments,
   blocks,
   professionals,
+  patients,
+  services,
+  rooms,
+  professionalProfiles,
+  scheduleSettings,
+  workflowEvents,
   canManage,
   canUpdateStatus,
   confirmationUrlBase,
@@ -51,6 +59,12 @@ export function AppointmentsBoard({
   appointments: AppointmentSummary[];
   blocks: ScheduleBlock[];
   professionals: ScheduleProfessional[];
+  patients: PatientSummary[];
+  services: ClinicService[];
+  rooms: ClinicRoom[];
+  professionalProfiles: ProfessionalOperationalProfile[];
+  scheduleSettings: ScheduleSettings[];
+  workflowEvents: AppointmentWorkflowEvent[];
   canManage: boolean;
   canUpdateStatus: boolean;
   confirmationUrlBase: string;
@@ -59,82 +73,100 @@ export function AppointmentsBoard({
     <div className="grid gap-6">
       <section className="grid gap-3">
         {appointments.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-            Nenhum compromisso encontrado para os filtros atuais.
+          <div className="rounded-md border border-dashed bg-muted/20 px-6 py-10 text-center">
+            <CalendarEmptyState />
           </div>
         ) : (
-          appointments.map((appointment) => (
-            <article key={appointment.id} className="rounded-lg border bg-card p-4 shadow-sm">
-              <div className="grid gap-4 xl:grid-cols-[180px_1fr_360px] xl:items-start">
-                <div className="grid gap-2">
-                  <div className="flex items-center gap-2 text-2xl font-semibold">
-                    <Clock className="size-5 text-primary" />
-                    {formatTimeBr(appointment.starts_at)}
+          <div className="overflow-hidden rounded-md border">
+            <div className="hidden grid-cols-[110px_minmax(220px,1.3fr)_minmax(190px,1fr)_minmax(170px,0.8fr)_150px_110px] gap-4 border-b bg-muted/60 px-4 py-2.5 text-xs font-medium uppercase text-muted-foreground xl:grid">
+              <span>Horário</span>
+              <span>Paciente</span>
+              <span>Profissional</span>
+              <span>Serviço / local</span>
+              <span>Status</span>
+              <span className="text-right">Ações</span>
+            </div>
+            <div className="divide-y">
+              {appointments.map((appointment) => (
+                <article
+                  key={appointment.id}
+                  className="grid min-w-0 gap-4 bg-card px-4 py-4 transition-colors hover:bg-muted/20 xl:grid-cols-[110px_minmax(220px,1.3fr)_minmax(190px,1fr)_minmax(170px,0.8fr)_150px_110px] xl:items-center"
+                >
+                  <div>
+                    <p className="flex items-center gap-2 text-lg font-semibold">
+                      <Clock className="size-4 text-primary" />
+                      {formatTimeBr(appointment.starts_at)}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      até {formatTimeBr(appointment.ends_at)}
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    até {formatTimeBr(appointment.ends_at)}
-                  </p>
-                  <Badge className={statusBadgeClass(appointment.status)}>
-                    {APPOINTMENT_STATUS_LABELS[appointment.status]}
-                  </Badge>
-                </div>
 
-                <div className="grid min-w-0 gap-3">
-                  <div className="flex min-w-0 gap-3">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                      <UserRound className="size-5" />
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                      <UserRound className="size-4" />
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate font-medium">{appointment.patient?.full_name ?? "Paciente não localizado"}</p>
-                      <p className="mt-1 truncate text-sm text-muted-foreground">
-                        {appointment.appointment_type} • {appointment.channel}
+                      <p className="truncate font-medium">
+                        {appointment.patient?.social_name ||
+                          appointment.patient?.full_name ||
+                          "Paciente não localizado"}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {appointment.patient?.phone ?? "Telefone não informado"}
                       </p>
                     </div>
                   </div>
 
-                  <div className="grid gap-2 rounded-md border bg-background p-3 text-sm md:grid-cols-2">
-                    <div>
-                      <p className="text-xs font-medium uppercase text-muted-foreground">Profissional</p>
-                      <p className="mt-1">{appointment.professional?.profile?.full_name ?? "Não informado"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium uppercase text-muted-foreground">Confirmação</p>
-                      <p className="mt-1">
-                        {appointment.confirmed_at ? formatDateTimeBr(appointment.confirmed_at) : "Aguardando paciente"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium uppercase text-muted-foreground">Serviço</p>
-                      <p className="mt-1">{appointment.service?.name ?? appointment.appointment_type}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium uppercase text-muted-foreground">Consultório</p>
-                      <p className="mt-1">{appointment.room?.name ?? "A definir"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium uppercase text-muted-foreground">Telefone</p>
-                      <p className="mt-1">{appointment.patient?.phone ?? "Não informado"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium uppercase text-muted-foreground">E-mail</p>
-                      <p className="mt-1 break-words">{appointment.patient?.email ?? "Não informado"}</p>
-                    </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {appointment.professional?.profile?.full_name ?? "Não informado"}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {appointment.channel}
+                    </p>
                   </div>
 
-                  <p className="text-sm text-muted-foreground">
-                    {appointment.notes || APPOINTMENT_STATUS_HELP[appointment.status]}
-                  </p>
+                  <div className="grid min-w-0 gap-1">
+                    <p className="flex min-w-0 items-center gap-2 truncate text-sm">
+                      <Stethoscope className="size-3.5 shrink-0 text-primary" />
+                      <span className="truncate">
+                        {appointment.service?.name ?? appointment.appointment_type}
+                      </span>
+                    </p>
+                    <p className="flex min-w-0 items-center gap-2 truncate text-xs text-muted-foreground">
+                      <MapPin className="size-3.5 shrink-0" />
+                      <span className="truncate">{appointment.room?.name ?? "Local a definir"}</span>
+                    </p>
+                  </div>
 
-                  <CopyConfirmationLink
-                    url={`${confirmationUrlBase}/${appointment.confirmation_token}`}
-                    disabled={!canManage}
-                  />
-                </div>
+                  <div>
+                    <Badge className={statusBadgeClass(appointment.status)}>
+                      {APPOINTMENT_STATUS_LABELS[appointment.status]}
+                    </Badge>
+                  </div>
 
-                <AppointmentStatusForm appointment={appointment} disabled={!canUpdateStatus} />
-              </div>
-            </article>
-          ))
+                  <div className="flex justify-end">
+                    <AppointmentDetailsModal
+                      appointment={appointment}
+                      workflowEvents={workflowEvents.filter(
+                        (event) => event.appointment_id === appointment.id,
+                      )}
+                      professionals={professionals}
+                      patients={patients}
+                      services={services}
+                      rooms={rooms}
+                      professionalProfiles={professionalProfiles}
+                      scheduleSettings={scheduleSettings}
+                      canManage={canManage}
+                      canUpdateStatus={canUpdateStatus}
+                      confirmationUrl={`${confirmationUrlBase}/${appointment.confirmation_token}`}
+                    />
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
         )}
       </section>
 
@@ -144,19 +176,19 @@ export function AppointmentsBoard({
           <Badge>{blocks.length}</Badge>
         </div>
         {blocks.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          <div className="rounded-md border border-dashed bg-muted/20 p-5 text-sm text-muted-foreground">
             Nenhum bloqueio cadastrado para os filtros atuais.
           </div>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 xl:grid-cols-2">
             {blocks.map((block) => (
-              <div key={block.id} className="rounded-lg border bg-card p-4 text-sm shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
+              <div key={block.id} className="rounded-md border bg-card p-4 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
                     <p className="font-medium">
                       {formatTimeBr(block.starts_at)} até {formatTimeBr(block.ends_at)}
                     </p>
-                    <p className="mt-1 text-muted-foreground">
+                    <p className="mt-1 truncate text-muted-foreground">
                       {professionalName(professionals, block.professional_member_id)}
                     </p>
                   </div>
@@ -172,94 +204,16 @@ export function AppointmentsBoard({
   );
 }
 
-function CopyConfirmationLink({ url, disabled }: { url: string; disabled?: boolean }) {
-  const { toast } = useToast();
-
+function CalendarEmptyState() {
   return (
-    <div className="flex flex-col gap-2 rounded-md border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <p className="text-xs font-medium uppercase text-muted-foreground">Link do paciente</p>
-        <p className="mt-1 truncate text-sm text-muted-foreground">{url}</p>
+    <div className="mx-auto grid max-w-sm justify-items-center gap-2">
+      <div className="flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">
+        <Clock className="size-5" />
       </div>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={disabled}
-        onClick={async () => {
-          await navigator.clipboard.writeText(url);
-          toast({ title: "Link copiado", description: "Envie ao paciente para confirmação da consulta." });
-        }}
-      >
-        <Link2 />
-        Copiar
-      </Button>
+      <p className="font-medium">Nenhum compromisso neste período</p>
+      <p className="text-sm leading-6 text-muted-foreground">
+        Ajuste os filtros ou utilize “Novo compromisso” para iniciar a agenda.
+      </p>
     </div>
-  );
-}
-
-function AppointmentStatusForm({
-  appointment,
-  disabled,
-}: {
-  appointment: AppointmentSummary;
-  disabled?: boolean;
-}) {
-  const { toast } = useToast();
-  const formRef = useRef<HTMLFormElement>(null);
-  const [open, setOpen] = useState(false);
-  const [state, formAction, pending] = useActionState(updateAppointmentStatusAction, {});
-
-  useEffect(() => {
-    if (state.success) {
-      toast({ title: state.success, description: "O fluxo operacional foi atualizado e auditado." });
-    }
-
-    if (state.error) {
-      toast({ title: "Status não atualizado", description: state.error, variant: "destructive" });
-    }
-  }, [state.error, state.success, toast]);
-
-  return (
-    <form ref={formRef} action={formAction} className="grid gap-3 rounded-md border bg-background p-3">
-      <input type="hidden" name="appointment_id" value={appointment.id} />
-      <div className="grid gap-2">
-        <Label htmlFor={`status-${appointment.id}`}>Atualizar etapa</Label>
-        <Select
-          id={`status-${appointment.id}`}
-          name="status"
-          defaultValue={appointment.status}
-          disabled={disabled || pending}
-        >
-          {APPOINTMENT_STATUSES.map((status) => (
-            <option key={status} value={status}>
-              {APPOINTMENT_STATUS_LABELS[status]}
-            </option>
-          ))}
-        </Select>
-      </div>
-      <div className="grid gap-2">
-        <Label htmlFor={`notes-${appointment.id}`}>Observação da etapa</Label>
-        <textarea
-          id={`notes-${appointment.id}`}
-          name="notes"
-          className="min-h-20 rounded-md border bg-card px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          disabled={disabled || pending}
-          placeholder="Motivo de cancelamento, orientação ou observação interna"
-        />
-      </div>
-      <Button type="button" variant="outline" disabled={disabled || pending} onClick={() => setOpen(true)}>
-        {pending ? <RefreshCw /> : <CheckCircle2 />}
-        {pending ? "Atualizando..." : "Aplicar etapa"}
-      </Button>
-      <ConfirmDialog
-        open={open}
-        onOpenChange={setOpen}
-        title="Atualizar etapa da consulta?"
-        description="A alteração será registrada na auditoria e poderá liberar os próximos fluxos operacionais."
-        confirmLabel="Atualizar etapa"
-        onConfirm={() => formRef.current?.requestSubmit()}
-      />
-    </form>
   );
 }

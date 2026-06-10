@@ -18,6 +18,7 @@ import {
 } from "@/repositories/registrations";
 import {
   getScheduleAccess,
+  listAppointmentWorkflowEvents,
   listAppointments,
   listScheduleBlocks,
   listSchedulePatients,
@@ -98,6 +99,13 @@ export default async function AgendaPage({
           listScheduleSettings(activeClinic.id),
         ])
       : [[], [], [], [], [], [], [], []];
+  const workflowEvents =
+    activeClinic && scheduleAccess.canView
+      ? await listAppointmentWorkflowEvents(
+          activeClinic.id,
+          appointments.map((appointment) => appointment.id),
+        )
+      : [];
 
   const confirmedCount = appointments.filter((appointment) =>
     ["confirmed", "checked_in", "in_triage", "in_progress"].includes(appointment.status),
@@ -286,6 +294,12 @@ export default async function AgendaPage({
                   appointments={appointments}
                   blocks={blocks}
                   professionals={professionals}
+                  patients={patients}
+                  services={services}
+                  rooms={rooms}
+                  professionalProfiles={professionalProfiles}
+                  scheduleSettings={scheduleSettings}
+                  workflowEvents={workflowEvents}
                   canManage={scheduleAccess.canManage}
                   canUpdateStatus={scheduleAccess.canManage || scheduleAccess.canOperateOwn}
                   confirmationUrlBase={confirmationUrlBase}

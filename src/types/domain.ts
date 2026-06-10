@@ -290,10 +290,27 @@ export type AppointmentSummary = {
   confirmation_token: string;
   confirmation_sent_at: string | null;
   confirmed_at: string | null;
+  checked_in_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  cancelled_at?: string | null;
+  no_show_at?: string | null;
+  last_notification_at?: string | null;
+  rescheduled_from_id?: string | null;
   cancellation_reason: string | null;
   notes: string | null;
   patient: PatientSummary | null;
   professional: ScheduleProfessional | null;
   service: ClinicService | null;
   room: ClinicRoom | null;
+};
+
+export type AppointmentWorkflowEvent = {
+  id: string;
+  clinic_id: string;
+  appointment_id: string;
+  from_status: AppointmentStatus | null;
+  to_status: AppointmentStatus;
+  notes: string | null;
+  created_at: string;
 };

@@ -14,6 +14,8 @@ const checks = [
   "STRIPE_PRICE_MASTER",
 ] as const;
 
+const optionalChecks = ["RESEND_API_KEY", "RESEND_FROM_EMAIL"] as const;
+
 function statusFor(value?: string) {
   if (!value) return "missing";
   if (/temporario|placeholder|missing|xxx|sua_|seu_/i.test(value)) return "placeholder";
@@ -24,6 +26,9 @@ export function GET() {
   return NextResponse.json({
     ok: checks.every((key) => statusFor(process.env[key]) === "present"),
     env: Object.fromEntries(checks.map((key) => [key, statusFor(process.env[key])])),
+    optional_env: Object.fromEntries(
+      optionalChecks.map((key) => [key, statusFor(process.env[key])]),
+    ),
     stripe_webhook_endpoint: `${getAppUrl()}/api/stripe/webhook`,
   });
 }

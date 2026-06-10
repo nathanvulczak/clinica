@@ -50,6 +50,20 @@ export const APPOINTMENT_STATUS_HELP: Record<AppointmentStatus, string> = {
   billed: "Cobrança concluída no financeiro.",
 };
 
+export const APPOINTMENT_STATUS_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
+  scheduled: ["confirmed", "checked_in", "cancelled", "no_show"],
+  confirmed: ["checked_in", "cancelled", "no_show"],
+  checked_in: ["in_triage", "in_progress", "cancelled"],
+  in_triage: ["in_progress", "cancelled"],
+  in_progress: ["completed"],
+  completed: ["billing_pending"],
+  billing_pending: ["billed"],
+  cancelled: [],
+  no_show: [],
+  rescheduled: [],
+  billed: [],
+};
+
 export const SCHEDULE_BLOCK_TYPES = [
   "unavailable",
   "lunch",

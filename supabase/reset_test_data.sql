@@ -18,6 +18,7 @@ declare
   agenda_table text;
 begin
   foreach agenda_table in array array[
+    'appointment_notifications',
     'appointment_workflow_events',
     'appointments',
     'schedule_blocks',

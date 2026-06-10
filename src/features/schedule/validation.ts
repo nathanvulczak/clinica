@@ -25,10 +25,23 @@ export const createAppointmentSchema = z.object({
   notes: optionalText,
 });
 
+export const updateAppointmentSchema = createAppointmentSchema.extend({
+  appointment_id: z.string().uuid("Compromisso não identificado."),
+});
+
+export const rescheduleAppointmentSchema = updateAppointmentSchema.extend({
+  reason: z.string().trim().min(3, "Informe o motivo da remarcação.").max(500),
+});
+
 export const updateAppointmentStatusSchema = z.object({
   appointment_id: z.string().uuid(),
   status: z.enum(APPOINTMENT_STATUSES),
   notes: optionalText,
+});
+
+export const sendAppointmentNotificationSchema = z.object({
+  appointment_id: z.string().uuid(),
+  channel: z.enum(["email", "whatsapp"]),
 });
 
 export const createScheduleBlockSchema = z

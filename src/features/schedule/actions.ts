@@ -2,16 +2,23 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { OPERATIONAL_APPOINTMENT_STATUSES } from "@/config/schedule";
+import {
+  APPOINTMENT_STATUS_TRANSITIONS,
+  OPERATIONAL_APPOINTMENT_STATUSES,
+} from "@/config/schedule";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
   createAppointmentSchema,
   createScheduleBlockSchema,
   deleteScheduleBlockSchema,
+  rescheduleAppointmentSchema,
+  sendAppointmentNotificationSchema,
+  updateAppointmentSchema,
   updateAppointmentStatusSchema,
   upsertProfessionalScheduleSettingsSchema,
 } from "@/features/schedule/validation";
-import { addMinutesIso, localDateTimeToIso } from "@/lib/dates";
+import { addMinutesIso, formatDateTimeBr, localDateTimeToIso } from "@/lib/dates";
+import { getAppUrl } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
@@ -19,6 +26,8 @@ import {
   getScheduleAccess,
 } from "@/repositories/schedule";
 import { logAuditEvent } from "@/services/audit/audit-service";
+import { sendAppointmentConfirmationEmail } from "@/services/notifications/appointment-notification-service";
+import type { AppointmentStatus } from "@/types/domain";
 
 export type ScheduleActionState = {
   error?: string;
@@ -92,9 +101,10 @@ async function findAppointmentConflict(
   professionalMemberId: string,
   startsAt: string,
   endsAt: string,
+  excludeAppointmentId?: string,
 ) {
   const admin = createSupabaseAdminClient();
-  const { data } = await admin
+  let query = admin
     .from("appointments")
     .select("id, starts_at, ends_at, status")
     .eq("clinic_id", clinicId)
@@ -102,8 +112,13 @@ async function findAppointmentConflict(
     .is("deleted_at", null)
     .in("status", [...OPERATIONAL_APPOINTMENT_STATUSES])
     .lt("starts_at", endsAt)
-    .gt("ends_at", startsAt)
-    .limit(1);
+    .gt("ends_at", startsAt);
+
+  if (excludeAppointmentId) {
+    query = query.neq("id", excludeAppointmentId);
+  }
+
+  const { data } = await query.limit(1);
 
   return data?.[0] ?? null;
 }
@@ -139,13 +154,14 @@ async function findRoomConflict(
   roomId: string | null,
   startsAt: string,
   endsAt: string,
+  excludeAppointmentId?: string,
 ) {
   if (!roomId) {
     return null;
   }
 
   const admin = createSupabaseAdminClient();
-  const { data } = await admin
+  let query = admin
     .from("appointments")
     .select("id, starts_at, ends_at, status")
     .eq("clinic_id", clinicId)
@@ -153,10 +169,243 @@ async function findRoomConflict(
     .is("deleted_at", null)
     .in("status", [...OPERATIONAL_APPOINTMENT_STATUSES])
     .lt("starts_at", endsAt)
-    .gt("ends_at", startsAt)
-    .limit(1);
+    .gt("ends_at", startsAt);
+
+  if (excludeAppointmentId) {
+    query = query.neq("id", excludeAppointmentId);
+  }
+
+  const { data } = await query.limit(1);
 
   return data?.[0] ?? null;
+}
+
+async function validateAppointmentReferences({
+  clinicId,
+  patientId,
+  professionalMemberId,
+  serviceId,
+  roomId,
+}: {
+  clinicId: string;
+  patientId: string;
+  professionalMemberId: string;
+  serviceId: string | null;
+  roomId: string | null;
+}) {
+  const admin = createSupabaseAdminClient();
+  const [professional, patientResult, serviceResult, roomResult] = await Promise.all([
+    assertProfessionalBelongsToClinic(professionalMemberId, clinicId),
+    admin
+      .from("patients")
+      .select("id")
+      .eq("id", patientId)
+      .eq("clinic_id", clinicId)
+      .eq("active", true)
+      .is("deleted_at", null)
+      .maybeSingle(),
+    serviceId
+      ? admin
+          .from("clinic_services")
+          .select("id")
+          .eq("id", serviceId)
+          .eq("clinic_id", clinicId)
+          .eq("active", true)
+          .is("deleted_at", null)
+          .maybeSingle()
+      : Promise.resolve({ data: { id: null } }),
+    roomId
+      ? admin
+          .from("clinic_rooms")
+          .select("id")
+          .eq("id", roomId)
+          .eq("clinic_id", clinicId)
+          .eq("active", true)
+          .is("deleted_at", null)
+          .maybeSingle()
+      : Promise.resolve({ data: { id: null } }),
+  ]);
+
+  if (!professional) {
+    return "Profissional não encontrado na clínica ativa.";
+  }
+
+  if (!patientResult.data) {
+    return "Paciente não encontrado ou inativo na clínica atual.";
+  }
+
+  if (serviceId && !serviceResult.data) {
+    return "Serviço não encontrado na clínica ativa.";
+  }
+
+  if (roomId && !roomResult.data) {
+    return "Consultório não encontrado na clínica ativa.";
+  }
+
+  return null;
+}
+
+async function validateAppointmentAvailability({
+  clinicId,
+  professionalMemberId,
+  roomId,
+  startsAt,
+  endsAt,
+  excludeAppointmentId,
+}: {
+  clinicId: string;
+  professionalMemberId: string;
+  roomId: string | null;
+  startsAt: string;
+  endsAt: string;
+  excludeAppointmentId?: string;
+}) {
+  const admin = createSupabaseAdminClient();
+  const { data: settings } = await admin
+    .from("schedule_professional_settings")
+    .select("buffer_minutes, working_hours")
+    .eq("clinic_id", clinicId)
+    .eq("professional_member_id", professionalMemberId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  const bufferMinutes = Number(settings?.buffer_minutes ?? 0);
+  const bufferedStartsAt = addMinutesIso(startsAt, -bufferMinutes);
+  const bufferedEndsAt = addMinutesIso(endsAt, bufferMinutes);
+  const [appointmentConflict, blockConflict, roomConflict] = await Promise.all([
+    findAppointmentConflict(
+      clinicId,
+      professionalMemberId,
+      bufferedStartsAt,
+      bufferedEndsAt,
+      excludeAppointmentId,
+    ),
+    findBlockConflict(clinicId, professionalMemberId, bufferedStartsAt, bufferedEndsAt),
+    findRoomConflict(clinicId, roomId, startsAt, endsAt, excludeAppointmentId),
+  ]);
+
+  if (appointmentConflict) {
+    return "Este profissional já possui compromisso nesse intervalo.";
+  }
+
+  if (blockConflict) {
+    return "Este horário está bloqueado na agenda do profissional.";
+  }
+
+  if (roomConflict) {
+    return "O consultório selecionado já está ocupado nesse intervalo.";
+  }
+
+  const availabilityError = await validateProfessionalWorkingHours({
+    clinicId,
+    professionalMemberId,
+    startsAt,
+    endsAt,
+    workingHours: settings?.working_hours,
+  });
+
+  if (availabilityError) {
+    return availabilityError;
+  }
+
+  return null;
+}
+
+function localAppointmentParts(value: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    month: "2-digit",
+    timeZone: "America/Sao_Paulo",
+    weekday: "short",
+    year: "numeric",
+  }).formatToParts(new Date(value));
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  const weekdayMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+
+  return {
+    date: `${values.get("year")}-${values.get("month")}-${values.get("day")}`,
+    time: `${values.get("hour")}:${values.get("minute")}`,
+    weekday: weekdayMap[values.get("weekday") ?? ""] ?? -1,
+  };
+}
+
+async function validateProfessionalWorkingHours({
+  clinicId,
+  professionalMemberId,
+  startsAt,
+  endsAt,
+  workingHours,
+}: {
+  clinicId: string;
+  professionalMemberId: string;
+  startsAt: string;
+  endsAt: string;
+  workingHours: unknown;
+}) {
+  const admin = createSupabaseAdminClient();
+  const start = localAppointmentParts(startsAt);
+  const end = localAppointmentParts(endsAt);
+
+  if (start.date !== end.date) {
+    return "O compromisso deve começar e terminar no mesmo dia.";
+  }
+
+  const { data: rules } = await admin
+    .from("professional_availability_rules")
+    .select(
+      "recurrence_type, weekday, specific_date, valid_from, valid_until, start_time, end_time",
+    )
+    .eq("clinic_id", clinicId)
+    .eq("professional_member_id", professionalMemberId)
+    .eq("active", true)
+    .is("deleted_at", null);
+
+  if (rules && rules.length > 0) {
+    const matchesRule = rules.some((rule) => {
+      const appliesToDate =
+        rule.recurrence_type === "specific_date"
+          ? rule.specific_date === start.date
+          : rule.weekday === start.weekday &&
+            (!rule.valid_from || rule.valid_from <= start.date) &&
+            (!rule.valid_until || rule.valid_until >= start.date);
+
+      return (
+        appliesToDate &&
+        String(rule.start_time).slice(0, 5) <= start.time &&
+        String(rule.end_time).slice(0, 5) >= end.time
+      );
+    });
+
+    return matchesRule
+      ? null
+      : "O horário está fora da disponibilidade cadastrada para este profissional.";
+  }
+
+  if (workingHours && typeof workingHours === "object") {
+    const data = workingHours as { days?: string[]; start?: string; end?: string };
+    const configured = Boolean(data.days?.length && data.start && data.end);
+    const matchesSettings =
+      configured &&
+      data.days?.includes(String(start.weekday)) &&
+      data.start! <= start.time &&
+      data.end! >= end.time;
+
+    if (configured && !matchesSettings) {
+      return "O horário está fora do expediente configurado para este profissional.";
+    }
+  }
+
+  return null;
 }
 
 export async function createAppointmentAction(
@@ -188,76 +437,27 @@ export async function createAppointmentAction(
 
   const { activeClinic, user } = context;
   const admin = createSupabaseAdminClient();
-  const professional = await assertProfessionalBelongsToClinic(
-    parsed.data.professional_member_id,
-    activeClinic.id,
-  );
-
-  if (!professional) {
-    return { error: "Profissional não encontrado na clínica ativa." };
-  }
-
   const startsAt = localDateTimeToIso(parsed.data.appointment_date, parsed.data.start_time);
   const endsAt = addMinutesIso(startsAt, parsed.data.duration_minutes);
-  const [appointmentConflict, blockConflict, roomConflict] = await Promise.all([
-    findAppointmentConflict(activeClinic.id, parsed.data.professional_member_id, startsAt, endsAt),
-    findBlockConflict(activeClinic.id, parsed.data.professional_member_id, startsAt, endsAt),
-    findRoomConflict(activeClinic.id, parsed.data.room_id, startsAt, endsAt),
+  const [referenceError, availabilityError] = await Promise.all([
+    validateAppointmentReferences({
+      clinicId: activeClinic.id,
+      patientId: parsed.data.patient_id,
+      professionalMemberId: parsed.data.professional_member_id,
+      serviceId: parsed.data.service_id,
+      roomId: parsed.data.room_id,
+    }),
+    validateAppointmentAvailability({
+      clinicId: activeClinic.id,
+      professionalMemberId: parsed.data.professional_member_id,
+      roomId: parsed.data.room_id,
+      startsAt,
+      endsAt,
+    }),
   ]);
 
-  if (appointmentConflict) {
-    return { error: "Este profissional já possui compromisso nesse intervalo." };
-  }
-
-  if (blockConflict) {
-    return { error: "Este horário está bloqueado na agenda do profissional." };
-  }
-
-  if (roomConflict) {
-    return { error: "O consultório selecionado já está ocupado nesse intervalo." };
-  }
-
-  if (parsed.data.service_id) {
-    const { data: service } = await admin
-      .from("clinic_services")
-      .select("id")
-      .eq("id", parsed.data.service_id)
-      .eq("clinic_id", activeClinic.id)
-      .eq("active", true)
-      .is("deleted_at", null)
-      .maybeSingle();
-
-    if (!service) {
-      return { error: "Serviço não encontrado na clínica ativa." };
-    }
-  }
-
-  if (parsed.data.room_id) {
-    const { data: room } = await admin
-      .from("clinic_rooms")
-      .select("id")
-      .eq("id", parsed.data.room_id)
-      .eq("clinic_id", activeClinic.id)
-      .eq("active", true)
-      .is("deleted_at", null)
-      .maybeSingle();
-
-    if (!room) {
-      return { error: "Consultório não encontrado na clínica ativa." };
-    }
-  }
-
-  const { data: selectedPatient } = await admin
-    .from("patients")
-    .select("id")
-    .eq("id", parsed.data.patient_id)
-    .eq("clinic_id", activeClinic.id)
-    .eq("active", true)
-    .is("deleted_at", null)
-    .maybeSingle();
-
-  if (!selectedPatient) {
-    return { error: "Paciente não encontrado ou inativo na clínica atual." };
+  if (referenceError || availabilityError) {
+    return { error: referenceError ?? availabilityError ?? "Agendamento inválido." };
   }
 
   const { data: appointment, error } = await admin
@@ -327,6 +527,417 @@ export async function createAppointmentAction(
   return { success: "Consulta agendada com segurança." };
 }
 
+export async function updateAppointmentAction(
+  _state: ScheduleActionState,
+  formData: FormData,
+): Promise<ScheduleActionState> {
+  const parsed = updateAppointmentSchema.safeParse({
+    appointment_id: formData.get("appointment_id"),
+    patient_id: formData.get("patient_id"),
+    professional_member_id: formData.get("professional_member_id"),
+    service_id: formData.get("service_id"),
+    room_id: formData.get("room_id"),
+    appointment_date: formData.get("appointment_date"),
+    start_time: formData.get("start_time"),
+    duration_minutes: formData.get("duration_minutes"),
+    appointment_type: formData.get("appointment_type"),
+    channel: formData.get("channel"),
+    notes: formData.get("notes"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+
+  const context = await getScheduleActionContext();
+
+  if ("error" in context) {
+    return { error: context.error };
+  }
+
+  const { activeClinic, user } = context;
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = await admin
+    .from("appointments")
+    .select("*")
+    .eq("id", parsed.data.appointment_id)
+    .eq("clinic_id", activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!previous) {
+    return { error: "Compromisso não encontrado na clínica ativa." };
+  }
+
+  if (!["scheduled", "confirmed", "checked_in"].includes(previous.status)) {
+    return { error: "Este compromisso não pode mais ser editado. Consulte o histórico da operação." };
+  }
+
+  const referenceError = await validateAppointmentReferences({
+    clinicId: activeClinic.id,
+    patientId: parsed.data.patient_id,
+    professionalMemberId: parsed.data.professional_member_id,
+    serviceId: parsed.data.service_id,
+    roomId: parsed.data.room_id,
+  });
+
+  if (referenceError) {
+    return { error: referenceError };
+  }
+
+  const startsAt = localDateTimeToIso(parsed.data.appointment_date, parsed.data.start_time);
+  const endsAt = addMinutesIso(startsAt, parsed.data.duration_minutes);
+  const availabilityError = await validateAppointmentAvailability({
+    clinicId: activeClinic.id,
+    professionalMemberId: parsed.data.professional_member_id,
+    roomId: parsed.data.room_id,
+    startsAt,
+    endsAt,
+    excludeAppointmentId: previous.id,
+  });
+
+  if (availabilityError) {
+    return { error: availabilityError };
+  }
+
+  const updatePayload = {
+    patient_id: parsed.data.patient_id,
+    professional_member_id: parsed.data.professional_member_id,
+    service_id: parsed.data.service_id,
+    room_id: parsed.data.room_id,
+    starts_at: startsAt,
+    ends_at: endsAt,
+    appointment_type: parsed.data.appointment_type,
+    channel: parsed.data.channel,
+    notes: parsed.data.notes,
+    updated_by: user.id,
+  };
+  const { error } = await admin
+    .from("appointments")
+    .update(updatePayload)
+    .eq("id", previous.id)
+    .eq("clinic_id", activeClinic.id);
+
+  if (error) {
+    const message = error.message.toLowerCase();
+    return {
+      error: message.includes("appointments_no_active_overlap")
+        ? "Outro compromisso ocupou este horário. Atualize a agenda e tente novamente."
+        : message.includes("appointments_no_active_room_overlap")
+          ? "O consultório foi ocupado neste intervalo. Selecione outro espaço."
+          : "Não foi possível atualizar o compromisso.",
+    };
+  }
+
+  await logAuditEvent({
+    clinicId: activeClinic.id,
+    userId: user.id,
+    actionType: "appointment_updated",
+    module: "schedule",
+    recordTable: "appointments",
+    recordId: previous.id,
+    oldValues: previous,
+    newValues: updatePayload,
+    notes: "Dados operacionais do compromisso atualizados.",
+  });
+
+  revalidatePath("/agenda");
+  revalidatePath("/auditoria");
+  return { success: "Compromisso atualizado." };
+}
+
+export async function rescheduleAppointmentAction(
+  _state: ScheduleActionState,
+  formData: FormData,
+): Promise<ScheduleActionState> {
+  const parsed = rescheduleAppointmentSchema.safeParse({
+    appointment_id: formData.get("appointment_id"),
+    patient_id: formData.get("patient_id"),
+    professional_member_id: formData.get("professional_member_id"),
+    service_id: formData.get("service_id"),
+    room_id: formData.get("room_id"),
+    appointment_date: formData.get("appointment_date"),
+    start_time: formData.get("start_time"),
+    duration_minutes: formData.get("duration_minutes"),
+    appointment_type: formData.get("appointment_type"),
+    channel: formData.get("channel"),
+    notes: formData.get("notes"),
+    reason: formData.get("reason"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+
+  const context = await getScheduleActionContext();
+
+  if ("error" in context) {
+    return { error: context.error };
+  }
+
+  const { activeClinic, user } = context;
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = await admin
+    .from("appointments")
+    .select("*")
+    .eq("id", parsed.data.appointment_id)
+    .eq("clinic_id", activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!previous || !["scheduled", "confirmed", "checked_in"].includes(previous.status)) {
+    return { error: "Este compromisso não pode mais ser remarcado." };
+  }
+
+  const referenceError = await validateAppointmentReferences({
+    clinicId: activeClinic.id,
+    patientId: parsed.data.patient_id,
+    professionalMemberId: parsed.data.professional_member_id,
+    serviceId: parsed.data.service_id,
+    roomId: parsed.data.room_id,
+  });
+
+  if (referenceError) {
+    return { error: referenceError };
+  }
+
+  const startsAt = localDateTimeToIso(parsed.data.appointment_date, parsed.data.start_time);
+  const endsAt = addMinutesIso(startsAt, parsed.data.duration_minutes);
+  const availabilityError = await validateAppointmentAvailability({
+    clinicId: activeClinic.id,
+    professionalMemberId: parsed.data.professional_member_id,
+    roomId: parsed.data.room_id,
+    startsAt,
+    endsAt,
+    excludeAppointmentId: previous.id,
+  });
+
+  if (availabilityError) {
+    return { error: availabilityError };
+  }
+
+  const { data: newAppointmentId, error } = await admin.rpc("reschedule_appointment", {
+    source_appointment_id: previous.id,
+    clinic_uuid: activeClinic.id,
+    patient_uuid: parsed.data.patient_id,
+    professional_member_uuid: parsed.data.professional_member_id,
+    service_uuid: parsed.data.service_id,
+    room_uuid: parsed.data.room_id,
+    new_starts_at: startsAt,
+    new_ends_at: endsAt,
+    new_appointment_type: parsed.data.appointment_type,
+    new_channel: parsed.data.channel,
+    new_notes: parsed.data.notes,
+    reschedule_reason: parsed.data.reason,
+    actor_uuid: user.id,
+  });
+
+  if (error || !newAppointmentId) {
+    const message = error?.message.toLowerCase() ?? "";
+    return {
+      error: message.includes("appointments_no_active_overlap")
+        ? "O novo horário acabou de ser ocupado por outro compromisso."
+        : message.includes("appointments_no_active_room_overlap")
+          ? "O consultório acabou de ser ocupado no novo horário."
+          : "Não foi possível concluir a remarcação.",
+    };
+  }
+
+  await logAuditEvent({
+    clinicId: activeClinic.id,
+    userId: user.id,
+    actionType: "appointment_rescheduled",
+    module: "schedule",
+    recordTable: "appointments",
+    recordId: previous.id,
+    oldValues: previous,
+    newValues: {
+      replacement_appointment_id: newAppointmentId,
+      starts_at: startsAt,
+      ends_at: endsAt,
+      reason: parsed.data.reason,
+    },
+    notes: "Compromisso anterior preservado e novo horário criado.",
+  });
+
+  revalidatePath("/agenda");
+  revalidatePath("/auditoria");
+  return { success: "Consulta remarcada e histórico preservado." };
+}
+
+export async function sendAppointmentNotificationAction(
+  _state: ScheduleActionState,
+  formData: FormData,
+): Promise<ScheduleActionState> {
+  const parsed = sendAppointmentNotificationSchema.safeParse({
+    appointment_id: formData.get("appointment_id"),
+    channel: formData.get("channel"),
+  });
+
+  if (!parsed.success) {
+    return { error: "Notificação não identificada." };
+  }
+
+  const context = await getScheduleActionContext();
+
+  if ("error" in context) {
+    return { error: context.error };
+  }
+
+  const { activeClinic, user } = context;
+  const admin = createSupabaseAdminClient();
+  const { data: appointment } = await admin
+    .from("appointments")
+    .select(
+      "id, clinic_id, patient_id, professional_member_id, starts_at, confirmation_token, status",
+    )
+    .eq("id", parsed.data.appointment_id)
+    .eq("clinic_id", activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!appointment || !["scheduled", "confirmed"].includes(appointment.status)) {
+    return { error: "A confirmação só pode ser enviada para consultas agendadas ou confirmadas." };
+  }
+
+  const [{ data: patient }, { data: clinic }, { data: professional }] = await Promise.all([
+    admin.from("patients").select("full_name, email, phone").eq("id", appointment.patient_id).single(),
+    admin.from("clinics").select("trade_name").eq("id", activeClinic.id).single(),
+    admin
+      .from("clinic_members")
+      .select("profile:profiles!clinic_members_user_id_fkey(full_name)")
+      .eq("id", appointment.professional_member_id)
+      .single(),
+  ]);
+  const professionalProfile = Array.isArray(professional?.profile)
+    ? professional.profile[0]
+    : professional?.profile;
+  const recipient = parsed.data.channel === "email" ? patient?.email : patient?.phone;
+
+  if (!recipient) {
+    return {
+      error:
+        parsed.data.channel === "email"
+          ? "O paciente não possui e-mail cadastrado."
+          : "O paciente não possui telefone cadastrado.",
+    };
+  }
+
+  const confirmationUrl = `${getAppUrl()}/confirmar-consulta/${appointment.confirmation_token}`;
+  const { data: notification, error: notificationError } = await admin
+    .from("appointment_notifications")
+    .insert({
+      clinic_id: activeClinic.id,
+      appointment_id: appointment.id,
+      channel: parsed.data.channel,
+      recipient,
+      status: "pending",
+      payload: {
+        confirmation_url: confirmationUrl,
+        patient_name: patient?.full_name,
+        professional_name: professionalProfile?.full_name,
+        starts_at: appointment.starts_at,
+      },
+      created_by: user.id,
+      updated_by: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (notificationError || !notification) {
+    return { error: "Não foi possível registrar a notificação." };
+  }
+
+  if (parsed.data.channel === "whatsapp") {
+    await logAuditEvent({
+      clinicId: activeClinic.id,
+      userId: user.id,
+      actionType: "appointment_whatsapp_queued",
+      module: "schedule",
+      recordTable: "appointment_notifications",
+      recordId: notification.id,
+      newValues: { appointment_id: appointment.id, channel: "whatsapp", recipient },
+      notes: "Mensagem preparada para futura integração oficial com WhatsApp.",
+    });
+
+    revalidatePath("/agenda");
+    revalidatePath("/auditoria");
+    return { success: "Mensagem de WhatsApp preparada na fila de notificações." };
+  }
+
+  const emailResult = await sendAppointmentConfirmationEmail({
+    to: recipient,
+    patientName: patient?.full_name ?? "Paciente",
+    clinicName: clinic?.trade_name ?? "Clínica",
+    professionalName: professionalProfile?.full_name ?? "Profissional",
+    startsAtLabel: formatDateTimeBr(appointment.starts_at),
+    confirmationUrl,
+    idempotencyKey: `appointment-confirmation-${notification.id}`,
+  });
+  const now = new Date().toISOString();
+
+  await admin
+    .from("appointment_notifications")
+    .update({
+      status: emailResult.sent ? "sent" : "failed",
+      provider_message_id: emailResult.sent ? emailResult.providerMessageId : null,
+      error_message: emailResult.sent ? null : emailResult.error,
+      sent_at: emailResult.sent ? now : null,
+      updated_by: user.id,
+    })
+    .eq("id", notification.id);
+
+  if (!emailResult.sent) {
+    await logAuditEvent({
+      clinicId: activeClinic.id,
+      userId: user.id,
+      actionType: "appointment_notification_failed",
+      module: "schedule",
+      recordTable: "appointment_notifications",
+      recordId: notification.id,
+      newValues: {
+        appointment_id: appointment.id,
+        channel: "email",
+        reason: emailResult.reason,
+      },
+      level: "warning",
+      notes: "Tentativa de envio da confirmação por e-mail não concluída.",
+    });
+    revalidatePath("/auditoria");
+
+    return {
+      error:
+        emailResult.reason === "not_configured"
+          ? "E-mail registrado, mas o provedor ainda não está configurado."
+          : `O provedor recusou o envio: ${emailResult.error}`,
+    };
+  }
+
+  await admin
+    .from("appointments")
+    .update({
+      confirmation_sent_at: now,
+      last_notification_at: now,
+      updated_by: user.id,
+    })
+    .eq("id", appointment.id);
+
+  await logAuditEvent({
+    clinicId: activeClinic.id,
+    userId: user.id,
+    actionType: "appointment_confirmation_email_sent",
+    module: "schedule",
+    recordTable: "appointment_notifications",
+    recordId: notification.id,
+    newValues: { appointment_id: appointment.id, channel: "email", recipient },
+    notes: "Confirmação de consulta enviada por e-mail.",
+  });
+
+  revalidatePath("/agenda");
+  revalidatePath("/auditoria");
+  return { success: "Confirmação enviada por e-mail." };
+}
+
 export async function updateAppointmentStatusAction(
   _state: ScheduleActionState,
   formData: FormData,
@@ -387,22 +998,52 @@ export async function updateAppointmentStatusAction(
     return { success: "Status já estava atualizado." };
   }
 
-  const updatePayload = {
+  const previousStatus = previous.status as AppointmentStatus;
+
+  if (!APPOINTMENT_STATUS_TRANSITIONS[previousStatus].includes(parsed.data.status)) {
+    return { error: "Esta mudança de etapa não é permitida pelo fluxo operacional." };
+  }
+
+  if (
+    ["cancelled", "no_show", "rescheduled"].includes(parsed.data.status) &&
+    !parsed.data.notes
+  ) {
+    return { error: "Informe o motivo desta alteração de status." };
+  }
+
+  const changedAt = new Date().toISOString();
+  const baseUpdatePayload = {
     status: parsed.data.status,
     confirmed_at:
       parsed.data.status === "confirmed" && !previous.confirmed_at
-        ? new Date().toISOString()
+        ? changedAt
         : previous.confirmed_at,
     cancellation_reason: ["cancelled", "no_show", "rescheduled"].includes(parsed.data.status)
       ? parsed.data.notes
       : previous.cancellation_reason,
     updated_by: user.id,
   };
+  const updatePayload = {
+    ...baseUpdatePayload,
+    checked_in_at: parsed.data.status === "checked_in" ? changedAt : undefined,
+    started_at: parsed.data.status === "in_progress" ? changedAt : undefined,
+    completed_at: parsed.data.status === "completed" ? changedAt : undefined,
+    cancelled_at: parsed.data.status === "cancelled" ? changedAt : undefined,
+    no_show_at: parsed.data.status === "no_show" ? changedAt : undefined,
+  };
 
-  const { error } = await admin
+  let { error } = await admin
     .from("appointments")
     .update(updatePayload)
     .eq("id", parsed.data.appointment_id);
+
+  if (error && /checked_in_at|started_at|completed_at|cancelled_at|no_show_at/i.test(error.message)) {
+    const fallbackResult = await admin
+      .from("appointments")
+      .update(baseUpdatePayload)
+      .eq("id", parsed.data.appointment_id);
+    error = fallbackResult.error;
+  }
 
   if (error) {
     return { error: "Não foi possível atualizar o status da consulta." };
