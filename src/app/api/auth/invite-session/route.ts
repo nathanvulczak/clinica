@@ -10,19 +10,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Payload inválido." }, { status: 400 });
   }
 
+  const accessToken =
+    typeof payload.access_token === "string" ? payload.access_token.trim() : "";
+  const refreshToken =
+    typeof payload.refresh_token === "string" ? payload.refresh_token.trim() : "";
+
   if (
-    typeof payload.access_token !== "string" ||
-    typeof payload.refresh_token !== "string" ||
-    payload.access_token.length < 20 ||
-    payload.refresh_token.length < 20
+    !accessToken ||
+    !refreshToken ||
+    accessToken.length > 16_384 ||
+    refreshToken.length > 16_384
   ) {
     return NextResponse.json({ error: "Tokens do convite não identificados." }, { status: 400 });
   }
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.setSession({
-    access_token: payload.access_token,
-    refresh_token: payload.refresh_token,
+    access_token: accessToken,
+    refresh_token: refreshToken,
   });
 
   if (error) {
