@@ -339,14 +339,18 @@ export function ScheduleBlockForm({
   block,
   fixedProfessionalId,
   disabled,
+  onCompleted,
 }: {
   professionals: ScheduleProfessional[];
   defaultDate: string;
   block?: ScheduleBlock;
   fixedProfessionalId?: string;
   disabled?: boolean;
+  onCompleted?: () => void;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction, pending] = useActionState(createScheduleBlockAction, {});
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const canSubmit = !disabled && professionals.length > 0;
   const start = dateTimeInputParts(block?.starts_at);
   const end = dateTimeInputParts(block?.ends_at);
@@ -354,8 +358,14 @@ export function ScheduleBlockForm({
 
   useScheduleToast(state, "O bloqueio impede agendamentos no intervalo informado.");
 
+  useEffect(() => {
+    if (state.success) {
+      onCompleted?.();
+    }
+  }, [onCompleted, state.success]);
+
   return (
-    <form action={formAction} className="grid gap-4">
+    <form ref={formRef} action={formAction} className="grid gap-4">
       {block?.id ? <input type="hidden" name="id" value={block.id} /> : null}
       {fixedProfessionalId ? (
         <input type="hidden" name="professional_member_id" value={fixedProfessionalId} />
@@ -441,10 +451,23 @@ export function ScheduleBlockForm({
       </div>
 
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
-      <Button variant="outline" disabled={!canSubmit || pending}>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={!canSubmit || pending}
+        onClick={() => setConfirmOpen(true)}
+      >
         <Ban />
         {pending ? "Salvando..." : block ? "Salvar bloqueio" : "Bloquear horário"}
       </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={block ? "Salvar alterações do bloqueio?" : "Criar bloqueio de horário?"}
+        description="A disponibilidade do profissional será atualizada e a ação ficará registrada na auditoria."
+        confirmLabel={block ? "Salvar alterações" : "Criar bloqueio"}
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
     </form>
   );
 }
@@ -499,13 +522,17 @@ export function ProfessionalSettingsForm({
   settings,
   fixedProfessionalId,
   disabled,
+  onCompleted,
 }: {
   professionals: ScheduleProfessional[];
   settings: ScheduleSettings[];
   fixedProfessionalId?: string;
   disabled?: boolean;
+  onCompleted?: () => void;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction, pending] = useActionState(upsertProfessionalScheduleSettingsAction, {});
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [professionalId, setProfessionalId] = useState(
     fixedProfessionalId ?? professionals[0]?.id ?? "",
   );
@@ -516,8 +543,14 @@ export function ProfessionalSettingsForm({
 
   useScheduleToast(state, "As próximas agendas usam esta configuração como referência operacional.");
 
+  useEffect(() => {
+    if (state.success) {
+      onCompleted?.();
+    }
+  }, [onCompleted, state.success]);
+
   return (
-    <form action={formAction} className="grid gap-4">
+    <form ref={formRef} action={formAction} className="grid gap-4">
       {fixedProfessionalId ? (
         <input type="hidden" name="professional_member_id" value={fixedProfessionalId} />
       ) : (
@@ -644,10 +677,18 @@ export function ProfessionalSettingsForm({
       </label>
 
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
-      <Button disabled={!canSubmit || pending}>
+      <Button type="button" disabled={!canSubmit || pending} onClick={() => setConfirmOpen(true)}>
         {pending ? <Save /> : <SlidersHorizontal />}
         {pending ? "Salvando..." : "Salvar configuração"}
       </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Salvar expediente e preferências?"
+        description="A configuração será aplicada à agenda do profissional e ficará registrada na auditoria."
+        confirmLabel="Salvar configuração"
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
     </form>
   );
 }

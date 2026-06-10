@@ -471,20 +471,30 @@ export function ServiceForm({
   service,
   disabled,
   defaultDuration = 30,
+  onCompleted,
 }: {
   service?: ClinicService;
   disabled?: boolean;
   defaultDuration?: number;
+  onCompleted?: () => void;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction, pending] = useActionState(saveServiceAction, {});
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [price, setPrice] = useState(
     service ? formatCurrencyInput(String(service.price_cents)) : "0,00",
   );
 
   useRegistrationToast(state, "O serviço já pode ser utilizado na Agenda e no financeiro futuro.");
 
+  useEffect(() => {
+    if (state.success) {
+      onCompleted?.();
+    }
+  }, [onCompleted, state.success]);
+
   return (
-    <form action={formAction} className="grid gap-4">
+    <form ref={formRef} action={formAction} className="grid gap-4">
       {service?.id ? <input type="hidden" name="id" value={service.id} /> : null}
       <div className="grid gap-3 sm:grid-cols-[140px_1fr]">
         <div className="grid gap-2">
@@ -585,21 +595,45 @@ export function ServiceForm({
         </label>
       </div>
       <FormMessage state={state} />
-      <Button disabled={disabled || pending}>
+      <Button type="button" disabled={disabled || pending} onClick={() => setConfirmOpen(true)}>
         <Save />
         {pending ? "Salvando..." : service ? "Salvar serviço" : "Cadastrar serviço"}
       </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={service ? "Salvar alterações do serviço?" : "Cadastrar novo serviço?"}
+        description="A ação será aplicada à clínica ativa e ficará registrada na auditoria."
+        confirmLabel={service ? "Salvar alterações" : "Cadastrar serviço"}
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
     </form>
   );
 }
 
-export function RoomForm({ room, disabled }: { room?: ClinicRoom; disabled?: boolean }) {
+export function RoomForm({
+  room,
+  disabled,
+  onCompleted,
+}: {
+  room?: ClinicRoom;
+  disabled?: boolean;
+  onCompleted?: () => void;
+}) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction, pending] = useActionState(saveRoomAction, {});
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   useRegistrationToast(state, "O consultório pode ser vinculado à disponibilidade e às consultas.");
 
+  useEffect(() => {
+    if (state.success) {
+      onCompleted?.();
+    }
+  }, [onCompleted, state.success]);
+
   return (
-    <form action={formAction} className="grid gap-4">
+    <form ref={formRef} action={formAction} className="grid gap-4">
       {room?.id ? <input type="hidden" name="id" value={room.id} /> : null}
       <div className="grid gap-3 sm:grid-cols-[140px_1fr]">
         <div className="grid gap-2">
@@ -691,10 +725,18 @@ export function RoomForm({ room, disabled }: { room?: ClinicRoom; disabled?: boo
         Consultório ativo
       </label>
       <FormMessage state={state} />
-      <Button disabled={disabled || pending}>
+      <Button type="button" disabled={disabled || pending} onClick={() => setConfirmOpen(true)}>
         <Save />
         {pending ? "Salvando..." : room ? "Salvar consultório" : "Cadastrar consultório"}
       </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={room ? "Salvar alterações do consultório?" : "Cadastrar novo consultório?"}
+        description="A ação será aplicada à clínica ativa e ficará registrada na auditoria."
+        confirmLabel={room ? "Salvar alterações" : "Cadastrar consultório"}
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
     </form>
   );
 }
@@ -705,14 +747,18 @@ export function ProfessionalProfileForm({
   services,
   rooms,
   disabled,
+  onCompleted,
 }: {
   professional: ScheduleProfessional;
   professionalProfile?: ProfessionalOperationalProfile;
   services: ClinicService[];
   rooms: ClinicRoom[];
   disabled?: boolean;
+  onCompleted?: () => void;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction, pending] = useActionState(saveProfessionalProfileAction, {});
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const canSubmit = !disabled && !pending;
 
   useRegistrationToast(
@@ -720,8 +766,14 @@ export function ProfessionalProfileForm({
     "Especialidade, registro profissional e padrões operacionais foram atualizados.",
   );
 
+  useEffect(() => {
+    if (state.success) {
+      onCompleted?.();
+    }
+  }, [onCompleted, state.success]);
+
   return (
-    <form action={formAction} className="grid gap-4">
+    <form ref={formRef} action={formAction} className="grid gap-4">
       <input type="hidden" name="professional_member_id" value={professional.id} />
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -873,10 +925,18 @@ export function ProfessionalProfileForm({
       </div>
 
       <FormMessage state={state} />
-      <Button disabled={!canSubmit}>
+      <Button type="button" disabled={!canSubmit} onClick={() => setConfirmOpen(true)}>
         <Save />
         {pending ? "Salvando..." : "Salvar ficha profissional"}
       </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Salvar ficha profissional?"
+        description="Especialidade, registro e padrões operacionais serão atualizados e auditados."
+        confirmLabel="Salvar ficha"
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
     </form>
   );
 }
@@ -888,6 +948,7 @@ export function AvailabilityForm({
   services,
   fixedProfessionalId,
   disabled,
+  onCompleted,
 }: {
   availability?: ProfessionalAvailabilityRule;
   professionals: ScheduleProfessional[];
@@ -895,8 +956,11 @@ export function AvailabilityForm({
   services: ClinicService[];
   fixedProfessionalId?: string;
   disabled?: boolean;
+  onCompleted?: () => void;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction, pending] = useActionState(saveAvailabilityAction, {});
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [recurrenceType, setRecurrenceType] = useState<"weekly" | "specific_date">(
     availability?.recurrence_type ?? "weekly",
   );
@@ -904,8 +968,14 @@ export function AvailabilityForm({
 
   useRegistrationToast(state, "A regra já pode ser usada para organizar a Agenda da clínica.");
 
+  useEffect(() => {
+    if (state.success) {
+      onCompleted?.();
+    }
+  }, [onCompleted, state.success]);
+
   return (
-    <form action={formAction} className="grid gap-4">
+    <form ref={formRef} action={formAction} className="grid gap-4">
       {availability?.id ? <input type="hidden" name="id" value={availability.id} /> : null}
       {fixedProfessionalId ? (
         <input type="hidden" name="professional_member_id" value={fixedProfessionalId} />
@@ -1079,10 +1149,22 @@ export function AvailabilityForm({
         Regra ativa
       </label>
       <FormMessage state={state} />
-      <Button disabled={disabled || pending || professionals.length === 0}>
+      <Button
+        type="button"
+        disabled={disabled || pending || professionals.length === 0}
+        onClick={() => setConfirmOpen(true)}
+      >
         <Save />
         {pending ? "Salvando..." : availability ? "Salvar disponibilidade" : "Cadastrar disponibilidade"}
       </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={availability ? "Salvar disponibilidade?" : "Cadastrar disponibilidade?"}
+        description="A regra será aplicada à agenda do profissional e ficará registrada na auditoria."
+        confirmLabel={availability ? "Salvar alterações" : "Cadastrar disponibilidade"}
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
     </form>
   );
 }
@@ -1090,16 +1172,26 @@ export function AvailabilityForm({
 export function RegistrationPreferencesForm({
   preferences,
   disabled,
+  onCompleted,
 }: {
   preferences: RegistrationPreferences;
   disabled?: boolean;
+  onCompleted?: () => void;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction, pending] = useActionState(saveRegistrationPreferencesAction, {});
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   useRegistrationToast(state, "As regras passam a valer nos próximos cadastros da clínica.");
 
+  useEffect(() => {
+    if (state.success) {
+      onCompleted?.();
+    }
+  }, [onCompleted, state.success]);
+
   return (
-    <form action={formAction} className="grid gap-4">
+    <form ref={formRef} action={formAction} className="grid gap-4">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex items-center gap-3 rounded-md border bg-background p-3 text-sm">
           <input
@@ -1156,10 +1248,18 @@ export function RegistrationPreferencesForm({
         Exibir registros inativos por padrão
       </label>
       <FormMessage state={state} />
-      <Button disabled={disabled || pending}>
+      <Button type="button" disabled={disabled || pending} onClick={() => setConfirmOpen(true)}>
         <Save />
         {pending ? "Salvando..." : "Salvar preferências"}
       </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Salvar preferências da clínica?"
+        description="As novas regras serão aplicadas aos próximos cadastros e registradas na auditoria."
+        confirmLabel="Salvar preferências"
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
     </form>
   );
 }
