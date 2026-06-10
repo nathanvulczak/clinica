@@ -1,8 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getAppUrl } from "@/lib/env";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getStripe } from "@/lib/stripe";
 import { resolveActiveStripeSubscription } from "@/services/billing/stripe-sync";
+import { getBillingAuthorization } from "@/services/billing/authorization";
+import { auditDeniedModuleAccess } from "@/services/authorization/clinic-access";
 
 export async function GET(request: NextRequest) {
   const supabase = await createSupabaseServerClient();
@@ -14,10 +17,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/login?next=/assinatura", request.url));
   }
 
-  const { data: subscription } = await supabase
+  const billingAuthorization = await getBillingAuthorization();
+
+  if (!billingAuthorization.canManage || !billingAuthorization.ownerUserId) {
+    await auditDeniedModuleAccess(
+      billingAuthorization.activeClinic?.id,
+      "billing",
+      "Tentativa de abrir o portal Stripe sem permissão para gerenciar assinatura.",
+    );
+    return NextResponse.redirect(new URL("/dashboard?access=denied&module=billing", request.url));
+  }
+
+  const { data: subscription } = await createSupabaseAdminClient()
     .from("subscriptions")
     .select("stripe_customer_id, stripe_subscription_id")
-    .eq("owner_user_id", user.id)
+    .eq("owner_user_id", billingAuthorization.ownerUserId)
     .maybeSingle();
 
   if (!subscription?.stripe_customer_id) {
@@ -28,7 +42,7 @@ export async function GET(request: NextRequest) {
     await resolveActiveStripeSubscription({
       customerId: subscription.stripe_customer_id,
       storedSubscriptionId: subscription.stripe_subscription_id,
-      ownerUserId: user.id,
+      ownerUserId: billingAuthorization.ownerUserId,
     });
   } catch {
     return NextResponse.redirect(new URL("/assinatura?billing=subscription_not_found", request.url));

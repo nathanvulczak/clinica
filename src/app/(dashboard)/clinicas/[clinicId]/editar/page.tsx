@@ -1,8 +1,9 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ClinicForm } from "@/features/clinics/components/clinic-form";
 import { getClinicById } from "@/repositories/clinics";
 import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getClinicAuthorization } from "@/services/authorization/clinic-access";
 
 export default async function EditarClinicaPage({
   params,
@@ -10,6 +11,12 @@ export default async function EditarClinicaPage({
   params: Promise<{ clinicId: string }>;
 }) {
   const { clinicId } = await params;
+  const authorization = await getClinicAuthorization(clinicId);
+
+  if (!authorization.can("clinics", "edit")) {
+    redirect("/dashboard?access=denied&module=clinics");
+  }
+
   const clinic = await getClinicById(clinicId);
 
   if (!clinic) {

@@ -16,6 +16,7 @@ Execute os arquivos uma única vez e na ordem numérica:
 10. `010_professional_registration.sql`
 11. `011_member_invite_access.sql`
 12. `012_schedule_operations_security.sql`
+13. `013_rbac_module_access_hardening.sql`
 
 Não execute novamente migrations já aplicadas. Para conferir o controle do
 ambiente hospedado, registre a execução em uma planilha de implantação ou adote
@@ -33,6 +34,16 @@ Esta migration:
 - cria a caixa de saída `appointment_notifications`;
 - prepara envio por e-mail e futura integração oficial com WhatsApp.
 
+## Migration 013
+
+Esta migration:
+
+- remove o acesso administrativo implícito de `clinic_admin`;
+- aplica presets objetivos para cada papel da clínica;
+- impede médico, enfermagem e recepção de acessar assinatura e auditoria por padrão;
+- separa consulta de billing de gerenciamento do plano;
+- faz permissões individuais de negação prevalecerem sobre o preset do papel.
+
 ## Testes de banco
 
 O arquivo `tests/001_schedule_rls.test.sql` usa pgTAP e executa tudo dentro de
@@ -42,7 +53,9 @@ uma transação com `rollback`. Ele valida:
 - leitura e edição permitidas ao médico;
 - isolamento da agenda do médico;
 - visão ampla da recepção;
-- visão restrita do perfil financeiro;
+- bloqueio da agenda clínica para o perfil financeiro;
+- bloqueio de assinatura e auditoria para o médico;
+- consulta de assinatura, sem gestão, para o financeiro;
 - bloqueio de transições inválidas;
 - bloqueio total para usuário sem vínculo.
 

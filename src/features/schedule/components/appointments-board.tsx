@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Clock, MapPin, Stethoscope, UserRound } from "lucide-react";
 import {
   APPOINTMENT_STATUS_LABELS,
@@ -69,6 +70,18 @@ export function AppointmentsBoard({
   canUpdateStatus: boolean;
   confirmationUrlBase: string;
 }) {
+  const workflowEventsByAppointment = useMemo(() => {
+    const eventsByAppointment = new Map<string, AppointmentWorkflowEvent[]>();
+
+    for (const event of workflowEvents) {
+      const current = eventsByAppointment.get(event.appointment_id) ?? [];
+      current.push(event);
+      eventsByAppointment.set(event.appointment_id, current);
+    }
+
+    return eventsByAppointment;
+  }, [workflowEvents]);
+
   return (
     <div className="grid gap-6">
       <section className="grid gap-3">
@@ -149,9 +162,7 @@ export function AppointmentsBoard({
                   <div className="flex justify-end">
                     <AppointmentDetailsModal
                       appointment={appointment}
-                      workflowEvents={workflowEvents.filter(
-                        (event) => event.appointment_id === appointment.id,
-                      )}
+                      workflowEvents={workflowEventsByAppointment.get(appointment.id) ?? []}
                       professionals={professionals}
                       patients={patients}
                       services={services}

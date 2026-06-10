@@ -1,17 +1,19 @@
 import { Building2, CalendarClock, CreditCard, ReceiptText } from "lucide-react";
+import { redirect } from "next/navigation";
 import { redirectToCustomerPortalAction } from "@/features/billing/actions";
 import { BillingStatusToast } from "@/features/billing/components/billing-status-toast";
 import { PlanCards } from "@/features/billing/components/plan-cards";
 import { PLAN_LIMITS, PLANS } from "@/config/plans";
-import { getActiveClinicContext } from "@/features/clinics/context";
 import { formatDateBr, formatDateTimeBr } from "@/lib/dates";
 import { formatCurrencyBRL } from "@/lib/utils";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { listCurrentUserInvoices } from "@/repositories/billing";
+import { countOwnerClinics, listCurrentUserInvoices } from "@/repositories/billing";
 import { getCurrentSubscription } from "@/repositories/subscriptions";
+import { getBillingAuthorization } from "@/services/billing/authorization";
+import { auditDeniedModuleAccess } from "@/services/authorization/clinic-access";
 import type { PlanSlug, SubscriptionStatus } from "@/types/domain";
 
 const statusLabels: Record<SubscriptionStatus | "inactive", string> = {
@@ -56,10 +58,21 @@ export default async function AssinaturaPage({
   searchParams: Promise<{ billing?: string; target?: string; details?: string }>;
 }) {
   const params = await searchParams;
-  const [{ clinics }, subscription, invoices] = await Promise.all([
-    getActiveClinicContext(),
-    getCurrentSubscription(),
-    listCurrentUserInvoices(),
+  const billingAuthorization = await getBillingAuthorization();
+
+  if (!billingAuthorization.canView || !billingAuthorization.ownerUserId) {
+    await auditDeniedModuleAccess(
+      billingAuthorization.activeClinic?.id,
+      "billing",
+      "Tentativa de acesso direto à página de assinatura sem permissão.",
+    );
+    redirect("/dashboard?access=denied&module=billing");
+  }
+
+  const [subscription, invoices, activeClinicsCount] = await Promise.all([
+    getCurrentSubscription(billingAuthorization.ownerUserId),
+    listCurrentUserInvoices(billingAuthorization.ownerUserId),
+    countOwnerClinics(billingAuthorization.ownerUserId),
   ]);
   const currentPlan = subscription?.plan_slug ? PLANS.find((plan) => plan.slug === subscription.plan_slug) : null;
   const limit = subscription?.plan_slug ? PLAN_LIMITS[subscription.plan_slug as PlanSlug] : 0;
@@ -73,14 +86,16 @@ export default async function AssinaturaPage({
         title="Assinatura e pagamentos"
         description="Gerencie plano, faturas, upgrade e downgrade com Stripe Customer Portal."
         action={
-          <div className="flex gap-2">
-            <Button asChild variant="outline">
-              <a href="/api/billing/sync">Sincronizar</a>
-            </Button>
-            <form action={redirectToCustomerPortalAction}>
-              <Button variant="outline">Portal Stripe</Button>
-            </form>
-          </div>
+          billingAuthorization.canManage ? (
+            <div className="flex gap-2">
+              <Button asChild variant="outline">
+                <a href="/api/billing/sync">Sincronizar</a>
+              </Button>
+              <form action={redirectToCustomerPortalAction}>
+                <Button variant="outline">Portal Stripe</Button>
+              </form>
+            </div>
+          ) : null
         }
       />
       <BillingNotice message={billingMessage} details={params.details} />
@@ -106,7 +121,7 @@ export default async function AssinaturaPage({
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-semibold">
-              {clinics.length}
+              {activeClinicsCount}
               <span className="text-base text-muted-foreground"> / {limit || "-"}</span>
             </p>
             <p className="text-xs text-muted-foreground">limite aplicado ao plano contratado</p>
@@ -150,20 +165,31 @@ export default async function AssinaturaPage({
         </CardContent>
       </Card>
 
-      <section className="mb-8 grid gap-4">
-        <div>
-          <h2 className="text-lg font-semibold">Alterar plano</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Upgrades e downgrades passam pelo portal da Stripe. Downgrades respeitam o limite de clínicas ativas.
-          </p>
-        </div>
-        <PlanCards
-          selected={subscription?.plan_slug}
-          currentPlan={subscription?.plan_slug}
-          subscriptionStatus={subscription?.status}
-          activeClinicsCount={clinics.length}
-        />
-      </section>
+      {billingAuthorization.canManage ? (
+        <section className="mb-8 grid gap-4">
+          <div>
+            <h2 className="text-lg font-semibold">Alterar plano</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Upgrades e downgrades passam pelo portal da Stripe. Downgrades respeitam o limite de clínicas ativas.
+            </p>
+          </div>
+          <PlanCards
+            selected={subscription?.plan_slug}
+            currentPlan={subscription?.plan_slug}
+            subscriptionStatus={subscription?.status}
+            activeClinicsCount={activeClinicsCount}
+          />
+        </section>
+      ) : (
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Acesso somente para consulta</CardTitle>
+            <CardDescription>
+              Seu perfil pode acompanhar plano e pagamentos, mas alterações exigem a permissão Gerenciar assinatura.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

@@ -81,7 +81,7 @@ export default async function AgendaPage({
             scopeToCurrentUser: true,
             access: scheduleAccess,
           }),
-          listSchedulePatients(activeClinic.id),
+          scheduleAccess.canManage ? listSchedulePatients(activeClinic.id) : Promise.resolve([]),
           listAppointments(activeClinic.id, {
             startDate: range.startDate,
             endDate: range.endDate,
@@ -93,10 +93,12 @@ export default async function AgendaPage({
             endDate: range.endDate,
             professionalId,
           }),
-          listClinicServices(activeClinic.id),
-          listClinicRooms(activeClinic.id),
-          listProfessionalOperationalProfiles(activeClinic.id, registrationAccess),
-          listScheduleSettings(activeClinic.id),
+          scheduleAccess.canManage ? listClinicServices(activeClinic.id) : Promise.resolve([]),
+          scheduleAccess.canManage ? listClinicRooms(activeClinic.id) : Promise.resolve([]),
+          scheduleAccess.canManage
+            ? listProfessionalOperationalProfiles(activeClinic.id, registrationAccess)
+            : Promise.resolve([]),
+          scheduleAccess.canManage ? listScheduleSettings(activeClinic.id) : Promise.resolve([]),
         ])
       : [[], [], [], [], [], [], [], []];
   const workflowEvents =

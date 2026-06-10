@@ -124,21 +124,22 @@ export function AppointmentDetailsModal({
         <Pencil />
         Detalhes
       </Button>
-      <Modal
-        open={open}
-        onOpenChange={(nextOpen) => {
-          setOpen(nextOpen);
-          if (!nextOpen) {
-            setView("summary");
-          }
-        }}
-        title={appointment.patient?.social_name || appointment.patient?.full_name || "Compromisso"}
-        description={`${formatDateTimeBr(appointment.starts_at)} • ${
-          appointment.professional?.profile?.full_name ?? "Profissional"
-        }`}
-        className="max-w-5xl"
-      >
-        <div className="grid gap-5">
+      {open ? (
+        <Modal
+          open
+          onOpenChange={(nextOpen) => {
+            setOpen(nextOpen);
+            if (!nextOpen) {
+              setView("summary");
+            }
+          }}
+          title={appointment.patient?.social_name || appointment.patient?.full_name || "Compromisso"}
+          description={`${formatDateTimeBr(appointment.starts_at)} • ${
+            appointment.professional?.profile?.full_name ?? "Profissional"
+          }`}
+          className="max-w-5xl"
+        >
+          <div className="grid gap-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex rounded-md border bg-background p-1">
               <Button
@@ -204,8 +205,9 @@ export function AppointmentDetailsModal({
               }}
             />
           )}
-        </div>
-      </Modal>
+          </div>
+        </Modal>
+      ) : null}
     </>
   );
 }

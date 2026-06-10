@@ -26,23 +26,25 @@ import { ClinicSwitcher } from "@/features/clinics/components/clinic-switcher";
 import type { Clinic, UserProfile } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { NavigationKey } from "@/services/authorization/clinic-access";
 
 type NavItem = {
   href: string;
+  key: NavigationKey;
   label: string;
   icon: LucideIcon;
   disabled?: boolean;
 };
 
 const nav: NavItem[] = [
-  { href: "/dashboard", label: "Painel", icon: LayoutDashboard },
-  { href: "/clinicas", label: "Clínicas", icon: Building2 },
-  { href: "/cadastros", label: "Cadastros", icon: ClipboardList },
-  { href: "/usuarios", label: "Usuários", icon: Users },
-  { href: "/assinatura", label: "Assinatura", icon: CreditCard },
-  { href: "/auditoria", label: "Auditoria", icon: ShieldCheck },
-  { href: "/perfil", label: "Meu perfil", icon: UserCircle },
-  { href: "/agenda", label: "Agenda", icon: CalendarDays },
+  { key: "dashboard", href: "/dashboard", label: "Painel", icon: LayoutDashboard },
+  { key: "schedule", href: "/agenda", label: "Agenda", icon: CalendarDays },
+  { key: "registrations", href: "/cadastros", label: "Cadastros", icon: ClipboardList },
+  { key: "clinics", href: "/clinicas", label: "Clínicas", icon: Building2 },
+  { key: "members", href: "/usuarios", label: "Usuários", icon: Users },
+  { key: "billing", href: "/assinatura", label: "Assinatura", icon: CreditCard },
+  { key: "audit", href: "/auditoria", label: "Auditoria", icon: ShieldCheck },
+  { key: "profile", href: "/perfil", label: "Meu perfil", icon: UserCircle },
 ];
 
 const WELCOME_SESSION_KEY = "clinicore.welcome.seen";
@@ -52,11 +54,13 @@ export function AppShell({
   profile,
   clinics,
   activeClinic,
+  allowedNavigation,
 }: {
   children: React.ReactNode;
   profile: UserProfile | null;
   clinics: Clinic[];
   activeClinic: Clinic | null;
+  allowedNavigation: NavigationKey[];
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
@@ -64,6 +68,10 @@ export function AppShell({
   const [welcomePhase, setWelcomePhase] = useState<"entering" | "visible" | "leaving">("entering");
   const welcomeTimerRef = useRef<number | null>(null);
   const [, startWelcomeTransition] = useTransition();
+  const visibleNavigation = useMemo(
+    () => nav.filter((item) => allowedNavigation.includes(item.key)),
+    [allowedNavigation],
+  );
 
   useEffect(() => {
     const saved = window.localStorage.getItem("clinicore.sidebar.collapsed");
@@ -164,7 +172,7 @@ export function AppShell({
         </div>
 
         <nav className="grid gap-1">
-          {nav.map((item) => {
+          {visibleNavigation.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const content = (
               <>
@@ -234,7 +242,7 @@ export function AppShell({
         </header>
 
         <nav className="flex gap-2 overflow-x-auto border-b bg-card px-4 py-2 lg:hidden">
-          {nav
+          {visibleNavigation
             .filter((item) => !item.disabled)
             .map((item) => (
               <Button key={item.href} asChild variant={pathname.startsWith(item.href) ? "secondary" : "ghost"} size="sm">

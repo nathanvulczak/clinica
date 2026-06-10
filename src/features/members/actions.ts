@@ -15,7 +15,10 @@ import {
   updateMemberRoleSchema,
   updateMemberStatusSchema,
 } from "@/features/members/validation";
-import { CRITICAL_PERMISSION_OPTIONS } from "@/config/permissions";
+import {
+  CRITICAL_PERMISSION_OPTIONS,
+  roleHasDefaultPermission,
+} from "@/config/permissions";
 import { logAuditEvent } from "@/services/audit/audit-service";
 
 export type MemberActionState = {
@@ -578,79 +581,46 @@ export async function updateMemberPermissionAction(
     .eq("action", parsed.data.action)
     .maybeSingle();
 
-  if (parsed.data.enabled) {
-    const { data: permission, error } = await admin
-      .from("member_permissions")
-      .upsert(
-        {
-          clinic_id: member.clinic_id,
-          member_id: member.id,
-          module: parsed.data.module,
-          action: parsed.data.action,
-          allowed: true,
-          reason: "Permissão individual liberada pelo painel de usuários.",
-          deleted_at: null,
-          created_by: user.id,
-          updated_by: user.id,
-        },
-        { onConflict: "clinic_id,member_id,module,action" },
-      )
-      .select("id")
-      .single();
-
-    if (error) {
-      return { error: "Não foi possível liberar a permissão." };
-    }
-
-    await logAuditEvent({
-      clinicId: member.clinic_id,
-      userId: user.id,
-      actionType: "member_permission_updated",
-      module: "permissions",
-      recordTable: "member_permissions",
-      recordId: permission.id,
-      oldValues: previous ? { allowed: previous.allowed } : null,
-      newValues: {
+  const { data: permission, error } = await admin
+    .from("member_permissions")
+    .upsert(
+      {
+        clinic_id: member.clinic_id,
         member_id: member.id,
         module: parsed.data.module,
         action: parsed.data.action,
-        allowed: true,
-      },
-      level: "security",
-      notes: "Permissão individual liberada para membro da clínica.",
-    });
-  } else if (previous?.id) {
-    const { error } = await admin
-      .from("member_permissions")
-      .update({
-        allowed: false,
-        deleted_at: new Date().toISOString(),
+        allowed: parsed.data.enabled,
+        reason: "Permissão individual configurada pelo painel de usuários.",
+        deleted_at: null,
+        created_by: user.id,
         updated_by: user.id,
-      })
-      .eq("id", previous.id);
-
-    if (error) {
-      return { error: "Não foi possível remover a permissão." };
-    }
-
-    await logAuditEvent({
-      clinicId: member.clinic_id,
-      userId: user.id,
-      actionType: "member_permission_updated",
-      module: "permissions",
-      recordTable: "member_permissions",
-      recordId: previous.id,
-      oldValues: { allowed: previous.allowed },
-      newValues: {
-        member_id: member.id,
-        module: parsed.data.module,
-        action: parsed.data.action,
-        allowed: false,
       },
-      level: "security",
-      notes: "Permissão individual removida de membro da clínica.",
-    });
+      { onConflict: "clinic_id,member_id,module,action" },
+    )
+    .select("id")
+    .single();
+
+  if (error) {
+    return { error: "Não foi possível atualizar a permissão individual." };
   }
+
+  await logAuditEvent({
+    clinicId: member.clinic_id,
+    userId: user.id,
+    actionType: "member_permission_updated",
+    module: "permissions",
+    recordTable: "member_permissions",
+    recordId: permission.id,
+    oldValues: previous ? { allowed: previous.allowed } : null,
+    newValues: {
+      member_id: member.id,
+      module: parsed.data.module,
+      action: parsed.data.action,
+      allowed: parsed.data.enabled,
+    },
+    level: "security",
+    notes: "Permissão individual atualizada para membro da clínica.",
+  });
 
   revalidatePath("/usuarios");
   revalidatePath("/auditoria");
@@ -711,9 +681,18 @@ export async function updateMemberPermissionsAction(
   }
 
   const currentKeys = new Set(
-    (existingPermissions ?? [])
-      .filter((permission) => permission.allowed && !permission.deleted_at)
-      .map((permission) => `${permission.module}:${permission.action}`),
+    CRITICAL_PERMISSION_OPTIONS.filter((option) => {
+      const existing = (existingPermissions ?? []).find(
+        (permission) =>
+          permission.module === option.module &&
+          permission.action === option.action &&
+          !permission.deleted_at,
+      );
+
+      return existing
+        ? existing.allowed
+        : roleHasDefaultPermission(member.role, option.module, option.action);
+    }).map((option) => `${option.module}:${option.action}`),
   );
 
   const changed = [...allowedKeys].some(
@@ -728,17 +707,35 @@ export async function updateMemberPermissionsAction(
     const key = `${option.module}:${option.action}`;
     const shouldEnable = selectedKeys.has(key);
     const existing = (existingPermissions ?? []).find(
-      (permission) => permission.module === option.module && permission.action === option.action,
+      (permission) =>
+        permission.module === option.module &&
+        permission.action === option.action &&
+        !permission.deleted_at,
     );
+    const roleDefault = roleHasDefaultPermission(member.role, option.module, option.action);
 
-    if (shouldEnable && (!existing?.allowed || existing.deleted_at)) {
+    if (existing && existing.allowed !== shouldEnable) {
+      const { error } = await admin
+        .from("member_permissions")
+        .update({
+          allowed: shouldEnable,
+          deleted_at: null,
+          reason: "Permissão individual configurada pelo painel de usuários.",
+          updated_by: user.id,
+        })
+        .eq("id", existing.id);
+
+      if (error) {
+        return { error: "Não foi possível atualizar todas as permissões selecionadas." };
+      }
+    } else if (!existing && shouldEnable !== roleDefault) {
       const { error } = await admin.from("member_permissions").upsert(
         {
           clinic_id: member.clinic_id,
           member_id: member.id,
           module: option.module,
           action: option.action,
-          allowed: true,
+          allowed: shouldEnable,
           reason: "Permissão individual configurada pelo painel de usuários.",
           deleted_at: null,
           created_by: user.id,
@@ -749,19 +746,6 @@ export async function updateMemberPermissionsAction(
 
       if (error) {
         return { error: "Não foi possível salvar todas as permissões selecionadas." };
-      }
-    } else if (existing?.allowed && !existing.deleted_at) {
-      const { error } = await admin
-        .from("member_permissions")
-        .update({
-          allowed: false,
-          deleted_at: new Date().toISOString(),
-          updated_by: user.id,
-        })
-        .eq("id", existing.id);
-
-      if (error) {
-        return { error: "Não foi possível remover todas as permissões desmarcadas." };
       }
     }
   }

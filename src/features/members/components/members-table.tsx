@@ -9,6 +9,7 @@ import {
   MODULE_LABELS,
   ROLE_LABELS,
   ROLE_PRESET_DESCRIPTIONS,
+  roleHasDefaultPermission,
 } from "@/config/permissions";
 import {
   deleteMemberAccountAction,
@@ -353,7 +354,8 @@ function MemberPermissionsDialog({
             <div className="min-w-0">
               <Dialog.Title className="text-lg font-semibold">Permissões individuais</Dialog.Title>
               <Dialog.Description className="mt-1 text-sm leading-6 text-muted-foreground">
-                Ajustes adicionais para {member.profile?.full_name ?? "este usuário"} na clínica ativa.
+                Defina o acesso efetivo de {member.profile?.full_name ?? "este usuário"} na clínica ativa.
+                As opções começam com o preset do perfil e podem ser liberadas ou bloqueadas individualmente.
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -379,10 +381,13 @@ function MemberPermissionsDialog({
                 <div className="grid gap-3 md:grid-cols-2">
                   {CRITICAL_PERMISSION_OPTIONS.map((option) => {
                     const key = `${option.module}:${option.action}`;
-                    const enabled = permissionOverrides.some(
+                    const explicitOverride = permissionOverrides.find(
                       (permission) =>
                         permission.module === option.module && permission.action === option.action,
                     );
+                    const enabled =
+                      explicitOverride?.allowed ??
+                      roleHasDefaultPermission(member.role, option.module, option.action);
 
                     return (
                       <label

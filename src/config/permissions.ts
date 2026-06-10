@@ -1,5 +1,7 @@
 import type { AppRole, PermissionAction, PermissionModule } from "@/types/domain";
 
+export type PermissionKey = `${PermissionModule}:${PermissionAction}`;
+
 export const PERMISSION_MODULES: PermissionModule[] = [
   "clinics",
   "members",
@@ -70,6 +72,95 @@ export const ROLE_PRESET_DESCRIPTIONS: Record<AppRole, string> = {
   professional: "Acesso básico ao ambiente e recursos liberados individualmente.",
 };
 
+export const ROLE_PERMISSION_PRESETS: Record<AppRole, PermissionKey[]> = {
+  platform_admin: [],
+  clinic_owner: [],
+  clinic_admin: [
+    "clinics:view",
+    "clinics:edit",
+    "members:view",
+    "members:create",
+    "members:edit",
+    "members:manage",
+    "permissions:view",
+    "permissions:manage",
+    "audit:view",
+    "audit:export",
+    "patients:view",
+    "patients:create",
+    "patients:edit",
+    "patients:delete",
+    "patients:export",
+    "schedule:view",
+    "schedule:create",
+    "schedule:edit",
+    "schedule:delete",
+    "schedule:manage",
+    "schedule:export",
+    "financial:view",
+    "financial:manage",
+    "reports:view",
+    "reports:export",
+  ],
+  doctor: [
+    "patients:view",
+    "medical_records:view",
+    "medical_records:create",
+    "medical_records:edit",
+    "medical_records:access_medical_record",
+    "schedule:view",
+    "schedule:edit",
+  ],
+  nurse: [
+    "patients:view",
+    "patients:edit",
+    "medical_records:view",
+    "medical_records:create",
+    "medical_records:edit",
+    "medical_records:access_medical_record",
+    "schedule:view",
+    "schedule:edit",
+  ],
+  receptionist: [
+    "patients:view",
+    "patients:create",
+    "patients:edit",
+    "patients:export",
+    "schedule:view",
+    "schedule:create",
+    "schedule:edit",
+    "schedule:manage",
+    "schedule:export",
+  ],
+  financial: [
+    "billing:view",
+    "financial:view",
+    "financial:create",
+    "financial:edit",
+    "financial:manage",
+    "financial:export",
+    "reports:view",
+    "reports:export",
+  ],
+  professional: ["patients:view", "schedule:view", "schedule:edit"],
+};
+
+export function permissionKey(module: PermissionModule, action: PermissionAction): PermissionKey {
+  return `${module}:${action}`;
+}
+
+export function roleHasDefaultPermission(
+  role: AppRole,
+  module: PermissionModule,
+  action: PermissionAction,
+) {
+  return (
+    role === "platform_admin" ||
+    role === "clinic_owner" ||
+    ROLE_PERMISSION_PRESETS[role].includes(permissionKey(module, action))
+  );
+}
+
 export const CRITICAL_PERMISSION_OPTIONS: Array<{
   module: PermissionModule;
   action: PermissionAction;
@@ -77,10 +168,34 @@ export const CRITICAL_PERMISSION_OPTIONS: Array<{
   description: string;
 }> = [
   {
+    module: "clinics",
+    action: "view",
+    label: "Visualizar clínicas",
+    description: "Permite consultar os dados administrativos das clínicas vinculadas.",
+  },
+  {
+    module: "clinics",
+    action: "edit",
+    label: "Editar clínica",
+    description: "Permite alterar os dados administrativos da clínica.",
+  },
+  {
+    module: "members",
+    action: "view",
+    label: "Visualizar usuários",
+    description: "Permite consultar os membros e seus perfis de acesso.",
+  },
+  {
     module: "members",
     action: "manage",
     label: "Gerenciar usuários",
     description: "Permite cadastrar, suspender e alterar perfis de membros.",
+  },
+  {
+    module: "permissions",
+    action: "view",
+    label: "Visualizar permissões",
+    description: "Permite consultar a matriz de acesso dos usuários.",
   },
   {
     module: "permissions",
@@ -180,14 +295,68 @@ export const CRITICAL_PERMISSION_OPTIONS: Array<{
   },
   {
     module: "medical_records",
+    action: "view",
+    label: "Visualizar prontuários",
+    description: "Prepara a visualização do módulo clínico quando ele for habilitado.",
+  },
+  {
+    module: "medical_records",
+    action: "create",
+    label: "Criar registros clínicos",
+    description: "Prepara a criação de evoluções e registros em prontuário.",
+  },
+  {
+    module: "medical_records",
+    action: "edit",
+    label: "Editar registros clínicos",
+    description: "Prepara a edição controlada de registros clínicos permitidos.",
+  },
+  {
+    module: "medical_records",
     action: "access_medical_record",
     label: "Acessar prontuário",
     description: "Permissão sensível para dados clínicos protegidos.",
   },
   {
     module: "financial",
+    action: "view",
+    label: "Visualizar financeiro",
+    description: "Permite consultar o módulo financeiro da clínica.",
+  },
+  {
+    module: "financial",
+    action: "create",
+    label: "Criar lançamentos financeiros",
+    description: "Prepara a criação de cobranças, recebimentos e despesas.",
+  },
+  {
+    module: "financial",
+    action: "edit",
+    label: "Editar lançamentos financeiros",
+    description: "Prepara a alteração de lançamentos autorizados.",
+  },
+  {
+    module: "financial",
     action: "manage",
     label: "Gerenciar financeiro",
     description: "Prepara acesso para contas, recebimentos e fluxo de caixa.",
+  },
+  {
+    module: "financial",
+    action: "export",
+    label: "Exportar financeiro",
+    description: "Prepara exportações financeiras conforme filtros autorizados.",
+  },
+  {
+    module: "reports",
+    action: "view",
+    label: "Visualizar relatórios",
+    description: "Prepara o acesso aos relatórios operacionais e administrativos.",
+  },
+  {
+    module: "reports",
+    action: "export",
+    label: "Exportar relatórios",
+    description: "Prepara a exportação dos relatórios liberados para o usuário.",
   },
 ];

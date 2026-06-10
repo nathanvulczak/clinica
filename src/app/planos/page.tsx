@@ -2,8 +2,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PlanCards } from "@/features/billing/components/plan-cards";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { hasBillableAccess } from "@/services/billing/access";
 import { syncUserSubscriptionFromStripe } from "@/services/billing/stripe-sync";
+import { getBillingAuthorization } from "@/services/billing/authorization";
 import type { PlanSlug, SubscriptionStatus, SubscriptionSummary } from "@/types/domain";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,10 +33,16 @@ export default async function PlanosPage({
   let subscription: SubscriptionSummary | null = null;
 
   if (user) {
-    const { data } = await supabase
+    const billingAuthorization = await getBillingAuthorization();
+
+    if (!billingAuthorization.canManage || !billingAuthorization.ownerUserId) {
+      redirect("/dashboard?access=denied&module=billing");
+    }
+
+    const { data } = await createSupabaseAdminClient()
       .from("subscriptions")
       .select("plan_slug, status, current_period_end, stripe_customer_id, stripe_subscription_id, cancel_at_period_end")
-      .eq("owner_user_id", user.id)
+      .eq("owner_user_id", billingAuthorization.ownerUserId)
       .maybeSingle();
 
     subscription = data as SubscriptionSummary | null;
@@ -42,7 +50,7 @@ export default async function PlanosPage({
     if (!hasBillableAccess(subscription)) {
       try {
         subscription = (await syncUserSubscriptionFromStripe({
-          ownerUserId: user.id,
+          ownerUserId: billingAuthorization.ownerUserId,
           email: user.email,
         })) as SubscriptionSummary | null;
       } catch {

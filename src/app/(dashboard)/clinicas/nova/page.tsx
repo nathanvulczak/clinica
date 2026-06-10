@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PLAN_LIMITS } from "@/config/plans";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { PageHeader } from "@/components/app/page-header";
@@ -7,9 +8,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ClinicForm } from "@/features/clinics/components/clinic-form";
 import { getCurrentSubscription } from "@/repositories/subscriptions";
 import type { PlanSlug } from "@/types/domain";
+import { getBillingAuthorization } from "@/services/billing/authorization";
 
 export default async function NovaClinicaPage() {
-  const [{ clinics }, subscription] = await Promise.all([getActiveClinicContext(), getCurrentSubscription()]);
+  const { clinics } = await getActiveClinicContext();
+  const billingAuthorization = await getBillingAuthorization();
+
+  if (!billingAuthorization.canManage || !billingAuthorization.ownerUserId) {
+    redirect("/dashboard?access=denied&module=clinics");
+  }
+
+  const subscription = await getCurrentSubscription(billingAuthorization.ownerUserId);
   const limit = subscription?.plan_slug ? PLAN_LIMITS[subscription.plan_slug as PlanSlug] : 0;
   const hasActiveSubscription = Boolean(subscription && ["active", "trialing"].includes(subscription.status));
   const reachedLimit = hasActiveSubscription && clinics.length >= limit;

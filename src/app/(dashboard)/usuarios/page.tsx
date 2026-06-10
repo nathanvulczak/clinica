@@ -4,31 +4,34 @@ import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUserId, listClinicMembers } from "@/repositories/clinics";
 import { listClinicMemberPermissionOverrides } from "@/repositories/permissions";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import {
+  auditDeniedModuleAccess,
+  getClinicAuthorization,
+} from "@/services/authorization/clinic-access";
 
 export default async function UsuariosPage() {
   const { activeClinic } = await getActiveClinicContext();
+  const authorization = await getClinicAuthorization(activeClinic?.id);
+
+  if (
+    activeClinic &&
+    !authorization.can("members", "view") &&
+    !authorization.can("members", "manage")
+  ) {
+    await auditDeniedModuleAccess(
+      activeClinic.id,
+      "members",
+      "Tentativa de acesso direto ao módulo de usuários sem permissão.",
+    );
+    redirect("/dashboard?access=denied&module=members");
+  }
+
   const [members, currentUserId, permissionOverrides] = await Promise.all([
     listClinicMembers(activeClinic?.id),
     getCurrentUserId(),
     listClinicMemberPermissionOverrides(activeClinic?.id),
   ]);
-  const supabase = await createSupabaseServerClient();
-  const [manageMembersResult, managePermissionsResult] = activeClinic
-    ? await Promise.all([
-        supabase.rpc("user_has_permission", {
-          clinic_uuid: activeClinic.id,
-          permission_module: "members",
-          permission_action: "manage",
-        }),
-        supabase.rpc("user_has_permission", {
-          clinic_uuid: activeClinic.id,
-          permission_module: "permissions",
-          permission_action: "manage",
-        }),
-      ])
-    : [{ data: false }, { data: false }];
-
   return (
     <>
       <PageHeader
@@ -48,8 +51,8 @@ export default async function UsuariosPage() {
             currentUserId={currentUserId}
             permissionOverrides={permissionOverrides}
             activeClinicName={activeClinic?.trade_name}
-            canManageMembers={manageMembersResult.data === true}
-            canManagePermissions={managePermissionsResult.data === true}
+            canManageMembers={authorization.can("members", "manage")}
+            canManagePermissions={authorization.can("permissions", "manage")}
           />
         </CardContent>
       </Card>

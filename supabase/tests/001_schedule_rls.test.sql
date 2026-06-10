@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(13);
+select plan(17);
 
 insert into auth.users (
   id,
@@ -220,6 +220,14 @@ select ok(
   ),
   'owner pode gerenciar a agenda'
 );
+select ok(
+  public.user_has_permission(
+    '20000000-0000-0000-0000-000000000001',
+    'billing',
+    'manage'
+  ),
+  'owner pode gerenciar a assinatura'
+);
 select is(
   (select count(*)::integer from public.appointments),
   2,
@@ -242,6 +250,22 @@ select ok(
     'manage'
   ),
   'doctor nao recebe visao ampla por padrao'
+);
+select ok(
+  not public.user_has_permission(
+    '20000000-0000-0000-0000-000000000001',
+    'billing',
+    'view'
+  ),
+  'doctor nao acessa assinatura por padrao'
+);
+select ok(
+  not public.user_has_permission(
+    '20000000-0000-0000-0000-000000000001',
+    'audit',
+    'view'
+  ),
+  'doctor nao acessa auditoria por padrao'
 );
 select is(
   (select count(*)::integer from public.appointments),
@@ -285,12 +309,20 @@ select is(
 
 select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000005', true);
 select ok(
-  public.user_has_permission(
+  not public.user_has_permission(
     '20000000-0000-0000-0000-000000000001',
     'schedule',
     'view'
   ),
-  'financeiro pode consultar a agenda quando o preset permite'
+  'financeiro nao acessa agenda clinica por padrao'
+);
+select ok(
+  public.user_has_permission(
+    '20000000-0000-0000-0000-000000000001',
+    'billing',
+    'view'
+  ),
+  'financeiro pode consultar assinatura sem gerencia-la'
 );
 select ok(
   not public.user_has_permission(

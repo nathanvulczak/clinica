@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
-import { Download, Save, Trash2 } from "lucide-react";
+import { CheckCircle2, Download, LoaderCircle, Save, Trash2 } from "lucide-react";
 import {
   deleteRegistrationAction,
   saveAvailabilityAction,
@@ -92,6 +92,15 @@ export function PatientForm({
   const [postalCode, setPostalCode] = useState(
     patient?.postal_code ? formatPostalCode(patient.postal_code) : "",
   );
+  const [addressLine, setAddressLine] = useState(patient?.address_line ?? "");
+  const [addressComplement, setAddressComplement] = useState(patient?.address_complement ?? "");
+  const [neighborhood, setNeighborhood] = useState(patient?.neighborhood ?? "");
+  const [city, setCity] = useState(patient?.city ?? "");
+  const [addressState, setAddressState] = useState<{
+    status: "idle" | "loading" | "success" | "error";
+    message?: string;
+  }>({ status: "idle" });
+  const [addressUf, setAddressUf] = useState(patient?.state ?? "");
 
   useRegistrationToast(
     state,
@@ -103,6 +112,66 @@ export function PatientForm({
       onCompleted?.();
     }
   }, [onCompleted, state.success]);
+
+  useEffect(() => {
+    const normalizedCep = postalCode.replace(/\D/g, "");
+
+    if (normalizedCep.length !== 8) {
+      setAddressState({ status: "idle" });
+      return;
+    }
+
+    const controller = new AbortController();
+    const lookupTimer = window.setTimeout(async () => {
+      setAddressState({ status: "loading", message: "Buscando endereço..." });
+
+      try {
+        const response = await fetch(`/api/address/cep/${normalizedCep}`, {
+          signal: controller.signal,
+        });
+        const result = (await response.json()) as {
+          addressLine?: string;
+          city?: string;
+          complement?: string;
+          error?: string;
+          neighborhood?: string;
+          state?: string;
+        };
+
+        if (!response.ok) {
+          setAddressState({
+            status: "error",
+            message: result.error ?? "CEP não encontrado.",
+          });
+          return;
+        }
+
+        setAddressLine(result.addressLine ?? "");
+        setAddressComplement((current) => current || result.complement || "");
+        setNeighborhood(result.neighborhood ?? "");
+        setCity(result.city ?? "");
+        setAddressUf(result.state ?? "");
+        setAddressState({
+          status: "success",
+          message: "Endereço preenchido automaticamente.",
+        });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        setAddressState({
+          status: "error",
+          message: "Não foi possível consultar o CEP. Preencha manualmente.",
+        });
+      }
+    }, 350);
+
+    return () => {
+      window.clearTimeout(lookupTimer);
+      controller.abort();
+    };
+  }, [postalCode]);
 
   return (
     <form ref={formRef} action={formAction} className="grid gap-5">
@@ -271,13 +340,28 @@ export function PatientForm({
               onChange={(event) => setPostalCode(formatPostalCode(event.target.value))}
               disabled={disabled || pending}
             />
+            {addressState.status !== "idle" ? (
+              <p
+                className={`flex items-center gap-1.5 text-xs ${
+                  addressState.status === "error" ? "text-destructive" : "text-muted-foreground"
+                }`}
+              >
+                {addressState.status === "loading" ? (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                ) : addressState.status === "success" ? (
+                  <CheckCircle2 className="size-3.5 text-primary" />
+                ) : null}
+                {addressState.message}
+              </p>
+            ) : null}
           </div>
           <div className="grid gap-2">
             <Label htmlFor={`address-${patient?.id ?? "new"}`}>Logradouro</Label>
             <Input
               id={`address-${patient?.id ?? "new"}`}
               name="address_line"
-              defaultValue={patient?.address_line ?? ""}
+              value={addressLine}
+              onChange={(event) => setAddressLine(event.target.value)}
               disabled={disabled || pending}
             />
           </div>
@@ -297,7 +381,8 @@ export function PatientForm({
             <Input
               id={`complement-${patient?.id ?? "new"}`}
               name="address_complement"
-              defaultValue={patient?.address_complement ?? ""}
+              value={addressComplement}
+              onChange={(event) => setAddressComplement(event.target.value)}
               disabled={disabled || pending}
             />
           </div>
@@ -306,7 +391,8 @@ export function PatientForm({
             <Input
               id={`neighborhood-${patient?.id ?? "new"}`}
               name="neighborhood"
-              defaultValue={patient?.neighborhood ?? ""}
+              value={neighborhood}
+              onChange={(event) => setNeighborhood(event.target.value)}
               disabled={disabled || pending}
             />
           </div>
@@ -315,7 +401,8 @@ export function PatientForm({
             <Input
               id={`city-${patient?.id ?? "new"}`}
               name="city"
-              defaultValue={patient?.city ?? ""}
+              value={city}
+              onChange={(event) => setCity(event.target.value)}
               disabled={disabled || pending}
             />
           </div>
@@ -325,11 +412,11 @@ export function PatientForm({
               id={`state-${patient?.id ?? "new"}`}
               name="state"
               maxLength={2}
-              defaultValue={patient?.state ?? ""}
+              value={addressUf}
               disabled={disabled || pending}
-              onChange={(event) => {
-                event.target.value = event.target.value.toUpperCase().replace(/[^A-Z]/g, "");
-              }}
+              onChange={(event) =>
+                setAddressUf(event.target.value.toUpperCase().replace(/[^A-Z]/g, ""))
+              }
             />
           </div>
         </div>

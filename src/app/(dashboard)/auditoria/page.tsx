@@ -11,6 +11,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { redirect } from "next/navigation";
+import {
+  auditDeniedModuleAccess,
+  getClinicAuthorization,
+} from "@/services/authorization/clinic-access";
 
 const actionLabels: Record<string, string> = {
   all: "Todas",
@@ -246,6 +251,16 @@ export default async function AuditoriaPage({
 }) {
   const params = await searchParams;
   const { activeClinic } = await getActiveClinicContext();
+  const authorization = await getClinicAuthorization(activeClinic?.id);
+
+  if (activeClinic && !authorization.can("audit", "view")) {
+    await auditDeniedModuleAccess(
+      activeClinic.id,
+      "audit",
+      "Tentativa de acesso direto ao módulo de auditoria sem permissão.",
+    );
+    redirect("/dashboard?access=denied&module=audit");
+  }
   const hasSearched = params.searched === "1";
   const filters: AuditLogFilters = {
     from: params.from,

@@ -6,6 +6,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getStripe } from "@/lib/stripe";
 import { ensureBillingReferenceData } from "@/services/billing/reference-data";
 import { resolveActiveStripeSubscription } from "@/services/billing/stripe-sync";
+import { getBillingAuthorization } from "@/services/billing/authorization";
+import { auditDeniedModuleAccess } from "@/services/authorization/clinic-access";
 import type { PlanSlug } from "@/types/domain";
 
 const validPlans: PlanSlug[] = ["singular", "duo", "master"];
@@ -34,11 +36,24 @@ export async function GET(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user?.email) {
+  if (!user) {
     return NextResponse.redirect(
       new URL(`/login?next=/api/billing/checkout?plan=${plan}`, request.url),
     );
   }
+
+  const billingAuthorization = await getBillingAuthorization();
+
+  if (!billingAuthorization.canManage || !billingAuthorization.ownerUserId) {
+    await auditDeniedModuleAccess(
+      billingAuthorization.activeClinic?.id,
+      "billing",
+      "Tentativa de iniciar checkout sem permissão para gerenciar assinatura.",
+    );
+    return NextResponse.redirect(new URL("/dashboard?access=denied&module=billing", request.url));
+  }
+
+  const ownerUserId = billingAuthorization.ownerUserId;
 
   const priceId = process.env[getStripePriceEnvName(plan)];
 
@@ -55,6 +70,17 @@ export async function GET(request: NextRequest) {
   }
 
   const admin = createSupabaseAdminClient();
+  const { data: ownerProfile } = await admin
+    .from("profiles")
+    .select("full_name, email")
+    .eq("id", ownerUserId)
+    .maybeSingle();
+  const billingEmail = ownerProfile?.email ?? user.email;
+
+  if (!billingEmail) {
+    return redirectWithBillingError(request, "missing_billing_email", plan);
+  }
+
   try {
     await ensureBillingReferenceData();
   } catch {
@@ -64,7 +90,7 @@ export async function GET(request: NextRequest) {
   const { data: existingSubscription } = await admin
     .from("subscriptions")
     .select("stripe_customer_id, stripe_subscription_id, plan_slug, status")
-    .eq("owner_user_id", user.id)
+    .eq("owner_user_id", ownerUserId)
     .maybeSingle();
 
   const stripe = getStripe();
@@ -78,7 +104,7 @@ export async function GET(request: NextRequest) {
       activeSubscription = await resolveActiveStripeSubscription({
         customerId,
         storedSubscriptionId: existingSubscription?.stripe_subscription_id,
-        ownerUserId: user.id,
+        ownerUserId,
       });
     } catch {
       return redirectWithBillingError(request, "stripe_subscription_sync_failed", plan);
@@ -99,7 +125,7 @@ export async function GET(request: NextRequest) {
       const { count } = await admin
         .from("clinics")
         .select("id", { count: "exact", head: true })
-        .eq("created_by", user.id)
+        .eq("created_by", ownerUserId)
         .is("deleted_at", null);
 
       if ((count ?? 0) > targetLimit) {
@@ -141,10 +167,10 @@ export async function GET(request: NextRequest) {
 
     try {
       customer = await stripe.customers.create({
-        email: user.email,
-        name: String(user.user_metadata?.full_name ?? ""),
+        email: billingEmail,
+        name: ownerProfile?.full_name ?? String(user.user_metadata?.full_name ?? ""),
         metadata: {
-          user_id: user.id,
+          user_id: ownerUserId,
         },
       });
     } catch {
@@ -155,7 +181,7 @@ export async function GET(request: NextRequest) {
 
     await admin.from("subscriptions").upsert(
       {
-        owner_user_id: user.id,
+        owner_user_id: ownerUserId,
         stripe_customer_id: customerId,
         plan_slug: plan,
         status: "inactive",
@@ -174,15 +200,17 @@ export async function GET(request: NextRequest) {
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${getAppUrl()}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${getAppUrl()}/planos?selected=${plan}&checkout=cancelled&reason=subscription_required`,
-      client_reference_id: user.id,
+      client_reference_id: ownerUserId,
       subscription_data: {
         metadata: {
-          user_id: user.id,
+          user_id: ownerUserId,
+          actor_user_id: user.id,
           plan_slug: plan,
         },
       },
       metadata: {
-        user_id: user.id,
+        user_id: ownerUserId,
+        actor_user_id: user.id,
         plan_slug: plan,
       },
     });

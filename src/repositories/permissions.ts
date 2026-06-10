@@ -24,7 +24,6 @@ export async function listClinicMemberPermissionOverrides(
     .from("member_permissions")
     .select("id, clinic_id, member_id, module, action, allowed, reason")
     .eq("clinic_id", clinicId)
-    .eq("allowed", true)
     .is("deleted_at", null)
     .order("module", { ascending: true })
     .order("action", { ascending: true });
