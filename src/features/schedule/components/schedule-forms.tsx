@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Ban, CalendarPlus, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 import {
@@ -14,7 +15,6 @@ import {
   deleteScheduleBlockAction,
   upsertProfessionalScheduleSettingsAction,
 } from "@/features/schedule/actions";
-import { formatCpf, formatPhone, normalizeEmail } from "@/lib/formatters";
 import type {
   ClinicRoom,
   ClinicService,
@@ -83,24 +83,29 @@ export function AppointmentForm({
   services,
   rooms,
   professionalProfiles,
+  scheduleSettings,
   defaultDate,
   disabled,
+  onCompleted,
 }: {
   professionals: ScheduleProfessional[];
   patients: PatientSummary[];
   services: ClinicService[];
   rooms: ClinicRoom[];
   professionalProfiles: ProfessionalOperationalProfile[];
+  scheduleSettings: ScheduleSettings[];
   defaultDate: string;
   disabled?: boolean;
+  onCompleted?: () => void;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction, pending] = useActionState(createAppointmentAction, {});
-  const [patientMode, setPatientMode] = useState(patients.length > 0 ? patients[0].id : "new");
-  const [cpf, setCpf] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const initialProfessionalId = professionals[0]?.id ?? "";
   const initialProfessionalProfile = professionalProfiles.find(
+    (item) => item.professional_member_id === initialProfessionalId,
+  );
+  const initialScheduleSettings = scheduleSettings.find(
     (item) => item.professional_member_id === initialProfessionalId,
   );
   const initialService = services.find(
@@ -114,75 +119,48 @@ export function AppointmentForm({
     initialService?.id ?? "none",
   );
   const [roomId, setRoomId] = useState(initialRoom?.id ?? "none");
-  const [duration, setDuration] = useState(initialService?.duration_minutes ?? 30);
+  const [duration, setDuration] = useState(
+    initialService?.duration_minutes ?? initialScheduleSettings?.slot_minutes ?? 30,
+  );
 
   useScheduleToast(state, "O compromisso entrou no fluxo da agenda e foi registrado na auditoria.");
 
-  const canSubmit = !disabled && professionals.length > 0;
+  useEffect(() => {
+    if (state.success) {
+      onCompleted?.();
+    }
+  }, [onCompleted, state.success]);
+
+  const canSubmit = !disabled && professionals.length > 0 && patients.length > 0;
 
   return (
-    <form action={formAction} className="grid gap-4">
-      <div className="grid gap-2">
-        <Label htmlFor="patient_id">Paciente</Label>
-        <Select
-          id="patient_id"
-          name="patient_id"
-          value={patientMode}
-          disabled={!canSubmit || pending}
-          onChange={(event) => setPatientMode(event.target.value)}
-        >
-          {patients.map((patient) => (
-            <option key={patient.id} value={patient.id}>
-              {patient.full_name}
-            </option>
-          ))}
-          <option value="new">Novo paciente</option>
-        </Select>
-      </div>
-
-      {patientMode === "new" ? (
-        <div className="grid gap-3 rounded-md border bg-background p-3">
-          <div className="grid gap-2">
-            <Label htmlFor="patient_full_name">Nome completo do paciente</Label>
-            <Input id="patient_full_name" name="patient_full_name" disabled={!canSubmit || pending} />
-          </div>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <div className="grid gap-2">
-              <Label htmlFor="patient_cpf">CPF</Label>
-              <Input
-                id="patient_cpf"
-                name="patient_cpf"
-                inputMode="numeric"
-                value={cpf}
-                onChange={(event) => setCpf(formatCpf(event.target.value))}
-                disabled={!canSubmit || pending}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="patient_phone">Telefone</Label>
-              <Input
-                id="patient_phone"
-                name="patient_phone"
-                inputMode="tel"
-                value={phone}
-                onChange={(event) => setPhone(formatPhone(event.target.value))}
-                disabled={!canSubmit || pending}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="patient_email">E-mail</Label>
-              <Input
-                id="patient_email"
-                name="patient_email"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(normalizeEmail(event.target.value))}
-                disabled={!canSubmit || pending}
-              />
-            </div>
-          </div>
+    <form ref={formRef} action={formAction} className="grid gap-4">
+      {patients.length === 0 ? (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900">
+          <p className="font-medium">Cadastre o paciente antes de criar o compromisso.</p>
+          <p className="mt-1">A Agenda utiliza somente pacientes já validados na clínica.</p>
+          <Button asChild variant="outline" size="sm" className="mt-3">
+            <Link href="/cadastros?section=patients">Abrir cadastro de pacientes</Link>
+          </Button>
         </div>
-      ) : null}
+      ) : (
+        <div className="grid gap-2">
+          <Label htmlFor="patient_id">Paciente</Label>
+          <Select
+            id="patient_id"
+            name="patient_id"
+            defaultValue={patients[0]?.id}
+            disabled={!canSubmit || pending}
+            required
+          >
+            {patients.map((patient) => (
+              <option key={patient.id} value={patient.id}>
+                {patient.social_name || patient.full_name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
 
       <div className="grid gap-2">
         <Label htmlFor="professional_member_id">Profissional</Label>
@@ -198,12 +176,15 @@ export function AppointmentForm({
             );
             const service = services.find((item) => item.id === profile?.default_service_id);
             const room = rooms.find((item) => item.id === profile?.default_room_id);
+            const settings = scheduleSettings.find(
+              (item) => item.professional_member_id === nextProfessionalId,
+            );
             const nextServiceId = service?.id ?? "none";
 
             setProfessionalId(nextProfessionalId);
             setServiceId(nextServiceId);
             setRoomId(room?.id ?? "none");
-            setDuration(service?.duration_minutes ?? 30);
+            setDuration(service?.duration_minutes ?? settings?.slot_minutes ?? 30);
           }}
           required
         >
@@ -325,10 +306,22 @@ export function AppointmentForm({
       </div>
 
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
-      <Button disabled={!canSubmit || pending}>
+      <Button
+        type="button"
+        disabled={!canSubmit || pending}
+        onClick={() => setConfirmOpen(true)}
+      >
         <CalendarPlus />
         {pending ? "Agendando..." : "Agendar consulta"}
       </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Confirmar novo compromisso?"
+        description="O horário será validado contra consultas, bloqueios e ocupação do consultório antes da gravação."
+        confirmLabel="Confirmar agendamento"
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
     </form>
   );
 }

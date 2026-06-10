@@ -1,4 +1,8 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   getAdjacentCalendarDate,
@@ -10,6 +14,8 @@ import { cn } from "@/lib/utils";
 import type { AppointmentSummary, ScheduleBlock } from "@/types/domain";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+
+const CALENDAR_VIEW_STORAGE_KEY = "clinicore.schedule.calendar-view";
 
 function queryUrl({
   date,
@@ -60,9 +66,30 @@ export function ScheduleCalendar({
   professionalId: string;
   status: string;
 }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const previousDate = getAdjacentCalendarDate(date, view, -1);
   const nextDate = getAdjacentCalendarDate(date, view, 1);
   const today = getTodayInputDate();
+
+  useEffect(() => {
+    if (searchParams.has("view")) {
+      window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, view);
+      return;
+    }
+
+    const savedView = window.localStorage.getItem(CALENDAR_VIEW_STORAGE_KEY);
+
+    if (savedView !== "day" && savedView !== "week" && savedView !== "month") {
+      return;
+    }
+
+    if (savedView !== view) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("view", savedView);
+      router.replace(`/agenda?${params.toString()}`, { scroll: false });
+    }
+  }, [router, searchParams, view]);
 
   return (
     <section className="grid gap-4">
@@ -93,7 +120,10 @@ export function ScheduleCalendar({
               size="sm"
               className="min-w-20"
             >
-              <Link href={queryUrl({ date, view: mode, professionalId, status })}>
+              <Link
+                href={queryUrl({ date, view: mode, professionalId, status })}
+                onClick={() => window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, mode)}
+              >
                 {mode === "day" ? "Dia" : mode === "week" ? "Semana" : "Mês"}
               </Link>
             </Button>

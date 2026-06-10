@@ -17,7 +17,6 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   canManageSchedule,
   getScheduleAccess,
-  userHasClinicPermission,
 } from "@/repositories/schedule";
 import { logAuditEvent } from "@/services/audit/audit-service";
 
@@ -166,10 +165,6 @@ export async function createAppointmentAction(
 ): Promise<ScheduleActionState> {
   const parsed = createAppointmentSchema.safeParse({
     patient_id: formData.get("patient_id"),
-    patient_full_name: formData.get("patient_full_name"),
-    patient_cpf: formData.get("patient_cpf"),
-    patient_phone: formData.get("patient_phone"),
-    patient_email: formData.get("patient_email"),
     professional_member_id: formData.get("professional_member_id"),
     service_id: formData.get("service_id"),
     room_id: formData.get("room_id"),
@@ -252,67 +247,24 @@ export async function createAppointmentAction(
     }
   }
 
-  let patientId = parsed.data.patient_id;
+  const { data: selectedPatient } = await admin
+    .from("patients")
+    .select("id")
+    .eq("id", parsed.data.patient_id)
+    .eq("clinic_id", activeClinic.id)
+    .eq("active", true)
+    .is("deleted_at", null)
+    .maybeSingle();
 
-  if (patientId) {
-    const { data: selectedPatient } = await admin
-      .from("patients")
-      .select("id")
-      .eq("id", patientId)
-      .eq("clinic_id", activeClinic.id)
-      .is("deleted_at", null)
-      .maybeSingle();
-
-    if (!selectedPatient) {
-      return { error: "Paciente não encontrado na clínica ativa." };
-    }
-  } else {
-    const canCreatePatient = await userHasClinicPermission(activeClinic.id, "patients", "create");
-
-    if (!canCreatePatient) {
-      return { error: "Você pode agendar pacientes existentes, mas não pode cadastrar novo paciente." };
-    }
-
-    if (parsed.data.patient_cpf) {
-      const { data: existingPatient } = await admin
-        .from("patients")
-        .select("id")
-        .eq("clinic_id", activeClinic.id)
-        .eq("cpf", parsed.data.patient_cpf)
-        .is("deleted_at", null)
-        .maybeSingle();
-
-      patientId = existingPatient?.id ?? null;
-    }
-
-    if (!patientId) {
-      const { data: patient, error: patientError } = await admin
-        .from("patients")
-        .insert({
-          clinic_id: activeClinic.id,
-          full_name: parsed.data.patient_full_name,
-          cpf: parsed.data.patient_cpf,
-          phone: parsed.data.patient_phone,
-          email: parsed.data.patient_email,
-          created_by: user.id,
-          updated_by: user.id,
-        })
-        .select("id")
-        .single();
-
-      if (patientError || !patient) {
-        return { error: "Não foi possível cadastrar o paciente para o agendamento." };
-      }
-
-      patientId = patient.id;
-    }
+  if (!selectedPatient) {
+    return { error: "Paciente não encontrado ou inativo na clínica atual." };
   }
 
   const { data: appointment, error } = await admin
     .from("appointments")
     .insert({
       clinic_id: activeClinic.id,
-      patient_id: patientId,
+      patient_id: parsed.data.patient_id,
       professional_member_id: parsed.data.professional_member_id,
       service_id: parsed.data.service_id,
       room_id: parsed.data.room_id,
@@ -359,7 +311,7 @@ export async function createAppointmentAction(
     recordTable: "appointments",
     recordId: appointment.id,
     newValues: {
-      patient_id: patientId,
+      patient_id: parsed.data.patient_id,
       professional_member_id: parsed.data.professional_member_id,
       service_id: parsed.data.service_id,
       room_id: parsed.data.room_id,

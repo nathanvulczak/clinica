@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Activity, ArrowLeft, Building2, ShieldCheck } from "lucide-react";
 import { AcceptInviteForm } from "@/features/members/components/accept-invite-form";
+import { InviteSessionBootstrap } from "@/features/members/components/invite-session-bootstrap";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ export default async function AcceptInvitePage({
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login?invite=expired");
+    return <InviteSessionBootstrap />;
   }
 
   if (!clinicId) {

@@ -3,9 +3,6 @@ import {
   APPOINTMENT_STATUSES,
   SCHEDULE_BLOCK_TYPES,
 } from "@/config/schedule";
-import { onlyDigits } from "@/lib/utils";
-import { isValidCpf, isValidEmail } from "@/lib/validators";
-
 const dateInputSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Informe uma data válida.");
 const timeInputSchema = z.string().regex(/^\d{2}:\d{2}$/, "Informe um horário válido.");
 
@@ -15,53 +12,18 @@ const optionalText = z
   .transform((value) => value?.trim() ?? "")
   .transform((value) => (value.length > 0 ? value : null));
 
-const optionalEmail = z
-  .string()
-  .optional()
-  .transform((value) => value?.trim().toLowerCase() ?? "")
-  .refine((value) => !value || isValidEmail(value), "Informe um e-mail válido.")
-  .transform((value) => (value.length > 0 ? value : null));
-
-const optionalCpf = z
-  .string()
-  .optional()
-  .transform((value) => onlyDigits(value ?? ""))
-  .refine((value) => !value || isValidCpf(value), "Informe um CPF válido.")
-  .transform((value) => (value.length > 0 ? value : null));
-
-const optionalPhone = z
-  .string()
-  .optional()
-  .transform((value) => onlyDigits(value ?? ""))
-  .refine((value) => !value || (value.length >= 10 && value.length <= 11), "Telefone inválido.")
-  .transform((value) => (value.length > 0 ? value : null));
-
-export const createAppointmentSchema = z
-  .object({
-    patient_id: z.string().optional().transform((value) => (value && value !== "new" ? value : null)),
-    patient_full_name: z.string().optional().transform((value) => value?.trim() ?? ""),
-    patient_cpf: optionalCpf,
-    patient_phone: optionalPhone,
-    patient_email: optionalEmail,
-    professional_member_id: z.string().uuid("Selecione o profissional."),
-    service_id: z.string().optional().transform((value) => (value && value !== "none" ? value : null)),
-    room_id: z.string().optional().transform((value) => (value && value !== "none" ? value : null)),
-    appointment_date: dateInputSchema,
-    start_time: timeInputSchema,
-    duration_minutes: z.coerce.number().int().min(5).max(720),
-    appointment_type: z.string().trim().min(2, "Informe o tipo de compromisso."),
-    channel: z.string().trim().min(2, "Informe o canal do atendimento."),
-    notes: optionalText,
-  })
-  .superRefine((data, context) => {
-    if (!data.patient_id && data.patient_full_name.length < 3) {
-      context.addIssue({
-        code: "custom",
-        message: "Selecione um paciente ou informe o nome completo.",
-        path: ["patient_full_name"],
-      });
-    }
-  });
+export const createAppointmentSchema = z.object({
+  patient_id: z.string().uuid("Selecione um paciente cadastrado."),
+  professional_member_id: z.string().uuid("Selecione o profissional."),
+  service_id: z.string().optional().transform((value) => (value && value !== "none" ? value : null)),
+  room_id: z.string().optional().transform((value) => (value && value !== "none" ? value : null)),
+  appointment_date: dateInputSchema,
+  start_time: timeInputSchema,
+  duration_minutes: z.coerce.number().int().min(5).max(720),
+  appointment_type: z.string().trim().min(2, "Informe o tipo de compromisso."),
+  channel: z.string().trim().min(2, "Informe o canal do atendimento."),
+  notes: optionalText,
+});
 
 export const updateAppointmentStatusSchema = z.object({
   appointment_id: z.string().uuid(),

@@ -11,7 +11,6 @@ const protectedPrefixes = [
   "/auditoria",
   "/perfil",
   "/agenda",
-  "/aceitar-convite",
 ];
 const authPrefixes = ["/login", "/cadastro"];
 const subscriptionRequiredPrefixes = ["/dashboard", "/clinicas", "/cadastros", "/usuarios", "/auditoria", "/agenda"];

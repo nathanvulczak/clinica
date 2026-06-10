@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, CalendarDays, LockKeyhole } from "lucide-react";
+import { CalendarDays, LockKeyhole } from "lucide-react";
 import { APPOINTMENT_STATUS_LABELS, APPOINTMENT_STATUSES } from "@/config/schedule";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
@@ -7,10 +7,8 @@ import {
   type CalendarViewMode,
 } from "@/features/schedule/calendar";
 import { AppointmentsBoard } from "@/features/schedule/components/appointments-board";
+import { AppointmentModal } from "@/features/schedule/components/appointment-modal";
 import { ScheduleCalendar } from "@/features/schedule/components/schedule-calendar";
-import {
-  AppointmentForm,
-} from "@/features/schedule/components/schedule-forms";
 import { getTodayInputDate } from "@/lib/dates";
 import {
   getRegistrationAccess,
@@ -24,6 +22,7 @@ import {
   listScheduleBlocks,
   listSchedulePatients,
   listScheduleProfessionals,
+  listScheduleSettings,
 } from "@/repositories/schedule";
 import { getAppUrl } from "@/lib/env";
 import type { AppointmentStatus } from "@/types/domain";
@@ -65,7 +64,16 @@ export default async function AgendaPage({
     ? params.professional_id || "all"
     : scheduleAccess.currentMemberId || "all";
 
-  const [professionals, patients, appointments, blocks, services, rooms, professionalProfiles] =
+  const [
+    professionals,
+    patients,
+    appointments,
+    blocks,
+    services,
+    rooms,
+    professionalProfiles,
+    scheduleSettings,
+  ] =
     activeClinic && scheduleAccess.canView
       ? await Promise.all([
           listScheduleProfessionals(activeClinic.id, {
@@ -87,8 +95,9 @@ export default async function AgendaPage({
           listClinicServices(activeClinic.id),
           listClinicRooms(activeClinic.id),
           listProfessionalOperationalProfiles(activeClinic.id, registrationAccess),
+          listScheduleSettings(activeClinic.id),
         ])
-      : [[], [], [], [], [], [], []];
+      : [[], [], [], [], [], [], [], []];
 
   const confirmedCount = appointments.filter((appointment) =>
     ["confirmed", "checked_in", "in_triage", "in_progress"].includes(appointment.status),
@@ -102,6 +111,20 @@ export default async function AgendaPage({
       <PageHeader
         title="Agenda"
         description="Gerencie compromissos, profissionais, bloqueios e fluxo operacional da clínica ativa com rastreabilidade."
+        action={
+          activeClinic && scheduleAccess.canView ? (
+            <AppointmentModal
+              professionals={professionals}
+              patients={patients}
+              services={services}
+              rooms={rooms}
+              professionalProfiles={professionalProfiles}
+              scheduleSettings={scheduleSettings}
+              defaultDate={date}
+              disabled={!scheduleAccess.canManage || professionals.length === 0}
+            />
+          ) : null
+        }
       />
 
       {!activeClinic ? (
@@ -242,7 +265,7 @@ export default async function AgendaPage({
             </Card>
           ) : null}
 
-          <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_430px]">
+          <div className="grid gap-6">
             {view === "day" ? (
               <Card>
               <CardHeader>
@@ -286,44 +309,22 @@ export default async function AgendaPage({
               </Card>
             )}
 
-            <div className="grid gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Activity className="size-5 text-primary" />
-                    Novo compromisso
-                  </CardTitle>
-                  <CardDescription>Agende com validação de conflito por profissional.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <AppointmentForm
-                    professionals={professionals}
-                    patients={patients}
-                    services={services}
-                    rooms={rooms}
-                    professionalProfiles={professionalProfiles}
-                    defaultDate={date}
-                    disabled={!scheduleAccess.canManage}
-                  />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Configuração profissional</CardTitle>
-                  <CardDescription>
-                    Expediente, disponibilidade, consultório padrão e bloqueios ficam centralizados no cadastro
-                    do profissional.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button asChild variant="outline" className="w-full">
-                    <Link href="/cadastros?section=professionals">Abrir cadastros de profissionais</Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Configuração profissional</CardTitle>
+              <CardDescription>
+                Expediente, disponibilidade, consultório padrão e bloqueios ficam centralizados no cadastro
+                do profissional.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="outline">
+                <Link href="/cadastros?section=professionals">Abrir cadastros de profissionais</Link>
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       )}
     </>

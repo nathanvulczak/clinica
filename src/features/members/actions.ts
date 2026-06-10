@@ -176,11 +176,8 @@ export async function inviteMemberAction(
     .maybeSingle();
 
   let targetUserId = existingProfile?.id as string | undefined;
-  const inviteRedirectUrl = new URL("/auth/callback", getAppUrl());
-  inviteRedirectUrl.searchParams.set(
-    "next",
-    `/aceitar-convite?clinic=${encodeURIComponent(activeClinic.id)}`,
-  );
+  const inviteRedirectUrl = new URL("/aceitar-convite", getAppUrl());
+  inviteRedirectUrl.searchParams.set("clinic", activeClinic.id);
 
   if (!targetUserId) {
     const { data: invitedUser, error: inviteError } = await admin.auth.admin.inviteUserByEmail(parsed.data.email, {
