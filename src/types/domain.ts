@@ -25,6 +25,7 @@ export type PermissionModule =
   | "audit"
   | "patients"
   | "medical_records"
+  | "nursing"
   | "schedule"
   | "financial"
   | "reports";
@@ -175,6 +176,7 @@ export type ClinicService = {
   price_cents: number;
   color: string;
   requires_authorization: boolean;
+  preconsultation_mode: PreconsultationMode;
   active: boolean;
 };
 
@@ -218,6 +220,63 @@ export type RegistrationPreferences = {
   default_export_format: "csv";
   patient_display_name: "full_name" | "social_name";
   show_inactive_records: boolean;
+  preconsultation_mode: Exclude<PreconsultationMode, "inherit">;
+  allow_preconsultation_override: boolean;
+  require_follow_up_decision: boolean;
+};
+
+export type PreconsultationMode = "inherit" | "required" | "optional" | "disabled";
+
+export type ClinicalEncounterStatus =
+  | "awaiting_preconsultation_decision"
+  | "waiting_triage"
+  | "triage_in_progress"
+  | "ready_for_consultation"
+  | "consultation_in_progress"
+  | "consultation_completed"
+  | "billing_pending"
+  | "billed"
+  | "cancelled";
+
+export type ClinicalEncounterSummary = {
+  id: string;
+  clinic_id: string;
+  appointment_id: string;
+  patient_id: string;
+  professional_member_id: string;
+  status: ClinicalEncounterStatus;
+  preconsultation_mode: PreconsultationMode;
+  preconsultation_required: boolean | null;
+  routing_source: "clinic" | "service" | "manual";
+  routing_reason: string | null;
+  arrived_at: string | null;
+  triage_started_at: string | null;
+  triage_completed_at: string | null;
+  consultation_started_at: string | null;
+  consultation_completed_at: string | null;
+  follow_up_status: "pending" | "not_required" | "to_schedule" | "scheduled" | "declined";
+  appointment: {
+    id: string;
+    starts_at: string;
+    ends_at: string;
+    appointment_type: string;
+    channel: string;
+    status: AppointmentStatus;
+  } | null;
+  patient: Pick<
+    PatientSummary,
+    "id" | "full_name" | "social_name" | "birth_date" | "phone" | "clinical_alerts"
+  > | null;
+  professional: {
+    id: string;
+    role: AppRole;
+    profile: {
+      full_name: string;
+      avatar_url?: string | null;
+    } | null;
+  } | null;
+  service: Pick<ClinicService, "id" | "name" | "color"> | null;
+  room: Pick<ClinicRoom, "id" | "name"> | null;
 };
 
 export type ScheduleProfessional = {

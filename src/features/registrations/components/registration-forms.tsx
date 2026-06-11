@@ -652,6 +652,22 @@ export function ServiceForm({
         </div>
       </div>
       <div className="grid gap-2">
+        <Label htmlFor={`service-preconsultation-${service?.id ?? "new"}`}>
+          Fluxo de pré-consulta
+        </Label>
+        <Select
+          id={`service-preconsultation-${service?.id ?? "new"}`}
+          name="preconsultation_mode"
+          defaultValue={service?.preconsultation_mode ?? "inherit"}
+          disabled={disabled || pending}
+        >
+          <option value="inherit">Usar regra padrão da clínica</option>
+          <option value="required">Pré-consulta obrigatória</option>
+          <option value="optional">Decidir na chegada</option>
+          <option value="disabled">Ir direto para atendimento</option>
+        </Select>
+      </div>
+      <div className="grid gap-2">
         <Label htmlFor={`service-description-${service?.id ?? "new"}`}>Descrição</Label>
         <textarea
           id={`service-description-${service?.id ?? "new"}`}
@@ -1334,6 +1350,39 @@ export function RegistrationPreferencesForm({
         />
         Exibir registros inativos por padrão
       </label>
+      <div className="grid gap-2">
+        <Label htmlFor="preconsultation_mode">Fluxo padrão após a chegada</Label>
+        <Select
+          id="preconsultation_mode"
+          name="preconsultation_mode"
+          defaultValue={preferences.preconsultation_mode}
+          disabled={disabled || pending}
+        >
+          <option value="required">Pré-consulta obrigatória</option>
+          <option value="optional">Recepção ou profissional decide na chegada</option>
+          <option value="disabled">Liberar direto para atendimento</option>
+        </Select>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="flex items-center gap-3 rounded-md border bg-background p-3 text-sm">
+          <input
+            type="checkbox"
+            name="allow_preconsultation_override"
+            defaultChecked={preferences.allow_preconsultation_override}
+            disabled={disabled || pending}
+          />
+          Permitir correção do encaminhamento antes do atendimento
+        </label>
+        <label className="flex items-center gap-3 rounded-md border bg-background p-3 text-sm">
+          <input
+            type="checkbox"
+            name="require_follow_up_decision"
+            defaultChecked={preferences.require_follow_up_decision}
+            disabled={disabled || pending}
+          />
+          Exigir decisão sobre retorno ao finalizar
+        </label>
+      </div>
       <FormMessage state={state} />
       <Button type="button" disabled={disabled || pending} onClick={() => setConfirmOpen(true)}>
         <Save />

@@ -49,6 +49,9 @@ const defaultPreferences: RegistrationPreferences = {
   default_export_format: "csv",
   patient_display_name: "full_name",
   show_inactive_records: false,
+  preconsultation_mode: "optional",
+  allow_preconsultation_override: true,
+  require_follow_up_decision: true,
 };
 
 function normalizeSection(value?: string): RegistrationSection {

@@ -17,6 +17,8 @@ Execute os arquivos uma única vez e na ordem numérica:
 11. `011_member_invite_access.sql`
 12. `012_schedule_operations_security.sql`
 13. `013_rbac_module_access_hardening.sql`
+14. `014_nursing_permission_module.sql`
+15. `015_clinical_encounter_workflow.sql`
 
 Não execute novamente migrations já aplicadas. Para conferir o controle do
 ambiente hospedado, registre a execução em uma planilha de implantação ou adote
@@ -43,6 +45,22 @@ Esta migration:
 - impede médico, enfermagem e recepção de acessar assinatura e auditoria por padrão;
 - separa consulta de billing de gerenciamento do plano;
 - faz permissões individuais de negação prevalecerem sobre o preset do papel.
+
+## Migrations 014 e 015
+
+Execute estes dois arquivos separadamente e na ordem indicada. A separação é
+necessária porque o PostgreSQL precisa confirmar o novo valor do enum de
+permissões antes de utilizá-lo.
+
+Estas migrations:
+
+- criam a permissão independente do módulo de Enfermagem;
+- configuram pré-consulta por clínica e por serviço;
+- geram um encontro clínico único para cada consulta após a chegada;
+- mantêm eventos imutáveis para encaminhamento e avanço assistencial;
+- permitem corrigir o encaminhamento somente antes do início clínico e com motivo;
+- restringem enfermagem, profissionais e visão administrativa por RLS;
+- preservam consultas já em andamento por meio de backfill.
 
 ## Testes de banco
 

@@ -344,6 +344,22 @@ export function PreferencesPanel({
             {preferences.show_inactive_records ? "Exibidos por padrão" : "Ocultos por padrão"}
           </dd>
         </div>
+        <div className="rounded-lg border bg-background p-4">
+          <dt className="text-xs text-muted-foreground">Fluxo após a chegada</dt>
+          <dd className="mt-1 text-sm font-medium">
+            {preferences.preconsultation_mode === "required"
+              ? "Pré-consulta obrigatória"
+              : preferences.preconsultation_mode === "disabled"
+                ? "Direto para atendimento"
+                : "Decidido na chegada"}
+          </dd>
+        </div>
+        <div className="rounded-lg border bg-background p-4">
+          <dt className="text-xs text-muted-foreground">Correção de encaminhamento</dt>
+          <dd className="mt-1 text-sm font-medium">
+            {preferences.allow_preconsultation_override ? "Permitida antes do início" : "Bloqueada"}
+          </dd>
+        </div>
       </dl>
 
       <Modal

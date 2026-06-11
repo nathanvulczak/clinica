@@ -96,6 +96,7 @@ export const serviceSchema = z.object({
       "Informe um valor válido.",
     ),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Selecione uma cor válida."),
+  preconsultation_mode: z.enum(["inherit", "required", "optional", "disabled"]),
   requires_authorization: z.enum(["on", "off"]).optional().transform((value) => value === "on"),
   active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
 });
@@ -162,6 +163,15 @@ export const registrationPreferencesSchema = z.object({
   default_service_duration: z.coerce.number().int().min(5).max(720),
   patient_display_name: z.enum(["full_name", "social_name"]),
   show_inactive_records: z.enum(["on", "off"]).optional().transform((value) => value === "on"),
+  preconsultation_mode: z.enum(["required", "optional", "disabled"]),
+  allow_preconsultation_override: z
+    .enum(["on", "off"])
+    .optional()
+    .transform((value) => value === "on"),
+  require_follow_up_decision: z
+    .enum(["on", "off"])
+    .optional()
+    .transform((value) => value === "on"),
 });
 
 export const professionalProfileSchema = z.object({

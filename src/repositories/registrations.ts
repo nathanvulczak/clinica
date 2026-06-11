@@ -214,7 +214,7 @@ export async function listClinicServices(
   let query = admin
     .from("clinic_services")
     .select(
-      "id, clinic_id, code, name, category, description, duration_minutes, price_cents, color, requires_authorization, active",
+      "id, clinic_id, code, name, category, description, duration_minutes, price_cents, color, preconsultation_mode, requires_authorization, active",
     )
     .eq("clinic_id", clinicId as string)
     .is("deleted_at", null)
@@ -301,7 +301,7 @@ export async function getRegistrationPreferences(
   const { data, error } = await admin
     .from("registration_preferences")
     .select(
-      "id, clinic_id, require_patient_cpf, require_patient_email, default_service_duration, default_export_format, patient_display_name, show_inactive_records",
+      "id, clinic_id, require_patient_cpf, require_patient_email, default_service_duration, default_export_format, patient_display_name, show_inactive_records, preconsultation_mode, allow_preconsultation_override, require_follow_up_decision",
     )
     .eq("clinic_id", clinicId as string)
     .is("deleted_at", null)

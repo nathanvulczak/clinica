@@ -19,6 +19,8 @@ declare
 begin
   foreach agenda_table in array array[
     'appointment_notifications',
+    'clinical_encounter_events',
+    'clinical_encounters',
     'appointment_workflow_events',
     'appointments',
     'schedule_blocks',

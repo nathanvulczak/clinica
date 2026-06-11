@@ -279,6 +279,7 @@ export async function saveServiceAction(
     duration_minutes: formData.get("duration_minutes"),
     price: formData.get("price"),
     color: formData.get("color"),
+    preconsultation_mode: formData.get("preconsultation_mode"),
     requires_authorization: formData.get("requires_authorization") ?? "off",
     active: formData.get("active") ?? "off",
   });
@@ -309,6 +310,7 @@ export async function saveServiceAction(
     duration_minutes: parsed.data.duration_minutes,
     price_cents: parseCurrencyToCents(parsed.data.price),
     color: parsed.data.color,
+    preconsultation_mode: parsed.data.preconsultation_mode,
     requires_authorization: parsed.data.requires_authorization,
     active: parsed.data.active,
     updated_by: user.id,
@@ -668,6 +670,10 @@ export async function saveRegistrationPreferencesAction(
     default_service_duration: formData.get("default_service_duration"),
     patient_display_name: formData.get("patient_display_name"),
     show_inactive_records: formData.get("show_inactive_records") ?? "off",
+    preconsultation_mode: formData.get("preconsultation_mode"),
+    allow_preconsultation_override:
+      formData.get("allow_preconsultation_override") ?? "off",
+    require_follow_up_decision: formData.get("require_follow_up_decision") ?? "off",
   });
 
   if (!parsed.success) {

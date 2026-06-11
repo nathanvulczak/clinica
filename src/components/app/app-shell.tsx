@@ -16,6 +16,8 @@ import {
   Menu,
   ShieldCheck,
   Sparkles,
+  HeartPulse,
+  Stethoscope,
   UserCircle,
   Users,
   type LucideIcon,
@@ -39,6 +41,8 @@ type NavItem = {
 const nav: NavItem[] = [
   { key: "dashboard", href: "/dashboard", label: "Painel", icon: LayoutDashboard },
   { key: "schedule", href: "/agenda", label: "Agenda", icon: CalendarDays },
+  { key: "encounters", href: "/atendimentos", label: "Atendimentos", icon: Stethoscope },
+  { key: "nursing", href: "/enfermagem", label: "Enfermagem", icon: HeartPulse },
   { key: "registrations", href: "/cadastros", label: "Cadastros", icon: ClipboardList },
   { key: "clinics", href: "/clinicas", label: "Clínicas", icon: Building2 },
   { key: "members", href: "/usuarios", label: "Usuários", icon: Users },
