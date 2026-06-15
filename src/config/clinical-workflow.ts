@@ -15,7 +15,6 @@ export const CLINICAL_ENCOUNTER_STATUS_LABELS: Record<ClinicalEncounterStatus, s
 export const NURSING_QUEUE_STATUSES: ClinicalEncounterStatus[] = [
   "waiting_triage",
   "triage_in_progress",
-  "ready_for_consultation",
 ];
 
 export const ACTIVE_CARE_STATUSES: ClinicalEncounterStatus[] = [

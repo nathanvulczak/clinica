@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
@@ -12,6 +13,7 @@ import {
   Pencil,
   RefreshCw,
   Stethoscope,
+  Trash2,
   UserRound,
 } from "lucide-react";
 import {
@@ -21,6 +23,7 @@ import {
   APPOINTMENT_STATUS_TRANSITIONS,
 } from "@/config/schedule";
 import {
+  deleteAppointmentAction,
   rescheduleAppointmentAction,
   sendAppointmentNotificationAction,
   updateAppointmentAction,
@@ -100,8 +103,12 @@ export function AppointmentDetailsModal({
   professionalProfiles,
   scheduleSettings,
   canManage,
+  canDelete,
   canUpdateStatus,
   confirmationUrl,
+  controlledOpen,
+  onControlledOpenChange,
+  showTrigger = true,
 }: {
   appointment: AppointmentSummary;
   workflowEvents: AppointmentWorkflowEvent[];
@@ -112,18 +119,26 @@ export function AppointmentDetailsModal({
   professionalProfiles: ProfessionalOperationalProfile[];
   scheduleSettings: ScheduleSettings[];
   canManage: boolean;
+  canDelete: boolean;
   canUpdateStatus: boolean;
   confirmationUrl: string;
+  controlledOpen?: boolean;
+  onControlledOpenChange?: (open: boolean) => void;
+  showTrigger?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
   const [view, setView] = useState<DetailView>("summary");
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onControlledOpenChange ?? setInternalOpen;
 
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Pencil />
-        Detalhes
-      </Button>
+      {showTrigger ? (
+        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Pencil />
+          Detalhes
+        </Button>
+      ) : null}
       {open ? (
         <Modal
           open
@@ -186,8 +201,10 @@ export function AppointmentDetailsModal({
               appointment={appointment}
               workflowEvents={workflowEvents}
               canManage={canManage}
+              canDelete={canDelete}
               canUpdateStatus={canUpdateStatus}
               confirmationUrl={confirmationUrl}
+              onDeleted={() => setOpen(false)}
             />
           ) : (
             <AppointmentOperationForm
@@ -216,14 +233,18 @@ function AppointmentSummaryView({
   appointment,
   workflowEvents,
   canManage,
+  canDelete,
   canUpdateStatus,
   confirmationUrl,
+  onDeleted,
 }: {
   appointment: AppointmentSummary;
   workflowEvents: AppointmentWorkflowEvent[];
   canManage: boolean;
+  canDelete: boolean;
   canUpdateStatus: boolean;
   confirmationUrl: string;
+  onDeleted: () => void;
 }) {
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -260,14 +281,104 @@ function AppointmentSummaryView({
       </div>
 
       <aside className="grid content-start gap-4">
+        {["checked_in", "in_triage", "in_progress"].includes(appointment.status) ? (
+          <Button asChild>
+            <Link href="/atendimentos">
+              <Stethoscope />
+              Abrir fluxo assistencial
+            </Link>
+          </Button>
+        ) : null}
         <AppointmentStatusForm appointment={appointment} disabled={!canUpdateStatus} />
         <AppointmentNotifications
           appointment={appointment}
           confirmationUrl={confirmationUrl}
           disabled={!canManage}
         />
+        <DeleteAppointmentButton
+          appointment={appointment}
+          disabled={!canDelete || !["scheduled", "confirmed"].includes(appointment.status)}
+          onDeleted={onDeleted}
+        />
       </aside>
     </div>
+  );
+}
+
+function DeleteAppointmentButton({
+  appointment,
+  disabled,
+  onDeleted,
+}: {
+  appointment: AppointmentSummary;
+  disabled: boolean;
+  onDeleted: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [state, formAction, pending] = useActionState(deleteAppointmentAction, {});
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (state.success) {
+      toast({
+        title: state.success,
+        description: "O registro permanece disponível na auditoria.",
+      });
+      setOpen(false);
+      onDeleted();
+    }
+    if (state.error) {
+      toast({ title: "Agendamento não excluído", description: state.error, variant: "destructive" });
+    }
+  }, [onDeleted, state.error, state.success, toast]);
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full text-destructive hover:text-destructive"
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+      >
+        <Trash2 />
+        Excluir agendamento
+      </Button>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        title="Excluir agendamento"
+        description="Disponível apenas antes da chegada do paciente. O registro será ocultado, mas continuará auditável."
+        className="max-w-lg"
+      >
+        <form action={formAction} className="grid gap-4">
+          <input type="hidden" name="appointment_id" value={appointment.id} />
+          <label className="grid gap-2 text-sm font-medium">
+            Motivo da exclusão
+            <textarea
+              name="reason"
+              required
+              minLength={3}
+              maxLength={500}
+              className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder="Ex.: cadastro realizado por engano"
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={pending}
+            >
+              <Trash2 />
+              {pending ? "Excluindo..." : "Confirmar exclusão"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </>
   );
 }
 
@@ -583,7 +694,9 @@ function AppointmentStatusForm({
   appointment: AppointmentSummary;
   disabled?: boolean;
 }) {
-  const transitions = APPOINTMENT_STATUS_TRANSITIONS[appointment.status];
+  const transitions = APPOINTMENT_STATUS_TRANSITIONS[appointment.status].filter(
+    (status) => !["in_triage", "in_progress", "completed"].includes(status),
+  );
   const [selectedStatus, setSelectedStatus] = useState(transitions[0] ?? appointment.status);
   const { toast } = useToast();
   const formRef = useRef<HTMLFormElement>(null);
@@ -616,7 +729,7 @@ function AppointmentStatusForm({
       <div>
         <p className="text-sm font-medium">Próxima etapa</p>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          Somente transições válidas para o estado atual são exibidas.
+          A Agenda controla a operação. Pré-consulta e atendimento avançam nos módulos clínicos.
         </p>
       </div>
       <Select

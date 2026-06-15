@@ -33,6 +33,7 @@ export type ScheduleFilters = {
 export type ScheduleAccess = {
   canView: boolean;
   canEdit: boolean;
+  canDelete: boolean;
   canManage: boolean;
   canOperateOwn: boolean;
   currentMemberId: string | null;
@@ -54,6 +55,7 @@ export async function getScheduleAccess(clinicId?: string | null): Promise<Sched
   const empty: ScheduleAccess = {
     canView: false,
     canEdit: false,
+    canDelete: false,
     canManage: false,
     canOperateOwn: false,
     currentMemberId: null,
@@ -74,7 +76,7 @@ export async function getScheduleAccess(clinicId?: string | null): Promise<Sched
   }
 
   const admin = createSupabaseAdminClient();
-  const [{ data: member }, viewPermission, editPermission, managePermission] = await Promise.all([
+  const [{ data: member }, viewPermission, editPermission, deletePermission, managePermission] = await Promise.all([
     admin
       .from("clinic_members")
       .select("id, role")
@@ -96,6 +98,11 @@ export async function getScheduleAccess(clinicId?: string | null): Promise<Sched
     supabase.rpc("user_has_permission", {
       clinic_uuid: clinicId,
       permission_module: "schedule",
+      permission_action: "delete",
+    }),
+    supabase.rpc("user_has_permission", {
+      clinic_uuid: clinicId,
+      permission_module: "schedule",
       permission_action: "manage",
     }),
   ]);
@@ -106,6 +113,7 @@ export async function getScheduleAccess(clinicId?: string | null): Promise<Sched
   return {
     canView: viewPermission.data === true,
     canEdit,
+    canDelete: deletePermission.data === true,
     canManage: managePermission.data === true,
     canOperateOwn:
       canEdit || role === "doctor" || role === "nurse" || role === "professional",
@@ -149,7 +157,7 @@ export async function listScheduleProfessionals(
   let query = admin
     .from("clinic_members")
     .select(
-      "id, clinic_id, user_id, role, status, profile:profiles!clinic_members_user_id_fkey(full_name, email, phone, cpf)",
+      "id, clinic_id, user_id, role, status, profile:profiles!clinic_members_user_id_fkey(full_name, email, phone, cpf, avatar_url)",
     )
     .eq("clinic_id", clinicId as string)
     .eq("status", "active")
@@ -324,7 +332,7 @@ export async function listAppointments(
         ? admin
             .from("clinic_members")
             .select(
-              "id, clinic_id, user_id, role, status, profile:profiles!clinic_members_user_id_fkey(full_name, email, phone, cpf)",
+              "id, clinic_id, user_id, role, status, profile:profiles!clinic_members_user_id_fkey(full_name, email, phone, cpf, avatar_url)",
             )
             .in("id", professionalIds)
         : Promise.resolve({ data: [] }),
@@ -332,7 +340,7 @@ export async function listAppointments(
         ? admin
             .from("clinic_services")
             .select(
-              "id, clinic_id, code, name, category, description, duration_minutes, price_cents, color, requires_authorization, active",
+              "id, clinic_id, code, name, category, description, duration_minutes, price_cents, color, preconsultation_mode, requires_authorization, active",
             )
             .in("id", serviceIds)
         : Promise.resolve({ data: [] }),

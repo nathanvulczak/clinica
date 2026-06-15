@@ -19,6 +19,7 @@ Execute os arquivos uma única vez e na ordem numérica:
 13. `013_rbac_module_access_hardening.sql`
 14. `014_nursing_permission_module.sql`
 15. `015_clinical_encounter_workflow.sql`
+16. `016_clinical_role_presets.sql`
 
 Não execute novamente migrations já aplicadas. Para conferir o controle do
 ambiente hospedado, registre a execução em uma planilha de implantação ou adote

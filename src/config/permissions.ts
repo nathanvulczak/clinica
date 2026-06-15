@@ -148,7 +148,15 @@ export const ROLE_PERMISSION_PRESETS: Record<AppRole, PermissionKey[]> = {
     "reports:view",
     "reports:export",
   ],
-  professional: ["patients:view", "schedule:view", "schedule:edit"],
+  professional: [
+    "patients:view",
+    "medical_records:view",
+    "medical_records:create",
+    "medical_records:edit",
+    "medical_records:access_medical_record",
+    "schedule:view",
+    "schedule:edit",
+  ],
 };
 
 export function permissionKey(module: PermissionModule, action: PermissionAction): PermissionKey {
@@ -260,8 +268,9 @@ export const CRITICAL_PERMISSION_OPTIONS: Array<{
   {
     module: "schedule",
     action: "delete",
-    label: "Excluir cadastros da agenda",
-    description: "Permite excluir serviços, consultórios e disponibilidade por soft delete.",
+    label: "Excluir agenda e cadastros",
+    description:
+      "Permite excluir agendamentos ainda não iniciados e cadastros operacionais por soft delete.",
   },
   {
     module: "schedule",

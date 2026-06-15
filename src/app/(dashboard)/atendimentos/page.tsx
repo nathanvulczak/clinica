@@ -8,15 +8,19 @@ import {
   getClinicalWorkflowAccess,
   listClinicalEncounters,
 } from "@/repositories/clinical-workflow";
+import { getRegistrationPreferences } from "@/repositories/registrations";
 
 export default async function AtendimentosPage() {
   const { activeClinic } = await getActiveClinicContext();
   const access = await getClinicalWorkflowAccess(activeClinic?.id);
   const canView = access.canViewAll || access.canViewOwn;
-  const encounters =
+  const [encounters, preferences] =
     activeClinic && canView
-      ? await listClinicalEncounters(activeClinic.id, { statuses: ACTIVE_CARE_STATUSES })
-      : [];
+      ? await Promise.all([
+          listClinicalEncounters(activeClinic.id, { statuses: ACTIVE_CARE_STATUSES }),
+          getRegistrationPreferences(activeClinic.id),
+        ])
+      : [[], null];
 
   return (
     <>
@@ -47,6 +51,23 @@ export default async function AtendimentosPage() {
         </Card>
       ) : (
         <div className="grid gap-5">
+          <div className="grid gap-3 rounded-lg border bg-muted/20 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div>
+              <p className="text-sm font-medium">Fluxo assistencial configurado</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Chegada →{" "}
+                {preferences?.preconsultation_mode === "required"
+                  ? "pré-consulta obrigatória"
+                  : preferences?.preconsultation_mode === "disabled"
+                    ? "atendimento direto"
+                    : "decisão na chegada"}{" "}
+                → consulta → conclusão.
+              </p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Serviços podem substituir a regra padrão da clínica.
+            </p>
+          </div>
           <div className="flex items-center gap-3 border-b pb-4">
             <div className="flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">
               <Stethoscope className="size-5" />

@@ -10,6 +10,7 @@ import { getActiveClinicContext } from "@/features/clinics/context";
 import {
   createAppointmentSchema,
   createScheduleBlockSchema,
+  deleteAppointmentSchema,
   deleteScheduleBlockSchema,
   rescheduleAppointmentSchema,
   sendAppointmentNotificationSchema,
@@ -998,6 +999,13 @@ export async function updateAppointmentStatusAction(
     return { success: "Status já estava atualizado." };
   }
 
+  if (["in_triage", "in_progress", "completed"].includes(parsed.data.status)) {
+    return {
+      error:
+        "Após registrar a chegada, avance a pré-consulta em Enfermagem e a consulta em Atendimentos.",
+    };
+  }
+
   const previousStatus = previous.status as AppointmentStatus;
 
   if (!APPOINTMENT_STATUS_TRANSITIONS[previousStatus].includes(parsed.data.status)) {
@@ -1252,6 +1260,118 @@ export async function deleteScheduleBlockAction(
   revalidatePath("/cadastros");
   revalidatePath("/auditoria");
   return { success: "Bloqueio removido." };
+}
+
+export async function deleteAppointmentAction(
+  _state: ScheduleActionState,
+  formData: FormData,
+): Promise<ScheduleActionState> {
+  const parsed = deleteAppointmentSchema.safeParse({
+    appointment_id: formData.get("appointment_id"),
+    reason: formData.get("reason"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados de exclusão inválidos." };
+  }
+
+  const context = await getAuthenticatedScheduleContext();
+  if ("error" in context) return { error: context.error };
+
+  const { activeClinic, user } = context;
+  const access = await getScheduleAccess(activeClinic.id);
+
+  if (!access.canDelete) {
+    await logAuditEvent({
+      clinicId: activeClinic.id,
+      userId: user.id,
+      actionType: "access_denied",
+      module: "schedule",
+      recordTable: "appointments",
+      recordId: parsed.data.appointment_id,
+      level: "security",
+      notes: "Tentativa de excluir compromisso sem permissão schedule.delete.",
+    });
+    return { error: "Seu perfil não possui permissão para excluir agendamentos." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = await admin
+    .from("appointments")
+    .select("*")
+    .eq("id", parsed.data.appointment_id)
+    .eq("clinic_id", activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!previous) return { error: "Agendamento não encontrado na clínica ativa." };
+
+  if (!["scheduled", "confirmed"].includes(previous.status)) {
+    return {
+      error:
+        "Após a chegada do paciente, preserve o histórico usando cancelamento, falta ou remarcação.",
+    };
+  }
+
+  const { count: encounterCount, error: encounterError } = await admin
+    .from("clinical_encounters")
+    .select("id", { count: "exact", head: true })
+    .eq("appointment_id", previous.id)
+    .is("deleted_at", null);
+
+  if (encounterError) {
+    return {
+      error:
+        "Não foi possível validar o vínculo assistencial. Confirme se as migrations clínicas foram aplicadas.",
+    };
+  }
+
+  if ((encounterCount ?? 0) > 0) {
+    return { error: "Este agendamento já possui fluxo assistencial e não pode ser excluído." };
+  }
+
+  const changedAt = new Date().toISOString();
+  const payload = {
+    status: "cancelled" as const,
+    cancellation_reason: parsed.data.reason,
+    cancelled_at: changedAt,
+    deleted_at: changedAt,
+    updated_by: user.id,
+  };
+  const { error } = await admin
+    .from("appointments")
+    .update(payload)
+    .eq("id", previous.id)
+    .eq("clinic_id", activeClinic.id);
+
+  if (error) return { error: "Não foi possível excluir o agendamento." };
+
+  await admin.from("appointment_workflow_events").insert({
+    clinic_id: activeClinic.id,
+    appointment_id: previous.id,
+    from_status: previous.status,
+    to_status: "cancelled",
+    notes: `Agendamento excluído: ${parsed.data.reason}`,
+    created_by: user.id,
+    updated_by: user.id,
+  });
+
+  await logAuditEvent({
+    clinicId: activeClinic.id,
+    userId: user.id,
+    actionType: "appointment_deleted",
+    module: "schedule",
+    recordTable: "appointments",
+    recordId: previous.id,
+    oldValues: previous,
+    newValues: payload,
+    level: "warning",
+    notes: "Agendamento removido por soft delete antes do início assistencial.",
+  });
+
+  revalidatePath("/agenda");
+  revalidatePath("/auditoria");
+  return { success: "Agendamento excluído com rastreabilidade." };
 }
 
 export async function upsertProfessionalScheduleSettingsAction(

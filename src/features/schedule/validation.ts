@@ -63,6 +63,11 @@ export const deleteScheduleBlockSchema = z.object({
   id: z.string().uuid(),
 });
 
+export const deleteAppointmentSchema = z.object({
+  appointment_id: z.string().uuid("Compromisso não identificado."),
+  reason: z.string().trim().min(3, "Informe o motivo da exclusão.").max(500),
+});
+
 export const upsertProfessionalScheduleSettingsSchema = z
   .object({
     professional_member_id: z.string().uuid("Selecione o profissional."),

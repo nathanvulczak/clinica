@@ -303,6 +303,7 @@ export default async function AgendaPage({
                   scheduleSettings={scheduleSettings}
                   workflowEvents={workflowEvents}
                   canManage={scheduleAccess.canManage}
+                  canDelete={scheduleAccess.canDelete}
                   canUpdateStatus={scheduleAccess.canManage || scheduleAccess.canOperateOwn}
                   confirmationUrlBase={confirmationUrlBase}
                 />

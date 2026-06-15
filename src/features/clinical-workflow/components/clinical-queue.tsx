@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   ClipboardCheck,
   HeartPulse,
@@ -11,8 +10,11 @@ import {
 } from "lucide-react";
 import { CLINICAL_ENCOUNTER_STATUS_LABELS } from "@/config/clinical-workflow";
 import {
+  completeConsultationAction,
+  completePreconsultationAction,
   routeClinicalEncounterAction,
-  transitionClinicalEncounterAction,
+  startConsultationAction,
+  startPreconsultationAction,
   type ClinicalWorkflowActionState,
 } from "@/features/clinical-workflow/actions";
 import type {
@@ -56,14 +58,61 @@ function statusTone(status: ClinicalEncounterStatus) {
   return "bg-primary/10 text-primary";
 }
 
+function workflowStage(status: ClinicalEncounterStatus) {
+  if (status === "awaiting_preconsultation_decision") return 0;
+  if (status === "waiting_triage" || status === "triage_in_progress") return 1;
+  if (status === "ready_for_consultation" || status === "consultation_in_progress") return 2;
+  return 3;
+}
+
+function EncounterProgress({ encounter }: { encounter: ClinicalEncounterSummary }) {
+  const currentStage = workflowStage(encounter.status);
+  const steps = [
+    "Chegada",
+    encounter.preconsultation_required === false ? "Pré-consulta dispensada" : "Pré-consulta",
+    "Consulta",
+    "Conclusão",
+  ];
+
+  return (
+    <div className="mt-3 grid grid-cols-4 gap-1" aria-label="Etapas do atendimento">
+      {steps.map((step, index) => (
+        <div key={step} className="min-w-0">
+          <div
+            className={`h-1 rounded-full ${
+              index <= currentStage ? "bg-primary" : "bg-muted"
+            }`}
+          />
+          <p
+            className={`mt-1 truncate text-[11px] ${
+              index === currentStage ? "font-medium text-foreground" : "text-muted-foreground"
+            }`}
+            title={step}
+          >
+            {step}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function useWorkflowFeedback(
   state: ClinicalWorkflowActionState,
   onCompleted?: () => void,
 ) {
-  const router = useRouter();
   const { toast } = useToast();
+  const handledMessageRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const messageKey = state.error
+      ? `error:${state.error}`
+      : state.success
+        ? `success:${state.success}`
+        : null;
+    if (!messageKey || handledMessageRef.current === messageKey) return;
+    handledMessageRef.current = messageKey;
+
     if (state.error) {
       toast({ title: "Ação não concluída", description: state.error, variant: "destructive" });
     }
@@ -71,9 +120,8 @@ function useWorkflowFeedback(
     if (state.success) {
       toast({ title: "Fluxo atualizado", description: state.success });
       onCompleted?.();
-      router.refresh();
     }
-  }, [onCompleted, router, state.error, state.success, toast]);
+  }, [onCompleted, state.error, state.success, toast]);
 }
 
 function ConfirmedWorkflowAction({
@@ -98,9 +146,15 @@ function ConfirmedWorkflowAction({
   const formRef = useRef<HTMLFormElement>(null);
   const [open, setOpen] = useState(false);
   const action =
-    requiresPreconsultation === undefined
-      ? transitionClinicalEncounterAction
-      : routeClinicalEncounterAction;
+    requiresPreconsultation !== undefined
+      ? routeClinicalEncounterAction
+      : targetStatus === "triage_in_progress"
+        ? startPreconsultationAction
+        : targetStatus === "ready_for_consultation"
+          ? completePreconsultationAction
+          : targetStatus === "consultation_in_progress"
+            ? startConsultationAction
+            : completeConsultationAction;
   const [state, formAction, pending] = useActionState(action, {});
 
   useWorkflowFeedback(state, () => setOpen(false));
@@ -108,7 +162,6 @@ function ConfirmedWorkflowAction({
   return (
     <form ref={formRef} action={formAction}>
       <input type="hidden" name="encounter_id" value={encounterId} />
-      {targetStatus ? <input type="hidden" name="target_status" value={targetStatus} /> : null}
       {requiresPreconsultation !== undefined ? (
         <input
           type="hidden"
@@ -277,6 +330,23 @@ function EncounterActions({
   }
 
   if (
+    mode === "care" &&
+    encounter.status === "consultation_in_progress" &&
+    isAssigned
+  ) {
+    return (
+      <ConfirmedWorkflowAction
+        encounterId={encounter.id}
+        targetStatus="consultation_completed"
+        label="Finalizar atendimento"
+        title="Finalizar atendimento?"
+        description="A consulta será encerrada e ficará pronta para as próximas decisões clínicas e financeiras."
+        icon={ClipboardCheck}
+      />
+    );
+  }
+
+  if (
     access.canRoute &&
     (encounter.status === "waiting_triage" || encounter.status === "ready_for_consultation")
   ) {
@@ -337,6 +407,7 @@ export function ClinicalQueue({
                   Alerta clínico cadastrado
                 </p>
               ) : null}
+              <EncounterProgress encounter={encounter} />
             </div>
 
             <dl className="grid gap-1 text-sm">

@@ -32,6 +32,13 @@ export type RegistrationAccess = {
   currentRole: AppRole | null;
 };
 
+export type RegistrationCounts = {
+  patients: number;
+  professionals: number;
+  rooms: number;
+  services: number;
+};
+
 async function hasPermission(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   clinicId: string,
@@ -131,6 +138,74 @@ async function canReadClinic(clinicId?: string | null) {
 
   const userId = await getCurrentUserId();
   return Boolean(userId && (await userCanAccessClinic(clinicId, userId)));
+}
+
+export async function getRegistrationCounts(
+  clinicId?: string | null,
+  access?: RegistrationAccess,
+): Promise<RegistrationCounts> {
+  const empty = { patients: 0, professionals: 0, rooms: 0, services: 0 };
+  if (!(await canReadClinic(clinicId))) return empty;
+
+  const admin = createSupabaseAdminClient();
+  const patientCountPromise = (async () => {
+    if (access && !access.canManageSchedule) {
+      if (!access.currentMemberId) return 0;
+
+      const { data } = await admin
+        .from("appointments")
+        .select("patient_id")
+        .eq("clinic_id", clinicId as string)
+        .eq("professional_member_id", access.currentMemberId)
+        .is("deleted_at", null);
+
+      return new Set((data ?? []).map((item) => item.patient_id).filter(Boolean)).size;
+    }
+
+    const { count } = await admin
+      .from("patients")
+      .select("id", { count: "exact", head: true })
+      .eq("clinic_id", clinicId as string)
+      .eq("active", true)
+      .is("deleted_at", null);
+
+    return count ?? 0;
+  })();
+
+  const [patientCount, professionals, rooms, services] = await Promise.all([
+    patientCountPromise,
+    admin
+      .from("clinic_members")
+      .select("id", { count: "exact", head: true })
+      .eq("clinic_id", clinicId as string)
+      .eq("status", "active")
+      .in("role", ["clinic_owner", "clinic_admin", "doctor", "nurse", "professional"])
+      .is("deleted_at", null),
+    admin
+      .from("clinic_rooms")
+      .select("id", { count: "exact", head: true })
+      .eq("clinic_id", clinicId as string)
+      .eq("active", true)
+      .is("deleted_at", null),
+    admin
+      .from("clinic_services")
+      .select("id", { count: "exact", head: true })
+      .eq("clinic_id", clinicId as string)
+      .eq("active", true)
+      .is("deleted_at", null),
+  ]);
+
+  return {
+    patients: patientCount,
+    professionals:
+      access && !access.canManageSchedule
+        ? access.currentMemberId
+          ? 1
+          : 0
+        : professionals.count ?? 0,
+    rooms: rooms.count ?? 0,
+    services: services.count ?? 0,
+  };
 }
 
 export async function listPatients(

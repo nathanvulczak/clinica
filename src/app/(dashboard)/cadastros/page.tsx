@@ -1,12 +1,4 @@
-import Link from "next/link";
-import {
-  Building,
-  BriefcaseBusiness,
-  HeartPulse,
-  LockKeyhole,
-  Settings2,
-  Stethoscope,
-} from "lucide-react";
+import { LockKeyhole } from "lucide-react";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
   PreferencesPanel,
@@ -16,7 +8,12 @@ import {
 import { PatientsPanel } from "@/features/registrations/components/patients-panel";
 import { ProfessionalsPanel } from "@/features/registrations/components/professionals-panel";
 import {
+  RegistrationSectionNav,
+  type RegistrationSection,
+} from "@/features/registrations/components/registration-section-nav";
+import {
   getRegistrationAccess,
+  getRegistrationCounts,
   getRegistrationPreferences,
   listAvailabilityRules,
   listClinicRooms,
@@ -28,18 +25,7 @@ import {
 import { listScheduleProfessionals, listScheduleSettings } from "@/repositories/schedule";
 import type { RegistrationPreferences } from "@/types/domain";
 import { PageHeader } from "@/components/app/page-header";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-
-const sections = [
-  { id: "patients", label: "Pacientes", icon: HeartPulse },
-  { id: "professionals", label: "Profissionais", icon: BriefcaseBusiness },
-  { id: "services", label: "Serviços", icon: Stethoscope },
-  { id: "rooms", label: "Consultórios", icon: Building },
-  { id: "preferences", label: "Preferências", icon: Settings2 },
-] as const;
-
-type RegistrationSection = (typeof sections)[number]["id"];
 
 const defaultPreferences: RegistrationPreferences = {
   clinic_id: "",
@@ -55,7 +41,9 @@ const defaultPreferences: RegistrationPreferences = {
 };
 
 function normalizeSection(value?: string): RegistrationSection {
-  return sections.some((section) => section.id === value) ? (value as RegistrationSection) : "patients";
+  return ["patients", "professionals", "services", "rooms", "preferences"].includes(value ?? "")
+    ? (value as RegistrationSection)
+    : "patients";
 }
 
 export default async function CadastrosPage({
@@ -73,27 +61,35 @@ export default async function CadastrosPage({
     ({ ...defaultPreferences, clinic_id: activeClinic?.id ?? "" } satisfies RegistrationPreferences);
   const includeInactive = preferences.show_inactive_records || params.inactive === "1";
 
-  const [
-    patients,
-    services,
-    rooms,
-    availability,
-    allProfessionals,
-    professionalProfiles,
-    scheduleSettings,
-    professionalBlocks,
-  ] = activeClinic
-    ? await Promise.all([
-        listPatients(activeClinic.id, { query, includeInactive, access }),
-        listClinicServices(activeClinic.id, includeInactive, access),
-        listClinicRooms(activeClinic.id, includeInactive, access),
-        listAvailabilityRules(activeClinic.id, access),
-        listScheduleProfessionals(activeClinic.id),
-        listProfessionalOperationalProfiles(activeClinic.id, access),
-        listScheduleSettings(activeClinic.id),
-        listProfessionalRegistrationBlocks(activeClinic.id, access),
-      ])
-    : [[], [], [], [], [], [], [], []];
+  const isProfessionalsSection = section === "professionals";
+  const [counts, patients, services, rooms, availability, allProfessionals, professionalProfiles, scheduleSettings, professionalBlocks] =
+    activeClinic
+      ? await Promise.all([
+          getRegistrationCounts(activeClinic.id, access),
+          section === "patients"
+            ? listPatients(activeClinic.id, { query, includeInactive, access })
+            : Promise.resolve([]),
+          section === "services" || isProfessionalsSection
+            ? listClinicServices(activeClinic.id, includeInactive, access)
+            : Promise.resolve([]),
+          section === "rooms" || isProfessionalsSection
+            ? listClinicRooms(activeClinic.id, includeInactive, access)
+            : Promise.resolve([]),
+          isProfessionalsSection
+            ? listAvailabilityRules(activeClinic.id, access)
+            : Promise.resolve([]),
+          isProfessionalsSection
+            ? listScheduleProfessionals(activeClinic.id)
+            : Promise.resolve([]),
+          isProfessionalsSection
+            ? listProfessionalOperationalProfiles(activeClinic.id, access)
+            : Promise.resolve([]),
+          isProfessionalsSection ? listScheduleSettings(activeClinic.id) : Promise.resolve([]),
+          isProfessionalsSection
+            ? listProfessionalRegistrationBlocks(activeClinic.id, access)
+            : Promise.resolve([]),
+        ])
+      : [{ patients: 0, professionals: 0, rooms: 0, services: 0 }, [], [], [], [], [], [], [], []];
 
   const professionals = access.canManageSchedule
     ? allProfessionals
@@ -128,20 +124,7 @@ export default async function CadastrosPage({
         </Card>
       ) : (
         <div className="grid gap-6">
-          <nav className="flex gap-2 overflow-x-auto border-b pb-3">
-            {sections.map((item) => {
-              const active = section === item.id;
-
-              return (
-                <Button key={item.id} asChild variant={active ? "secondary" : "ghost"} size="sm">
-                  <Link href={`/cadastros?section=${item.id}`}>
-                    <item.icon />
-                    {item.label}
-                  </Link>
-                </Button>
-              );
-            })}
-          </nav>
+          <RegistrationSectionNav activeSection={section} />
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Card>
@@ -149,7 +132,7 @@ export default async function CadastrosPage({
                 <CardTitle className="text-sm font-medium">Pacientes visíveis</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-semibold">{patients.length}</p>
+                <p className="text-2xl font-semibold">{counts.patients}</p>
                 <p className="text-xs text-muted-foreground">
                   {access.canManageSchedule ? "na clínica ativa" : "vinculados aos seus atendimentos"}
                 </p>
@@ -160,7 +143,7 @@ export default async function CadastrosPage({
                 <CardTitle className="text-sm font-medium">Serviços</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-semibold">{services.length}</p>
+                <p className="text-2xl font-semibold">{counts.services}</p>
                 <p className="text-xs text-muted-foreground">disponíveis para a Agenda</p>
               </CardContent>
             </Card>
@@ -169,7 +152,7 @@ export default async function CadastrosPage({
                 <CardTitle className="text-sm font-medium">Consultórios</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-semibold">{rooms.length}</p>
+                <p className="text-2xl font-semibold">{counts.rooms}</p>
                 <p className="text-xs text-muted-foreground">espaços cadastrados</p>
               </CardContent>
             </Card>
@@ -178,7 +161,7 @@ export default async function CadastrosPage({
                 <CardTitle className="text-sm font-medium">Profissionais</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-semibold">{professionals.length}</p>
+                <p className="text-2xl font-semibold">{counts.professionals}</p>
                 <p className="text-xs text-muted-foreground">com ficha operacional acessível</p>
               </CardContent>
             </Card>

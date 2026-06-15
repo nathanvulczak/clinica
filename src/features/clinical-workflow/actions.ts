@@ -20,14 +20,8 @@ const routeSchema = z.object({
   reason: z.string().trim().max(500).optional().transform((value) => value || null),
 });
 
-const transitionSchema = z.object({
+const encounterSchema = z.object({
   encounter_id: z.string().uuid(),
-  target_status: z.enum([
-    "triage_in_progress",
-    "ready_for_consultation",
-    "consultation_in_progress",
-    "consultation_completed",
-  ]),
   reason: z.string().trim().max(500).optional().transform((value) => value || null),
 });
 
@@ -155,16 +149,22 @@ export async function routeClinicalEncounterAction(
   };
 }
 
-export async function transitionClinicalEncounterAction(
+async function transitionClinicalEncounter(
   _state: ClinicalWorkflowActionState,
   formData: FormData,
+  targetStatus:
+    | "triage_in_progress"
+    | "ready_for_consultation"
+    | "consultation_in_progress"
+    | "consultation_completed",
 ): Promise<ClinicalWorkflowActionState> {
-  const parsed = transitionSchema.safeParse({
+  const parsed = encounterSchema.safeParse({
     encounter_id: formData.get("encounter_id"),
-    target_status: formData.get("target_status"),
     reason: formData.get("reason"),
   });
-  if (!parsed.success) return { error: "Etapa assistencial inválida." };
+  if (!parsed.success) {
+    return { error: "Atendimento não identificado. Atualize a página e tente novamente." };
+  }
 
   const context = await getContext();
   if (!context) return { error: "Selecione uma clínica e autentique-se novamente." };
@@ -182,7 +182,7 @@ export async function transitionClinicalEncounterAction(
 
   const { data, error } = await context.supabase.rpc("transition_clinical_encounter", {
     encounter_uuid: parsed.data.encounter_id,
-    target_status: parsed.data.target_status,
+    target_status: targetStatus,
     transition_reason: parsed.data.reason,
   });
   if (error) {
@@ -192,8 +192,8 @@ export async function transitionClinicalEncounterAction(
         userId: context.user.id,
         actionType: "access_denied",
         module:
-          parsed.data.target_status === "triage_in_progress" ||
-          parsed.data.target_status === "ready_for_consultation"
+          targetStatus === "triage_in_progress" ||
+          targetStatus === "ready_for_consultation"
             ? "nursing"
             : "medical_records",
         recordTable: "clinical_encounters",
@@ -222,22 +222,50 @@ export async function transitionClinicalEncounterAction(
     userId: context.user.id,
     actionType: "clinical_workflow_transitioned",
     module:
-      parsed.data.target_status === "triage_in_progress" ||
-      parsed.data.target_status === "ready_for_consultation"
+      targetStatus === "triage_in_progress" ||
+      targetStatus === "ready_for_consultation"
         ? "nursing"
         : "medical_records",
     recordTable: "clinical_encounters",
     recordId: parsed.data.encounter_id,
     oldValues: previous,
     newValues: {
-      status: parsed.data.target_status,
+      status: targetStatus,
       reason: parsed.data.reason,
       persisted_status: (data as { status?: string } | null)?.status,
     },
     level: "security",
-    notes: labels[parsed.data.target_status],
+    notes: labels[targetStatus],
   });
 
   revalidateClinicalWorkflow();
-  return { success: labels[parsed.data.target_status] };
+  return { success: labels[targetStatus] };
+}
+
+export async function startPreconsultationAction(
+  state: ClinicalWorkflowActionState,
+  formData: FormData,
+) {
+  return transitionClinicalEncounter(state, formData, "triage_in_progress");
+}
+
+export async function completePreconsultationAction(
+  state: ClinicalWorkflowActionState,
+  formData: FormData,
+) {
+  return transitionClinicalEncounter(state, formData, "ready_for_consultation");
+}
+
+export async function startConsultationAction(
+  state: ClinicalWorkflowActionState,
+  formData: FormData,
+) {
+  return transitionClinicalEncounter(state, formData, "consultation_in_progress");
+}
+
+export async function completeConsultationAction(
+  state: ClinicalWorkflowActionState,
+  formData: FormData,
+) {
+  return transitionClinicalEncounter(state, formData, "consultation_completed");
 }

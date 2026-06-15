@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useState } from "react";
 import {
   Ban,
@@ -132,10 +133,20 @@ export function ProfessionalsPanel({
             <header className="flex flex-col gap-4 border-b p-5 xl:flex-row xl:items-start xl:justify-between">
               <div className="flex min-w-0 gap-3">
                 <div
-                  className="flex size-11 shrink-0 items-center justify-center rounded-md text-white"
+                  className="relative flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-md text-white"
                   style={{ backgroundColor: professionalProfile?.appointment_color ?? "#0f766e" }}
                 >
-                  <UserRound className="size-5" />
+                  {professional.profile?.avatar_url ? (
+                    <Image
+                      src={professional.profile.avatar_url}
+                      alt=""
+                      fill
+                      sizes="44px"
+                      className="object-cover"
+                    />
+                  ) : (
+                    <UserRound className="size-5" />
+                  )}
                 </div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">

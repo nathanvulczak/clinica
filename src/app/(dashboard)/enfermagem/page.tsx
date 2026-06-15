@@ -45,6 +45,11 @@ export default async function EnfermagemPage() {
         </Card>
       ) : (
         <div className="grid gap-5">
+          <div className="rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
+            <strong className="font-medium text-foreground">Fluxo:</strong> pacientes encaminhados
+            aguardam início da pré-consulta. Ao concluir esta etapa, eles saem desta fila e são
+            liberados em Atendimentos para o profissional responsável.
+          </div>
           <div className="flex items-center gap-3 border-b pb-4">
             <div className="flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">
               <HeartPulse className="size-5" />

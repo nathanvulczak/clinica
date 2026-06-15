@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { Clock, MapPin, Stethoscope, UserRound } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Clock, MapPin, Pencil, Stethoscope, UserRound } from "lucide-react";
 import {
   APPOINTMENT_STATUS_LABELS,
   SCHEDULE_BLOCK_TYPE_LABELS,
@@ -21,6 +21,7 @@ import type {
   ScheduleSettings,
 } from "@/types/domain";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 function professionalName(professionals: ScheduleProfessional[], professionalId: string) {
   return (
@@ -54,6 +55,7 @@ export function AppointmentsBoard({
   scheduleSettings,
   workflowEvents,
   canManage,
+  canDelete,
   canUpdateStatus,
   confirmationUrlBase,
 }: {
@@ -67,9 +69,13 @@ export function AppointmentsBoard({
   scheduleSettings: ScheduleSettings[];
   workflowEvents: AppointmentWorkflowEvent[];
   canManage: boolean;
+  canDelete: boolean;
   canUpdateStatus: boolean;
   confirmationUrlBase: string;
 }) {
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState<string | null>(null);
+  const selectedAppointment =
+    appointments.find((appointment) => appointment.id === selectedAppointmentId) ?? null;
   const workflowEventsByAppointment = useMemo(() => {
     const eventsByAppointment = new Map<string, AppointmentWorkflowEvent[]>();
 
@@ -160,19 +166,15 @@ export function AppointmentsBoard({
                   </div>
 
                   <div className="flex justify-end">
-                    <AppointmentDetailsModal
-                      appointment={appointment}
-                      workflowEvents={workflowEventsByAppointment.get(appointment.id) ?? []}
-                      professionals={professionals}
-                      patients={patients}
-                      services={services}
-                      rooms={rooms}
-                      professionalProfiles={professionalProfiles}
-                      scheduleSettings={scheduleSettings}
-                      canManage={canManage}
-                      canUpdateStatus={canUpdateStatus}
-                      confirmationUrl={`${confirmationUrlBase}/${appointment.confirmation_token}`}
-                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedAppointmentId(appointment.id)}
+                    >
+                      <Pencil />
+                      Detalhes
+                    </Button>
                   </div>
                 </article>
               ))}
@@ -180,6 +182,29 @@ export function AppointmentsBoard({
           </div>
         )}
       </section>
+
+      {selectedAppointment ? (
+        <AppointmentDetailsModal
+          key={selectedAppointment.id}
+          appointment={selectedAppointment}
+          workflowEvents={workflowEventsByAppointment.get(selectedAppointment.id) ?? []}
+          professionals={professionals}
+          patients={patients}
+          services={services}
+          rooms={rooms}
+          professionalProfiles={professionalProfiles}
+          scheduleSettings={scheduleSettings}
+          canManage={canManage}
+          canDelete={canDelete}
+          canUpdateStatus={canUpdateStatus}
+          confirmationUrl={`${confirmationUrlBase}/${selectedAppointment.confirmation_token}`}
+          controlledOpen
+          onControlledOpenChange={(open) => {
+            if (!open) setSelectedAppointmentId(null);
+          }}
+          showTrigger={false}
+        />
+      ) : null}
 
       <section className="grid gap-3">
         <div className="flex items-center justify-between">

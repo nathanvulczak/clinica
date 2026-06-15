@@ -290,6 +290,7 @@ export type ScheduleProfessional = {
     email: string | null;
     phone?: string | null;
     cpf?: string | null;
+    avatar_url?: string | null;
   } | null;
 };
 
