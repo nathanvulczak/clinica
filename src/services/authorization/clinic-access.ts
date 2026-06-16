@@ -128,6 +128,7 @@ export type NavigationKey =
   | "profile"
   | "schedule"
   | "encounters"
+  | "medicalRecords"
   | "nursing";
 
 export function getAllowedNavigation(
@@ -159,6 +160,12 @@ export function getAllowedNavigation(
     )
   ) {
     allowed.add("encounters");
+  }
+  if (
+    authorization.can("medical_records", "view") &&
+    authorization.can("medical_records", "access_medical_record")
+  ) {
+    allowed.add("medicalRecords");
   }
   if (authorization.can("nursing", "view")) allowed.add("nursing");
 

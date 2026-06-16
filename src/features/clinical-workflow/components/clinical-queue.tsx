@@ -334,6 +334,28 @@ function EncounterActions({
     );
   }
 
+  if (mode === "care" && encounter.status === "ready_for_consultation" && isAssigned) {
+    return (
+      <Button asChild size="sm">
+        <Link href={`/prontuarios/${encounter.id}`}>
+          <FilePenLine />
+          Abrir prontuario
+        </Link>
+      </Button>
+    );
+  }
+
+  if (mode === "care" && encounter.status === "consultation_in_progress" && isAssigned) {
+    return (
+      <Button asChild size="sm">
+        <Link href={`/prontuarios/${encounter.id}`}>
+          <ClipboardCheck />
+          Continuar prontuario
+        </Link>
+      </Button>
+    );
+  }
+
   if (
     mode === "care" &&
     encounter.status === "ready_for_consultation" &&
