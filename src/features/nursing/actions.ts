@@ -75,6 +75,19 @@ function bmi(weightKg: number | null, heightCm: number | null) {
   return Number((weightKg / (heightMeters * heightMeters)).toFixed(2));
 }
 
+async function transitionEncounter(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  encounterId: string,
+  targetStatus: "triage_in_progress" | "ready_for_consultation",
+  reason: string | null,
+) {
+  return supabase.rpc("transition_clinical_encounter", {
+    encounter_uuid: encounterId,
+    target_status: targetStatus,
+    transition_reason: reason,
+  });
+}
+
 export async function saveNursingAssessmentAction(
   _state: NursingActionState,
   formData: FormData,
@@ -139,7 +152,7 @@ export async function saveNursingAssessmentAction(
     }>();
 
   if (!encounter) return { error: "Atendimento não encontrado na clínica ativa." };
-  if (!["triage_in_progress", "ready_for_consultation"].includes(encounter.status)) {
+  if (!["waiting_triage", "triage_in_progress", "ready_for_consultation"].includes(encounter.status)) {
     return { error: "A ficha de enfermagem só pode ser preenchida durante a pré-consulta." };
   }
 
@@ -191,6 +204,22 @@ export async function saveNursingAssessmentAction(
     updated_by: context.user.id,
   };
 
+  if (encounter.status === "waiting_triage") {
+    const { error: startError } = await transitionEncounter(
+      context.supabase,
+      encounter.id,
+      "triage_in_progress",
+      "Pré-consulta iniciada pela ficha de enfermagem.",
+    );
+
+    if (startError) {
+      return {
+        error:
+          "Não foi possível iniciar a pré-consulta deste paciente. Atualize a fila de Enfermagem e tente novamente.",
+      };
+    }
+  }
+
   const { data: saved, error } = await admin
     .from("nursing_assessments")
     .upsert(payload, { onConflict: "encounter_id" })
@@ -217,12 +246,13 @@ export async function saveNursingAssessmentAction(
     notes: "Ficha de pré-consulta registrada com rastreabilidade.",
   });
 
-  if (parsed.data.mode === "complete" && encounter.status === "triage_in_progress") {
-    const { error: transitionError } = await context.supabase.rpc("transition_clinical_encounter", {
-      encounter_uuid: encounter.id,
-      target_status: "ready_for_consultation",
-      transition_reason: parsed.data.recommendations,
-    });
+  if (parsed.data.mode === "complete") {
+    const { error: transitionError } = await transitionEncounter(
+      context.supabase,
+      encounter.id,
+      "ready_for_consultation",
+      parsed.data.recommendations,
+    );
 
     if (transitionError) {
       return {

@@ -91,7 +91,7 @@ export function NursingAssessmentForm({ detail }: { detail: NursingEncounterDeta
     }
   }, [router, state.error, state.success, toast]);
 
-  const completeDisabled = detail.status !== "triage_in_progress";
+  const completeDisabled = !["waiting_triage", "triage_in_progress"].includes(detail.status);
 
   return (
     <form ref={formRef} action={formAction} className="grid gap-5">
@@ -115,6 +115,12 @@ export function NursingAssessmentForm({ detail }: { detail: NursingEncounterDeta
         {detail.patient?.clinical_alerts ? (
           <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
             Alerta clínico cadastrado para este paciente.
+          </div>
+        ) : null}
+        {detail.status === "waiting_triage" ? (
+          <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+            Ao salvar ou encerrar esta ficha, a pré-consulta será assumida por você e ficará
+            registrada na auditoria.
           </div>
         ) : null}
       </section>

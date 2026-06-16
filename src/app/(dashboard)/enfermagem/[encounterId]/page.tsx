@@ -48,7 +48,7 @@ export default async function NursingAssessmentPage({
 
   const canEdit =
     access.canOperateNursing &&
-    ["triage_in_progress", "ready_for_consultation"].includes(detail.status);
+    ["waiting_triage", "triage_in_progress", "ready_for_consultation"].includes(detail.status);
 
   return (
     <>

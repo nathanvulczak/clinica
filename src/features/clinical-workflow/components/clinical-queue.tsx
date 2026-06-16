@@ -310,15 +310,12 @@ function EncounterActions({
 
   if (mode === "nursing" && encounter.status === "waiting_triage" && access.canOperateNursing) {
     return (
-      <ConfirmedWorkflowAction
-        encounterId={encounter.id}
-        appointmentId={encounter.appointment_id}
-        targetStatus="triage_in_progress"
-        label="Iniciar pré-consulta"
-        title="Iniciar pré-consulta?"
-        description="O horário e o usuário responsável serão registrados."
-        icon={Play}
-      />
+      <Button asChild size="sm">
+        <Link href={`/enfermagem/${encounter.id}`}>
+          <Play />
+          Iniciar pré-consulta
+        </Link>
+      </Button>
     );
   }
 
