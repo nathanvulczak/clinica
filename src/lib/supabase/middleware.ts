@@ -11,9 +11,20 @@ const protectedPrefixes = [
   "/auditoria",
   "/perfil",
   "/agenda",
+  "/enfermagem",
+  "/atendimentos",
 ];
 const authPrefixes = ["/login", "/cadastro"];
-const subscriptionRequiredPrefixes = ["/dashboard", "/clinicas", "/cadastros", "/usuarios", "/auditoria", "/agenda"];
+const subscriptionRequiredPrefixes = [
+  "/dashboard",
+  "/clinicas",
+  "/cadastros",
+  "/usuarios",
+  "/auditoria",
+  "/agenda",
+  "/enfermagem",
+  "/atendimentos",
+];
 
 function matchesRoute(pathname: string, route: string) {
   return pathname === route || pathname.startsWith(`${route}/`);

@@ -1,4 +1,5 @@
-import { HeartPulse, LockKeyhole } from "lucide-react";
+import { BarChart3, ClipboardList, HeartPulse, History, LockKeyhole } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getActiveClinicContext } from "@/features/clinics/context";
@@ -15,6 +16,10 @@ export default async function EnfermagemPage() {
     activeClinic && (access.canViewNursing || access.canViewAll)
       ? await listClinicalEncounters(activeClinic.id, { queue: "nursing" })
       : [];
+  const waitingCount = encounters.filter((encounter) => encounter.status === "waiting_triage").length;
+  const activeCount = encounters.filter(
+    (encounter) => encounter.status === "triage_in_progress",
+  ).length;
 
   return (
     <>
@@ -45,6 +50,41 @@ export default async function EnfermagemPage() {
         </Card>
       ) : (
         <div className="grid gap-5">
+          <div className="grid gap-3 lg:grid-cols-3">
+            <div className="rounded-lg border bg-card p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Fila</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Aguardando início</p>
+                </div>
+                <ClipboardList className="size-5 text-primary" />
+              </div>
+              <p className="mt-3 text-2xl font-semibold">{waitingCount}</p>
+            </div>
+            <div className="rounded-lg border bg-card p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Em pré-consulta</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Coleta em andamento</p>
+                </div>
+                <HeartPulse className="size-5 text-primary" />
+              </div>
+              <p className="mt-3 text-2xl font-semibold">{activeCount}</p>
+            </div>
+            <div className="rounded-lg border bg-card p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Histórico e relatórios</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Preparado para indicadores</p>
+                </div>
+                <BarChart3 className="size-5 text-primary" />
+              </div>
+              <Badge className="mt-3 bg-muted text-muted-foreground">
+                Próxima etapa
+              </Badge>
+            </div>
+          </div>
+
           <div className="rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
             <strong className="font-medium text-foreground">Fluxo:</strong> pacientes encaminhados
             aguardam início da pré-consulta. Ao concluir esta etapa, eles saem desta fila e são
@@ -57,6 +97,10 @@ export default async function EnfermagemPage() {
             <div>
               <p className="font-medium">Pré-consultas</p>
               <p className="text-sm text-muted-foreground">{activeClinic.trade_name}</p>
+            </div>
+            <div className="ml-auto hidden items-center gap-2 text-xs text-muted-foreground lg:flex">
+              <History className="size-4" />
+              Histórico completo será vinculado à ficha do paciente.
             </div>
           </div>
           <ClinicalQueue encounters={encounters} access={access} mode="nursing" />

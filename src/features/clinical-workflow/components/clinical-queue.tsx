@@ -1,8 +1,11 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ClipboardCheck,
+  FilePenLine,
   HeartPulse,
   Play,
   RotateCcw,
@@ -108,6 +111,7 @@ function useWorkflowFeedback(
   onCompleted?: () => void,
 ) {
   const { toast } = useToast();
+  const router = useRouter();
   const handledMessageRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -126,12 +130,16 @@ function useWorkflowFeedback(
     if (state.success) {
       toast({ title: "Fluxo atualizado", description: state.success });
       onCompleted?.();
+      if (state.redirectTo) {
+        router.push(state.redirectTo);
+      }
     }
-  }, [onCompleted, state.error, state.success, toast]);
+  }, [onCompleted, router, state.error, state.redirectTo, state.success, toast]);
 }
 
 function ConfirmedWorkflowAction({
   encounterId,
+  appointmentId,
   targetStatus,
   requiresPreconsultation,
   label,
@@ -141,6 +149,7 @@ function ConfirmedWorkflowAction({
   variant = "default",
 }: {
   encounterId: string;
+  appointmentId: string;
   targetStatus?: ClinicalEncounterStatus;
   requiresPreconsultation?: boolean;
   label: string;
@@ -168,6 +177,7 @@ function ConfirmedWorkflowAction({
   return (
     <form ref={formRef} action={formAction}>
       <input type="hidden" name="encounter_id" value={encounterId} />
+      <input type="hidden" name="appointment_id" value={appointmentId} />
       {requiresPreconsultation !== undefined ? (
         <input
           type="hidden"
@@ -277,6 +287,7 @@ function EncounterActions({
       <div className="flex flex-wrap gap-2">
         <ConfirmedWorkflowAction
           encounterId={encounter.id}
+          appointmentId={encounter.appointment_id}
           requiresPreconsultation
           label="Enviar à enfermagem"
           title="Encaminhar para pré-consulta?"
@@ -285,6 +296,7 @@ function EncounterActions({
         />
         <ConfirmedWorkflowAction
           encounterId={encounter.id}
+          appointmentId={encounter.appointment_id}
           requiresPreconsultation={false}
           label="Atendimento direto"
           title="Liberar para atendimento?"
@@ -300,6 +312,7 @@ function EncounterActions({
     return (
       <ConfirmedWorkflowAction
         encounterId={encounter.id}
+        appointmentId={encounter.appointment_id}
         targetStatus="triage_in_progress"
         label="Iniciar pré-consulta"
         title="Iniciar pré-consulta?"
@@ -315,14 +328,12 @@ function EncounterActions({
     access.canOperateNursing
   ) {
     return (
-      <ConfirmedWorkflowAction
-        encounterId={encounter.id}
-        targetStatus="ready_for_consultation"
-        label="Liberar para consulta"
-        title="Concluir esta etapa?"
-        description="O paciente será liberado para o profissional responsável."
-        icon={ClipboardCheck}
-      />
+      <Button asChild size="sm">
+        <Link href={`/enfermagem/${encounter.id}`}>
+          <FilePenLine />
+          Abrir ficha
+        </Link>
+      </Button>
     );
   }
 
@@ -334,6 +345,7 @@ function EncounterActions({
     return (
       <ConfirmedWorkflowAction
         encounterId={encounter.id}
+        appointmentId={encounter.appointment_id}
         targetStatus="consultation_in_progress"
         label="Iniciar atendimento"
         title="Iniciar atendimento?"
@@ -351,6 +363,7 @@ function EncounterActions({
     return (
       <ConfirmedWorkflowAction
         encounterId={encounter.id}
+        appointmentId={encounter.appointment_id}
         targetStatus="consultation_completed"
         label="Finalizar atendimento"
         title="Finalizar atendimento?"

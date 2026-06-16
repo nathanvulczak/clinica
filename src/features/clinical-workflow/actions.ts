@@ -12,6 +12,7 @@ import type { ClinicalEncounterStatus } from "@/types/domain";
 export type ClinicalWorkflowActionState = {
   error?: string;
   success?: string;
+  redirectTo?: string;
 };
 
 const routeSchema = z.object({
@@ -21,8 +22,11 @@ const routeSchema = z.object({
 });
 
 const encounterSchema = z.object({
-  encounter_id: z.string().uuid(),
+  encounter_id: z.string().uuid().optional(),
+  appointment_id: z.string().uuid().optional(),
   reason: z.string().trim().max(500).optional().transform((value) => value || null),
+}).refine((value) => value.encounter_id || value.appointment_id, {
+  message: "Informe o atendimento ou agendamento.",
 });
 
 function workflowError(message?: string) {
@@ -70,6 +74,26 @@ function revalidateClinicalWorkflow() {
   revalidatePath("/atendimentos");
   revalidatePath("/enfermagem");
   revalidatePath("/auditoria");
+}
+
+async function resolveEncounterId(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  clinicId: string,
+  encounterId?: string,
+  appointmentId?: string,
+) {
+  if (encounterId) return encounterId;
+  if (!appointmentId) return null;
+
+  const { data } = await admin
+    .from("clinical_encounters")
+    .select("id")
+    .eq("appointment_id", appointmentId)
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .maybeSingle<{ id: string }>();
+
+  return data?.id ?? null;
 }
 
 export async function routeClinicalEncounterAction(
@@ -164,9 +188,13 @@ async function transitionClinicalEncounter(
     | "ready_for_consultation"
     | "consultation_in_progress"
     | "consultation_completed",
+  options?: {
+    redirectToNursingAssessment?: boolean;
+  },
 ): Promise<ClinicalWorkflowActionState> {
   const parsed = encounterSchema.safeParse({
-    encounter_id: formData.get("encounter_id"),
+    encounter_id: formData.get("encounter_id") || undefined,
+    appointment_id: formData.get("appointment_id") || undefined,
     reason: formData.get("reason"),
   });
   if (!parsed.success) {
@@ -180,10 +208,24 @@ async function transitionClinicalEncounter(
   if (!context) return { error: "Selecione uma clínica e autentique-se novamente." };
 
   const admin = createSupabaseAdminClient();
+  const encounterId = await resolveEncounterId(
+    admin,
+    context.activeClinic.id,
+    parsed.data.encounter_id,
+    parsed.data.appointment_id,
+  );
+
+  if (!encounterId) {
+    return {
+      error:
+        "Atendimento não encontrado para este agendamento. Registre novamente a chegada do paciente na Agenda e atualize a fila.",
+    };
+  }
+
   const { data: previous } = await admin
     .from("clinical_encounters")
     .select("status, triage_started_at, triage_completed_at, consultation_started_at, consultation_completed_at")
-    .eq("id", parsed.data.encounter_id)
+    .eq("id", encounterId)
     .eq("clinic_id", context.activeClinic.id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -196,7 +238,7 @@ async function transitionClinicalEncounter(
   }
 
   const { data, error } = await context.supabase.rpc("transition_clinical_encounter", {
-    encounter_uuid: parsed.data.encounter_id,
+    encounter_uuid: encounterId,
     target_status: targetStatus,
     transition_reason: parsed.data.reason,
   });
@@ -212,7 +254,7 @@ async function transitionClinicalEncounter(
             ? "nursing"
             : "medical_records",
         recordTable: "clinical_encounters",
-        recordId: parsed.data.encounter_id,
+        recordId: encounterId,
         level: "security",
         notes: "Tentativa negada de avançar uma etapa assistencial.",
       });
@@ -242,7 +284,7 @@ async function transitionClinicalEncounter(
         ? "nursing"
         : "medical_records",
     recordTable: "clinical_encounters",
-    recordId: parsed.data.encounter_id,
+    recordId: encounterId,
     oldValues: previous,
     newValues: {
       status: targetStatus,
@@ -254,14 +296,19 @@ async function transitionClinicalEncounter(
   });
 
   revalidateClinicalWorkflow();
-  return { success: labels[targetStatus] };
+  return {
+    success: labels[targetStatus],
+    redirectTo: options?.redirectToNursingAssessment ? `/enfermagem/${encounterId}` : undefined,
+  };
 }
 
 export async function startPreconsultationAction(
   state: ClinicalWorkflowActionState,
   formData: FormData,
 ) {
-  return transitionClinicalEncounter(state, formData, "triage_in_progress");
+  return transitionClinicalEncounter(state, formData, "triage_in_progress", {
+    redirectToNursingAssessment: true,
+  });
 }
 
 export async function completePreconsultationAction(
