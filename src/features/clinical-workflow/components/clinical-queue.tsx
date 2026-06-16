@@ -65,6 +65,12 @@ function workflowStage(status: ClinicalEncounterStatus) {
   return 3;
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
 function EncounterProgress({ encounter }: { encounter: ClinicalEncounterSummary }) {
   const currentStage = workflowStage(encounter.status);
   const steps = [
@@ -257,6 +263,14 @@ function EncounterActions({
   mode: "care" | "nursing";
 }) {
   const isAssigned = encounter.professional_member_id === access.currentMemberId;
+
+  if (!isUuid(encounter.id)) {
+    return (
+      <div className="max-w-sm rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+        Fluxo assistencial não inicializado. Registre a chegada na Agenda ou atualize a fila.
+      </div>
+    );
+  }
 
   if (encounter.status === "awaiting_preconsultation_decision" && access.canRoute) {
     return (

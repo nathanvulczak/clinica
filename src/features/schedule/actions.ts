@@ -28,7 +28,7 @@ import {
 } from "@/repositories/schedule";
 import { logAuditEvent } from "@/services/audit/audit-service";
 import { sendAppointmentConfirmationEmail } from "@/services/notifications/appointment-notification-service";
-import type { AppointmentStatus } from "@/types/domain";
+import type { AppointmentStatus, ClinicalEncounterStatus, PreconsultationMode } from "@/types/domain";
 
 export type ScheduleActionState = {
   error?: string;
@@ -36,6 +36,20 @@ export type ScheduleActionState = {
 };
 
 const PATIENT_CONFIRMABLE_STATUSES = ["scheduled", "confirmed"];
+
+type AppointmentClinicalSyncRow = {
+  id: string;
+  clinic_id: string;
+  patient_id: string;
+  professional_member_id: string;
+  service_id: string | null;
+  status: AppointmentStatus;
+  checked_in_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+};
 
 async function getAuthenticatedScheduleContext() {
   const [{ activeClinic }, supabase] = await Promise.all([
@@ -81,6 +95,163 @@ async function getScheduleActionContext() {
   }
 
   return { activeClinic, user };
+}
+
+async function ensureClinicalEncounterForAppointment(
+  appointmentId: string,
+  actorId: string,
+): Promise<{ ok: true; encounterId: string; created: boolean } | { ok: false; error: string }> {
+  const admin = createSupabaseAdminClient();
+  const { data: existing, error: existingError } = await admin
+    .from("clinical_encounters")
+    .select("id")
+    .eq("appointment_id", appointmentId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (existing?.id) {
+    return { ok: true, encounterId: existing.id, created: false };
+  }
+
+  if (existingError) {
+    return {
+      ok: false,
+      error: "Não foi possível verificar se o atendimento assistencial já existe.",
+    };
+  }
+
+  const { data: appointment, error: appointmentError } = await admin
+    .from("appointments")
+    .select(
+      "id, clinic_id, patient_id, professional_member_id, service_id, status, checked_in_at, started_at, completed_at, created_by, updated_by",
+    )
+    .eq("id", appointmentId)
+    .is("deleted_at", null)
+    .maybeSingle<AppointmentClinicalSyncRow>();
+
+  if (appointmentError || !appointment) {
+    return { ok: false, error: "Agendamento não encontrado para iniciar o fluxo assistencial." };
+  }
+
+  if (
+    !["checked_in", "in_triage", "in_progress", "completed", "billing_pending", "billed"].includes(
+      appointment.status,
+    )
+  ) {
+    return {
+      ok: false,
+      error: "Registre a chegada do paciente antes de iniciar pré-consulta ou atendimento.",
+    };
+  }
+
+  const [{ data: preferences }, { data: service }] = await Promise.all([
+    admin
+      .from("registration_preferences")
+      .select("preconsultation_mode")
+      .eq("clinic_id", appointment.clinic_id)
+      .is("deleted_at", null)
+      .maybeSingle<{ preconsultation_mode: Exclude<PreconsultationMode, "inherit"> }>(),
+    appointment.service_id
+      ? admin
+          .from("clinic_services")
+          .select("preconsultation_mode")
+          .eq("id", appointment.service_id)
+          .eq("clinic_id", appointment.clinic_id)
+          .is("deleted_at", null)
+          .maybeSingle<{ preconsultation_mode: PreconsultationMode }>()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const clinicMode = preferences?.preconsultation_mode ?? "optional";
+  const resolvedMode =
+    service?.preconsultation_mode && service.preconsultation_mode !== "inherit"
+      ? service.preconsultation_mode
+      : clinicMode;
+  const statusByAppointment: Partial<Record<AppointmentStatus, ClinicalEncounterStatus>> = {
+    in_triage: "triage_in_progress",
+    in_progress: "consultation_in_progress",
+    completed: "consultation_completed",
+    billing_pending: "billing_pending",
+    billed: "billed",
+  };
+  const resolvedStatus =
+    appointment.status === "checked_in"
+      ? resolvedMode === "required"
+        ? "waiting_triage"
+        : resolvedMode === "disabled"
+          ? "ready_for_consultation"
+          : "awaiting_preconsultation_decision"
+      : statusByAppointment[appointment.status];
+
+  if (!resolvedStatus) {
+    return { ok: false, error: "Etapa assistencial incompatível com o status da agenda." };
+  }
+
+  const preconsultationRequired =
+    appointment.status === "in_triage" || resolvedMode === "required"
+      ? true
+      : resolvedMode === "disabled"
+        ? false
+        : null;
+  const responsibleId = appointment.updated_by ?? appointment.created_by ?? actorId;
+  const arrivedAt = appointment.checked_in_at ?? new Date().toISOString();
+  const { data: created, error: insertError } = await admin
+    .from("clinical_encounters")
+    .insert({
+      clinic_id: appointment.clinic_id,
+      appointment_id: appointment.id,
+      patient_id: appointment.patient_id,
+      professional_member_id: appointment.professional_member_id,
+      status: resolvedStatus,
+      preconsultation_mode: resolvedMode,
+      preconsultation_required: preconsultationRequired,
+      routing_source:
+        service?.preconsultation_mode && service.preconsultation_mode !== "inherit"
+          ? "service"
+          : "clinic",
+      routing_decided_at: preconsultationRequired === null ? null : new Date().toISOString(),
+      arrived_at: arrivedAt,
+      triage_started_at:
+        appointment.status === "in_triage" ? appointment.started_at ?? new Date().toISOString() : null,
+      consultation_started_at:
+        appointment.status === "in_progress" ? appointment.started_at ?? new Date().toISOString() : null,
+      consultation_completed_at:
+        appointment.status === "completed"
+          ? appointment.completed_at ?? new Date().toISOString()
+          : null,
+      created_by: responsibleId,
+      updated_by: responsibleId,
+    })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (insertError) {
+    if (/duplicate|unique/i.test(insertError.message)) {
+      const { data: recovered } = await admin
+        .from("clinical_encounters")
+        .select("id")
+        .eq("appointment_id", appointmentId)
+        .is("deleted_at", null)
+        .maybeSingle<{ id: string }>();
+
+      if (recovered?.id) return { ok: true, encounterId: recovered.id, created: false };
+    }
+
+    return { ok: false, error: "Não foi possível iniciar o fluxo assistencial deste agendamento." };
+  }
+
+  await admin.from("clinical_encounter_events").insert({
+    clinic_id: appointment.clinic_id,
+    encounter_id: created.id,
+    event_type: "patient_arrived",
+    from_status: null,
+    to_status: resolvedStatus,
+    metadata: { source: "application_repair", appointment_status: appointment.status },
+    created_by: responsibleId,
+    updated_by: responsibleId,
+  });
+
+  return { ok: true, encounterId: created.id, created: true };
 }
 
 async function assertProfessionalBelongsToClinic(professionalMemberId: string, clinicId: string) {
@@ -1067,6 +1238,51 @@ export async function updateAppointmentStatusAction(
     updated_by: user.id,
   });
 
+  if (parsed.data.status === "checked_in") {
+    const syncResult = await ensureClinicalEncounterForAppointment(
+      parsed.data.appointment_id,
+      user.id,
+    );
+
+    if (!syncResult.ok) {
+      await logAuditEvent({
+        clinicId: activeClinic.id,
+        userId: user.id,
+        actionType: "clinical_workflow_sync_failed",
+        module: "schedule",
+        recordTable: "appointments",
+        recordId: parsed.data.appointment_id,
+        oldValues: { status: previous.status },
+        newValues: { status: parsed.data.status, sync_error: syncResult.error },
+        level: "warning",
+        notes: "Chegada registrada, mas o atendimento assistencial não foi inicializado.",
+      });
+
+      revalidatePath("/agenda");
+      revalidatePath("/atendimentos");
+      revalidatePath("/enfermagem");
+      revalidatePath("/auditoria");
+      return {
+        error:
+          "Chegada registrada, mas o fluxo assistencial não foi iniciado. Atualize a Agenda ou peça a um administrador para revisar o vínculo do atendimento.",
+      };
+    }
+
+    if (syncResult.created) {
+      await logAuditEvent({
+        clinicId: activeClinic.id,
+        userId: user.id,
+        actionType: "clinical_workflow_created",
+        module: "schedule",
+        recordTable: "clinical_encounters",
+        recordId: syncResult.encounterId,
+        newValues: { appointment_id: parsed.data.appointment_id },
+        level: "security",
+        notes: "Atendimento assistencial criado automaticamente após chegada do paciente.",
+      });
+    }
+  }
+
   await logAuditEvent({
     clinicId: activeClinic.id,
     userId: user.id,
@@ -1084,6 +1300,8 @@ export async function updateAppointmentStatusAction(
   });
 
   revalidatePath("/agenda");
+  revalidatePath("/atendimentos");
+  revalidatePath("/enfermagem");
   revalidatePath("/auditoria");
   return { success: "Status da consulta atualizado." };
 }

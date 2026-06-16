@@ -28,6 +28,13 @@ const encounterSchema = z.object({
 function workflowError(message?: string) {
   const normalized = message?.toLowerCase() ?? "";
 
+  if (
+    normalized.includes("atendimento nao encontrado") ||
+    normalized.includes("atendimento não encontrado")
+  ) {
+    return "Este agendamento ainda não possui fluxo assistencial vinculado. Registre a chegada do paciente na Agenda ou atualize a página.";
+  }
+
   if (normalized.includes("permission") || normalized.includes("permiss")) {
     return "Seu perfil não possui permissão para esta etapa.";
   }
@@ -163,7 +170,10 @@ async function transitionClinicalEncounter(
     reason: formData.get("reason"),
   });
   if (!parsed.success) {
-    return { error: "Atendimento não identificado. Atualize a página e tente novamente." };
+    return {
+      error:
+        "Atendimento não identificado. Volte para a Agenda, confirme se o paciente já chegou e abra novamente a fila assistencial.",
+    };
   }
 
   const context = await getContext();
@@ -178,7 +188,12 @@ async function transitionClinicalEncounter(
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (!previous) return { error: "Atendimento não encontrado na clínica ativa." };
+  if (!previous) {
+    return {
+      error:
+        "Atendimento não encontrado na clínica ativa. Registre a chegada do paciente na Agenda para iniciar o fluxo assistencial.",
+    };
+  }
 
   const { data, error } = await context.supabase.rpc("transition_clinical_encounter", {
     encounter_uuid: parsed.data.encounter_id,
