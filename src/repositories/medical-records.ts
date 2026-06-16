@@ -5,10 +5,11 @@ import {
   type MedicalRecordFieldKey,
 } from "@/features/medical-records/config";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
+import { getClinicAuthorization } from "@/services/authorization/clinic-access";
 import type { ClinicalEncounterStatus } from "@/types/domain";
 
 export type MedicalRecordStatus = "draft" | "completed" | "corrected";
-export type MedicalPrescriptionStatus = "draft" | "issued" | "cancelled" | "corrected";
+export type MedicalPrescriptionStatus = "draft" | "issued" | "cancelled" | "corrected" | "deleted";
 
 export type MedicalRecordPreferences = {
   clinic_id: string;
@@ -54,10 +55,38 @@ export type MedicalPrescription = {
   title: string;
   content: string;
   status: MedicalPrescriptionStatus;
+  professional_registry: string | null;
+  deleted_reason: string | null;
+  deleted_by: string | null;
   issued_at: string | null;
+  printed_at: string | null;
+  exported_at: string | null;
   correction_reason: string | null;
   created_at: string;
   updated_at: string;
+  deleted_at?: string | null;
+};
+
+export type MedicalDocumentEvent = {
+  id: string;
+  medical_document_id: string;
+  event_type: "created" | "updated" | "printed" | "exported_pdf" | "deleted" | "restored";
+  reason: string | null;
+  created_at: string;
+  created_by: string | null;
+};
+
+export type PatientClinicalComment = {
+  id: string;
+  patient_id: string;
+  encounter_id: string | null;
+  medical_record_id: string | null;
+  professional_member_id: string | null;
+  comment: string;
+  visibility: "clinical" | "private";
+  created_at: string;
+  created_by: string | null;
+  author: { full_name: string } | null;
 };
 
 export type MedicalRecordEncounterDetail = {
@@ -91,10 +120,14 @@ export type MedicalRecordEncounterDetail = {
   professional: {
     id: string;
     role: string;
-    profile: {
-      full_name: string;
-      avatar_url?: string | null;
-    } | null;
+    profile: { full_name: string; avatar_url?: string | null } | null;
+  } | null;
+  professional_profile: {
+    specialty: string | null;
+    council_type: string | null;
+    council_number: string | null;
+    council_state: string | null;
+    rqe: string | null;
   } | null;
   nursing_assessment: {
     id: string;
@@ -121,11 +154,29 @@ export type MedicalRecordEncounterDetail = {
   } | null;
   medical_record: MedicalRecord | null;
   prescriptions: MedicalPrescription[];
+  document_events: MedicalDocumentEvent[];
+  patient_comments: PatientClinicalComment[];
 };
 
 export type MedicalRecordListItem = MedicalRecord & {
   patient: { id: string; full_name: string; social_name: string | null } | null;
   professional: { id: string; profile: { full_name: string } | null } | null;
+};
+
+export type MedicalRecordReports = {
+  totalRecords: number;
+  completedRecords: number;
+  draftRecords: number;
+  issuedDocuments: number;
+  deletedDocuments: number;
+  recordsByStatus: Array<{ status: string; count: number }>;
+  recordsByProfessional: Array<{ professional: string; count: number }>;
+};
+
+export type PatientMedicalOverview = {
+  patient: { id: string; full_name: string; social_name: string | null; phone: string | null } | null;
+  records: MedicalRecordListItem[];
+  comments: PatientClinicalComment[];
 };
 
 export const defaultMedicalRecordPreferences = (clinicId = ""): MedicalRecordPreferences => ({
@@ -139,7 +190,10 @@ export const defaultMedicalRecordPreferences = (clinicId = ""): MedicalRecordPre
 type ProfessionalRow = {
   id: string;
   role?: string;
-  profile: { full_name: string; avatar_url?: string | null } | { full_name: string; avatar_url?: string | null }[] | null;
+  profile:
+    | { full_name: string; avatar_url?: string | null }
+    | { full_name: string; avatar_url?: string | null }[]
+    | null;
 };
 
 function normalizeProfessional(row?: ProfessionalRow | null) {
@@ -233,6 +287,7 @@ export async function getMedicalRecordEncounterDetail(
     { data: appointment },
     { data: patient },
     { data: professional },
+    { data: professionalProfile },
     { data: nursingAssessment },
     { data: medicalRecord },
   ] = await Promise.all([
@@ -252,6 +307,13 @@ export async function getMedicalRecordEncounterDetail(
       .eq("id", encounter.professional_member_id)
       .maybeSingle<ProfessionalRow>(),
     admin
+      .from("clinic_professional_profiles")
+      .select("specialty, council_type, council_number, council_state, rqe")
+      .eq("clinic_id", clinicId)
+      .eq("professional_member_id", encounter.professional_member_id)
+      .is("deleted_at", null)
+      .maybeSingle<MedicalRecordEncounterDetail["professional_profile"]>(),
+    admin
       .from("nursing_assessments")
       .select(
         "id, status, chief_complaint, current_medications, allergies, comorbidities, pain_score, systolic_bp, diastolic_bp, heart_rate, respiratory_rate, temperature_c, oxygen_saturation, capillary_glucose, weight_kg, height_cm, bmi, risk_level, nursing_notes, recommendations, completed_at",
@@ -267,23 +329,54 @@ export async function getMedicalRecordEncounterDetail(
       .maybeSingle<MedicalRecord>(),
   ]);
 
-  const { data: prescriptions } = medicalRecord?.id
+  const [{ data: prescriptions }, { data: comments }] = await Promise.all([
+    medicalRecord?.id
+      ? admin
+          .from("medical_prescriptions")
+          .select("*")
+          .eq("medical_record_id", medicalRecord.id)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] }),
+    admin
+      .from("patient_clinical_comments")
+      .select(
+        "id, patient_id, encounter_id, medical_record_id, professional_member_id, comment, visibility, created_at, created_by",
+      )
+      .eq("clinic_id", clinicId)
+      .eq("patient_id", encounter.patient_id)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(20),
+  ]);
+
+  const documentIds = ((prescriptions ?? []) as MedicalPrescription[]).map((item) => item.id);
+  const { data: documentEvents } = documentIds.length
     ? await admin
-        .from("medical_prescriptions")
-        .select("*")
-        .eq("medical_record_id", medicalRecord.id)
-        .is("deleted_at", null)
+        .from("medical_document_events")
+        .select("id, medical_document_id, event_type, reason, created_at, created_by")
+        .in("medical_document_id", documentIds)
         .order("created_at", { ascending: false })
     : { data: [] };
+  const authorIds = [...new Set((comments ?? []).map((item) => item.created_by).filter(Boolean))];
+  const { data: authors } = authorIds.length
+    ? await admin.from("profiles").select("id, full_name").in("id", authorIds)
+    : { data: [] };
+  const authorMap = new Map((authors ?? []).map((item) => [item.id, item]));
 
   return {
     ...encounter,
     appointment: appointment ?? null,
     patient: patient ?? null,
     professional: normalizeProfessional(professional) as MedicalRecordEncounterDetail["professional"],
+    professional_profile: professionalProfile ?? null,
     nursing_assessment: nursingAssessment ?? null,
     medical_record: medicalRecord ?? null,
     prescriptions: (prescriptions ?? []) as MedicalPrescription[],
+    document_events: (documentEvents ?? []) as MedicalDocumentEvent[],
+    patient_comments: ((comments ?? []) as PatientClinicalComment[]).map((comment) => ({
+      ...comment,
+      author: comment.created_by ? authorMap.get(comment.created_by) ?? null : null,
+    })),
   };
 }
 
@@ -332,4 +425,131 @@ export async function listMedicalRecords(
     patient: patientMap.get(row.patient_id) ?? null,
     professional: professionalMap.get(row.professional_member_id) ?? null,
   }));
+}
+
+export async function getMedicalRecordReports(
+  clinicId: string | null | undefined,
+): Promise<MedicalRecordReports> {
+  const records = await listMedicalRecords(clinicId);
+  if (!clinicId) {
+    return emptyReports();
+  }
+
+  const access = await getClinicalWorkflowAccess(clinicId);
+  if (!access.canViewAll && !access.canViewOwn) return emptyReports();
+
+  const admin = createSupabaseAdminClient();
+  let documentQuery = admin
+    .from("medical_prescriptions")
+    .select("id, status")
+    .eq("clinic_id", clinicId);
+
+  if (!access.canViewAll && access.currentMemberId) {
+    documentQuery = documentQuery.eq("professional_member_id", access.currentMemberId);
+  }
+
+  const { data: documents } = await documentQuery;
+  const statusMap = new Map<string, number>();
+  const professionalMap = new Map<string, number>();
+
+  for (const record of records) {
+    statusMap.set(record.status, (statusMap.get(record.status) ?? 0) + 1);
+    const professional = record.professional?.profile?.full_name ?? "Profissional";
+    professionalMap.set(professional, (professionalMap.get(professional) ?? 0) + 1);
+  }
+
+  return {
+    totalRecords: records.length,
+    completedRecords: records.filter((record) => record.status === "completed").length,
+    draftRecords: records.filter((record) => record.status === "draft").length,
+    issuedDocuments: (documents ?? []).filter((doc) => doc.status === "issued").length,
+    deletedDocuments: (documents ?? []).filter((doc) => doc.status === "deleted").length,
+    recordsByStatus: [...statusMap.entries()].map(([status, count]) => ({ status, count })),
+    recordsByProfessional: [...professionalMap.entries()].map(([professional, count]) => ({
+      professional,
+      count,
+    })),
+  };
+}
+
+function emptyReports(): MedicalRecordReports {
+  return {
+    totalRecords: 0,
+    completedRecords: 0,
+    draftRecords: 0,
+    issuedDocuments: 0,
+    deletedDocuments: 0,
+    recordsByStatus: [],
+    recordsByProfessional: [],
+  };
+}
+
+export async function listPatientMedicalOverviews(
+  clinicId: string | null | undefined,
+): Promise<PatientMedicalOverview[]> {
+  const records = await listMedicalRecords(clinicId);
+  if (!clinicId || !records.length) return [];
+
+  const patientIds = [...new Set(records.map((record) => record.patient_id))];
+  const admin = createSupabaseAdminClient();
+  const { data: comments } = await admin
+    .from("patient_clinical_comments")
+    .select(
+      "id, patient_id, encounter_id, medical_record_id, professional_member_id, comment, visibility, created_at, created_by",
+    )
+    .eq("clinic_id", clinicId)
+    .in("patient_id", patientIds)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  const authorIds = [...new Set((comments ?? []).map((comment) => comment.created_by).filter(Boolean))];
+  const { data: authors } = authorIds.length
+    ? await admin.from("profiles").select("id, full_name").in("id", authorIds)
+    : { data: [] };
+  const authorMap = new Map((authors ?? []).map((item) => [item.id, item]));
+  const byPatient = new Map<string, PatientMedicalOverview>();
+
+  for (const record of records) {
+    const existing = byPatient.get(record.patient_id);
+    if (existing) {
+      existing.records.push(record);
+      continue;
+    }
+    byPatient.set(record.patient_id, {
+      patient: record.patient
+        ? { ...record.patient, phone: null }
+        : { id: record.patient_id, full_name: "Paciente", social_name: null, phone: null },
+      records: [record],
+      comments: [],
+    });
+  }
+
+  for (const comment of (comments ?? []) as PatientClinicalComment[]) {
+    const overview = byPatient.get(comment.patient_id);
+    if (!overview) continue;
+    overview.comments.push({
+      ...comment,
+      author: comment.created_by ? authorMap.get(comment.created_by) ?? null : null,
+    });
+  }
+
+  return [...byPatient.values()];
+}
+
+export async function getMedicalLgpdAcknowledgement(clinicId: string | null | undefined) {
+  if (!clinicId) return null;
+  const access = await getClinicAuthorization(clinicId);
+  if (!access.userId) return null;
+
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin
+    .from("medical_lgpd_acknowledgements")
+    .select("id, version, accepted_at")
+    .eq("clinic_id", clinicId)
+    .eq("user_id", access.userId)
+    .eq("version", "2026-06-clinical-data-v1")
+    .maybeSingle<{ id: string; version: string; accepted_at: string }>();
+
+  return data ?? null;
 }

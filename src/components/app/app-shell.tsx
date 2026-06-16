@@ -43,7 +43,7 @@ const nav: NavItem[] = [
   { key: "dashboard", href: "/dashboard", label: "Painel", icon: LayoutDashboard },
   { key: "schedule", href: "/agenda", label: "Agenda", icon: CalendarDays },
   { key: "encounters", href: "/atendimentos", label: "Atendimentos", icon: Stethoscope },
-  { key: "medicalRecords", href: "/prontuarios", label: "ProntuÃ¡rios", icon: FileText },
+  { key: "medicalRecords", href: "/prontuarios", label: "Prontuarios", icon: FileText },
   { key: "nursing", href: "/enfermagem", label: "Enfermagem", icon: HeartPulse },
   { key: "registrations", href: "/cadastros", label: "Cadastros", icon: ClipboardList },
   { key: "clinics", href: "/clinicas", label: "Clínicas", icon: Building2 },
@@ -177,12 +177,12 @@ export function AppShell({
           <ClinicSwitcher clinics={clinics} activeClinicId={activeClinic?.id} collapsed={collapsed} />
         </div>
 
-        <nav className="grid gap-1">
+        <nav className="grid min-h-0 flex-1 content-start gap-1 overflow-y-auto overscroll-contain pr-1">
           {visibleNavigation.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const content = (
               <>
-                <item.icon />
+                <item.icon className="size-4 shrink-0" />
                 {!collapsed ? <span>{item.label}</span> : null}
               </>
             );
@@ -207,10 +207,12 @@ export function AppShell({
                 key={item.href}
                 asChild
                 variant={isActive ? "secondary" : "ghost"}
-                className={cn("justify-start", collapsed && "justify-center px-0")}
+                className={cn("h-10 justify-start gap-2 overflow-hidden", collapsed && "justify-center px-0")}
                 title={item.label}
               >
-                <Link href={item.href}>{content}</Link>
+                <Link href={item.href} className="min-w-0">
+                  {content}
+                </Link>
               </Button>
             );
           })}

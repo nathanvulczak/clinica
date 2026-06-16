@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, FileText, LockKeyhole, Settings2, Stethoscope } from "lucide-react";
+import { LockKeyhole } from "lucide-react";
 import { ACTIVE_CARE_STATUSES } from "@/config/clinical-workflow";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -7,16 +7,28 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { ClinicalQueue } from "@/features/clinical-workflow/components/clinical-queue";
+import { MedicalLgpdAckCard } from "@/features/medical-records/components/medical-lgpd-ack-card";
+import { MedicalRecordPreferencesForm } from "@/features/medical-records/components/medical-record-preferences-form";
+import {
+  MedicalRecordSectionNav,
+  type MedicalRecordSection,
+} from "@/features/medical-records/components/medical-record-section-nav";
+import { PatientMedicalOverviewPanel } from "@/features/medical-records/components/patient-medical-overview-panel";
 import {
   getClinicalWorkflowAccess,
   listClinicalEncounters,
 } from "@/repositories/clinical-workflow";
-import { listMedicalRecords } from "@/repositories/medical-records";
-import type { LucideIcon } from "lucide-react";
+import {
+  getMedicalLgpdAcknowledgement,
+  getMedicalRecordPreferences,
+  getMedicalRecordReports,
+  listMedicalRecords,
+  listPatientMedicalOverviews,
+} from "@/repositories/medical-records";
 
-function normalizeSection(value?: string) {
-  return ["queue", "records", "reports", "preferences"].includes(value ?? "")
-    ? value
+function normalizeSection(value?: string): MedicalRecordSection {
+  return ["queue", "records", "patients", "reports", "preferences"].includes(value ?? "")
+    ? (value as MedicalRecordSection)
     : "queue";
 }
 
@@ -28,17 +40,6 @@ function formatDateTime(value: string | null | undefined) {
     timeZone: "America/Sao_Paulo",
   }).format(new Date(value));
 }
-
-const sections: Array<{
-  key: "queue" | "records" | "reports" | "preferences";
-  label: string;
-  icon: LucideIcon;
-}> = [
-  { key: "queue", label: "Fila clinica", icon: Stethoscope },
-  { key: "records", label: "Registros", icon: FileText },
-  { key: "reports", label: "Relatorios", icon: BarChart3 },
-  { key: "preferences", label: "Preferencias", icon: Settings2 },
-];
 
 export default async function ProntuariosPage({
   searchParams,
@@ -55,9 +56,22 @@ export default async function ProntuariosPage({
       ? await listClinicalEncounters(activeClinic.id, { statuses: ACTIVE_CARE_STATUSES })
       : [];
   const records =
-    activeClinic && canView && section === "records"
+    activeClinic && canView && (section === "records" || section === "reports")
       ? await listMedicalRecords(activeClinic.id)
       : [];
+  const reports =
+    activeClinic && canView && section === "reports"
+      ? await getMedicalRecordReports(activeClinic.id)
+      : null;
+  const preferences =
+    activeClinic && canView && section === "preferences"
+      ? await getMedicalRecordPreferences(activeClinic.id)
+      : null;
+  const patientOverviews =
+    activeClinic && canView && section === "patients"
+      ? await listPatientMedicalOverviews(activeClinic.id)
+      : [];
+  const lgpdAck = activeClinic && canView ? await getMedicalLgpdAcknowledgement(activeClinic.id) : null;
 
   const readyCount = encounters.filter((encounter) => encounter.status === "ready_for_consultation").length;
   const activeCount = encounters.filter(
@@ -69,7 +83,7 @@ export default async function ProntuariosPage({
     <>
       <PageHeader
         title="Prontuarios"
-        description="Evolucao clinica, prescricoes e fechamento do atendimento com rastreabilidade."
+        description="Evolucao clinica, documentos, comentarios por paciente e fechamento do atendimento."
       />
 
       {!activeClinic ? (
@@ -94,21 +108,8 @@ export default async function ProntuariosPage({
         </Card>
       ) : (
         <div className="grid gap-5">
-          <div className="flex flex-wrap gap-2 rounded-lg border bg-card p-2">
-            {sections.map(({ key, label, icon: Icon }) => (
-              <Button
-                key={key as string}
-                asChild
-                size="sm"
-                variant={section === key ? "secondary" : "ghost"}
-              >
-                <Link href={`/prontuarios?section=${key}`}>
-                  <Icon className="size-4" />
-                  {label}
-                </Link>
-              </Button>
-            ))}
-          </div>
+          <MedicalLgpdAckCard acceptedAt={lgpdAck?.accepted_at} />
+          <MedicalRecordSectionNav activeSection={section} />
 
           <div className="grid gap-3 lg:grid-cols-3">
             <div className="rounded-lg border bg-card p-4">
@@ -171,30 +172,71 @@ export default async function ProntuariosPage({
             </div>
           ) : null}
 
-          {section === "reports" ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Relatorios clinicos</CardTitle>
-                <CardDescription>
-                  Base preparada para indicadores por profissional, paciente, periodo, CID e status.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Badge>Proxima etapa</Badge>
-              </CardContent>
-            </Card>
+          {section === "patients" ? <PatientMedicalOverviewPanel overviews={patientOverviews} /> : null}
+
+          {section === "reports" && reports ? (
+            <div className="grid gap-4">
+              <div className="grid gap-3 lg:grid-cols-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm font-medium">Prontuarios</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-2xl font-semibold">{reports.totalRecords}</CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm font-medium">Concluidos</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-2xl font-semibold">{reports.completedRecords}</CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm font-medium">Rascunhos</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-2xl font-semibold">{reports.draftRecords}</CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm font-medium">Documentos emitidos</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-2xl font-semibold">{reports.issuedDocuments}</CardContent>
+                </Card>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Status dos prontuarios</CardTitle>
+                    <CardDescription>Distribuicao operacional da carteira clinica.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-2">
+                    {reports.recordsByStatus.map((item) => (
+                      <div key={item.status} className="flex justify-between rounded-md border bg-muted/20 p-3 text-sm">
+                        <span>{item.status}</span>
+                        <strong>{item.count}</strong>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Por profissional</CardTitle>
+                    <CardDescription>Volume de prontuarios por responsavel.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-2">
+                    {reports.recordsByProfessional.map((item) => (
+                      <div key={item.professional} className="flex justify-between rounded-md border bg-muted/20 p-3 text-sm">
+                        <span>{item.professional}</span>
+                        <strong>{item.count}</strong>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           ) : null}
 
-          {section === "preferences" ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Preferencias do prontuario</CardTitle>
-                <CardDescription>
-                  Campos obrigatorios, correcao de registros e exibicao da Enfermagem ja possuem
-                  estrutura no banco para evoluirmos com painel de configuracao.
-                </CardDescription>
-              </CardHeader>
-            </Card>
+          {section === "preferences" && preferences ? (
+            <MedicalRecordPreferencesForm preferences={preferences} canEdit={access.canViewAll} />
           ) : null}
         </div>
       )}

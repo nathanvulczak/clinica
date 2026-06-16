@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
   DEFAULT_REQUIRED_MEDICAL_RECORD_FIELDS,
+  MEDICAL_RECORD_LGPD_ACK_TEXT,
   isMedicalRecordFieldKey,
   medicalRecordFieldLabels,
 } from "@/features/medical-records/config";
@@ -18,6 +19,8 @@ export type MedicalRecordActionState = {
   success?: string;
   redirectTo?: string;
 };
+
+export type MedicalDocumentActionState = MedicalRecordActionState;
 
 const optionalText = (max: number) =>
   z.string().trim().max(max).optional().transform((value) => value || null);
@@ -41,10 +44,42 @@ const recordSchema = z.object({
   follow_up_required: z.boolean(),
   follow_up_notes: optionalText(2000),
   correction_reason: optionalText(800),
-  prescription_id: z.string().uuid().optional().or(z.literal("")).transform((value) => value || null),
-  prescription_template_key: optionalText(80),
-  prescription_title: optionalText(180),
-  prescription_content: optionalText(8000),
+});
+
+const documentSchema = z.object({
+  encounter_id: z.string().uuid(),
+  medical_record_id: z.string().uuid().optional().or(z.literal("")).transform((value) => value || null),
+  document_id: z.string().uuid().optional().or(z.literal("")).transform((value) => value || null),
+  template_key: optionalText(80),
+  title: z.string().trim().min(2, "Informe o titulo do documento.").max(180),
+  content: z.string().trim().min(10, "Informe o conteudo do documento.").max(12000),
+  professional_registry: optionalText(120),
+  action: z.enum(["draft", "issue"]),
+});
+
+const deleteDocumentSchema = z.object({
+  document_id: z.string().uuid(),
+  reason: z.string().trim().min(10, "Informe um motivo com pelo menos 10 caracteres.").max(800),
+});
+
+const documentEventSchema = z.object({
+  document_id: z.string().uuid(),
+  event_type: z.enum(["printed", "exported_pdf"]),
+});
+
+const preferencesSchema = z.object({
+  required_fields: z.array(z.string()).transform((values) => values.filter(isMedicalRecordFieldKey)),
+  allow_completed_corrections: z.boolean(),
+  require_correction_reason: z.boolean(),
+  show_nursing_summary: z.boolean(),
+});
+
+const commentSchema = z.object({
+  patient_id: z.string().uuid(),
+  encounter_id: z.string().uuid().optional().or(z.literal("")).transform((value) => value || null),
+  medical_record_id: z.string().uuid().optional().or(z.literal("")).transform((value) => value || null),
+  comment: z.string().trim().min(3, "Escreva um comentario clinico.").max(2000),
+  visibility: z.enum(["clinical", "private"]),
 });
 
 async function getContext() {
@@ -116,6 +151,69 @@ function revalidateMedicalRecord(encounterId: string) {
   revalidatePath("/auditoria");
 }
 
+async function resolveEncounterForAction(encounterId: string, clinicId: string) {
+  const admin = createSupabaseAdminClient();
+  const { data: encounter } = await admin
+    .from("clinical_encounters")
+    .select("id, clinic_id, appointment_id, patient_id, professional_member_id, status")
+    .eq("id", encounterId)
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .maybeSingle<{
+      id: string;
+      clinic_id: string;
+      appointment_id: string;
+      patient_id: string;
+      professional_member_id: string;
+      status: string;
+    }>();
+
+  return encounter ?? null;
+}
+
+async function getOrCreateMedicalRecordForDocument({
+  encounter,
+  userId,
+}: {
+  encounter: {
+    id: string;
+    clinic_id: string;
+    appointment_id: string;
+    patient_id: string;
+    professional_member_id: string;
+  };
+  userId: string;
+}) {
+  const admin = createSupabaseAdminClient();
+  const { data: existing } = await admin
+    .from("medical_records")
+    .select("id")
+    .eq("encounter_id", encounter.id)
+    .is("deleted_at", null)
+    .maybeSingle<{ id: string }>();
+
+  if (existing) return existing.id;
+
+  const { data, error } = await admin
+    .from("medical_records")
+    .insert({
+      clinic_id: encounter.clinic_id,
+      encounter_id: encounter.id,
+      appointment_id: encounter.appointment_id,
+      patient_id: encounter.patient_id,
+      professional_member_id: encounter.professional_member_id,
+      performed_by: userId,
+      status: "draft",
+      created_by: userId,
+      updated_by: userId,
+    })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (error || !data) return null;
+  return data.id;
+}
+
 export async function saveMedicalRecordAction(
   _state: MedicalRecordActionState,
   formData: FormData,
@@ -139,10 +237,6 @@ export async function saveMedicalRecordAction(
     follow_up_required: formData.get("follow_up_required") === "on",
     follow_up_notes: formString("follow_up_notes"),
     correction_reason: formString("correction_reason"),
-    prescription_id: formString("prescription_id"),
-    prescription_template_key: formString("prescription_template_key"),
-    prescription_title: formString("prescription_title"),
-    prescription_content: formString("prescription_content"),
   });
 
   if (!parsed.success) {
@@ -300,49 +394,6 @@ export async function saveMedicalRecordAction(
     notes: "Prontuario registrado com rastreabilidade do atendimento.",
   });
 
-  if (parsed.data.prescription_title && parsed.data.prescription_content) {
-    const prescriptionPayload = {
-      clinic_id: encounter.clinic_id,
-      medical_record_id: saved.id,
-      encounter_id: encounter.id,
-      patient_id: encounter.patient_id,
-      professional_member_id: encounter.professional_member_id,
-      template_key: parsed.data.prescription_template_key,
-      title: parsed.data.prescription_title,
-      content: parsed.data.prescription_content,
-      status: parsed.data.mode === "complete" ? "issued" : "draft",
-      issued_at: parsed.data.mode === "complete" ? new Date().toISOString() : null,
-      updated_by: context.user.id,
-      created_by: context.user.id,
-    };
-
-    const upsertPayload = parsed.data.prescription_id
-      ? { ...prescriptionPayload, id: parsed.data.prescription_id }
-      : prescriptionPayload;
-
-    const { data: prescription, error: prescriptionError } = await admin
-      .from("medical_prescriptions")
-      .upsert(upsertPayload)
-      .select("id")
-      .single<{ id: string }>();
-
-    if (prescriptionError) {
-      return { error: "Prontuario salvo, mas nao foi possivel salvar a prescricao." };
-    }
-
-    await logAuditEvent({
-      clinicId: context.activeClinic.id,
-      userId: context.user.id,
-      actionType: parsed.data.prescription_id ? "prescription_updated" : "prescription_created",
-      module: "medical_records",
-      recordTable: "medical_prescriptions",
-      recordId: prescription.id,
-      newValues: prescriptionPayload,
-      level: "security",
-      notes: "Prescricao vinculada ao prontuario.",
-    });
-  }
-
   if (parsed.data.mode === "complete") {
     const { error: transitionError } = await transitionEncounter(
       context.supabase,
@@ -367,4 +418,380 @@ export async function saveMedicalRecordAction(
         : "Prontuario salvo.",
     redirectTo: parsed.data.mode === "complete" ? "/atendimentos" : undefined,
   };
+}
+
+export async function saveMedicalDocumentAction(
+  _state: MedicalDocumentActionState,
+  formData: FormData,
+): Promise<MedicalDocumentActionState> {
+  const parsed = documentSchema.safeParse({
+    encounter_id: formData.get("encounter_id"),
+    medical_record_id: formData.get("medical_record_id"),
+    document_id: formData.get("document_id"),
+    template_key: formData.get("template_key"),
+    title: formData.get("title"),
+    content: formData.get("content"),
+    professional_registry: formData.get("professional_registry"),
+    action: formData.get("action"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Documento invalido." };
+  }
+
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clinica e autentique-se novamente." };
+  if (!context.access.canViewOwn && !context.access.canViewAll) {
+    return { error: "Seu perfil nao possui permissao para emitir documentos clinicos." };
+  }
+
+  const encounter = await resolveEncounterForAction(parsed.data.encounter_id, context.activeClinic.id);
+  if (!encounter) return { error: "Atendimento nao encontrado." };
+  if (!context.access.canViewAll && encounter.professional_member_id !== context.access.currentMemberId) {
+    return { error: "Este atendimento nao esta vinculado ao seu usuario." };
+  }
+
+  const medicalRecordId =
+    parsed.data.medical_record_id ??
+    (await getOrCreateMedicalRecordForDocument({ encounter, userId: context.user.id }));
+  if (!medicalRecordId) return { error: "Nao foi possivel preparar o prontuario para o documento." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = parsed.data.document_id
+    ? await admin
+        .from("medical_prescriptions")
+        .select("*")
+        .eq("id", parsed.data.document_id)
+        .eq("clinic_id", context.activeClinic.id)
+        .maybeSingle()
+    : { data: null };
+
+  const now = new Date().toISOString();
+  const payload = {
+    clinic_id: context.activeClinic.id,
+    medical_record_id: medicalRecordId,
+    encounter_id: encounter.id,
+    patient_id: encounter.patient_id,
+    professional_member_id: encounter.professional_member_id,
+    template_key: parsed.data.template_key,
+    title: parsed.data.title,
+    content: parsed.data.content,
+    professional_registry: parsed.data.professional_registry,
+    status: parsed.data.action === "issue" ? "issued" : "draft",
+    issued_at: parsed.data.action === "issue" ? previous?.issued_at ?? now : previous?.issued_at ?? null,
+    deleted_at: null,
+    deleted_reason: null,
+    deleted_by: null,
+    updated_by: context.user.id,
+    created_by: previous?.created_by ?? context.user.id,
+  };
+
+  const query = parsed.data.document_id
+    ? admin.from("medical_prescriptions").update(payload).eq("id", parsed.data.document_id)
+    : admin.from("medical_prescriptions").insert(payload);
+
+  const { data: document, error } = await query.select("id").single<{ id: string }>();
+  if (error || !document) return { error: "Nao foi possivel salvar o documento." };
+
+  await admin.from("medical_document_events").insert({
+    clinic_id: context.activeClinic.id,
+    medical_document_id: document.id,
+    medical_record_id: medicalRecordId,
+    encounter_id: encounter.id,
+    patient_id: encounter.patient_id,
+    professional_member_id: encounter.professional_member_id,
+    event_type: parsed.data.document_id ? "updated" : "created",
+    created_by: context.user.id,
+  });
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: parsed.data.document_id ? "prescription_updated" : "prescription_created",
+    module: "medical_records",
+    recordTable: "medical_prescriptions",
+    recordId: document.id,
+    oldValues: previous,
+    newValues: payload,
+    level: "security",
+    notes: "Documento clinico vinculado ao prontuario.",
+  });
+
+  revalidateMedicalRecord(encounter.id);
+  return { success: parsed.data.action === "issue" ? "Documento emitido." : "Documento salvo." };
+}
+
+export async function deleteMedicalDocumentAction(
+  _state: MedicalDocumentActionState,
+  formData: FormData,
+): Promise<MedicalDocumentActionState> {
+  const parsed = deleteDocumentSchema.safeParse({
+    document_id: formData.get("document_id"),
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Exclusao invalida." };
+
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clinica e autentique-se novamente." };
+  const admin = createSupabaseAdminClient();
+  const { data: document } = await admin
+    .from("medical_prescriptions")
+    .select("*")
+    .eq("id", parsed.data.document_id)
+    .eq("clinic_id", context.activeClinic.id)
+    .maybeSingle();
+  if (!document) return { error: "Documento nao encontrado." };
+  if (!context.access.canViewAll && document.professional_member_id !== context.access.currentMemberId) {
+    return { error: "Este documento nao esta vinculado ao seu usuario." };
+  }
+
+  const payload = {
+    status: "deleted",
+    deleted_at: new Date().toISOString(),
+    deleted_reason: parsed.data.reason,
+    deleted_by: context.user.id,
+    updated_by: context.user.id,
+  };
+
+  const { error } = await admin
+    .from("medical_prescriptions")
+    .update(payload)
+    .eq("id", parsed.data.document_id);
+  if (error) return { error: "Nao foi possivel excluir o documento." };
+
+  await admin.from("medical_document_events").insert({
+    clinic_id: context.activeClinic.id,
+    medical_document_id: document.id,
+    medical_record_id: document.medical_record_id,
+    encounter_id: document.encounter_id,
+    patient_id: document.patient_id,
+    professional_member_id: document.professional_member_id,
+    event_type: "deleted",
+    reason: parsed.data.reason,
+    created_by: context.user.id,
+  });
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "prescription_deleted",
+    module: "medical_records",
+    recordTable: "medical_prescriptions",
+    recordId: document.id,
+    oldValues: document,
+    newValues: payload,
+    level: "security",
+    notes: "Documento clinico excluido com motivo preservado no prontuario.",
+  });
+
+  revalidateMedicalRecord(document.encounter_id);
+  return { success: "Documento excluido e preservado no historico." };
+}
+
+export async function logMedicalDocumentEventAction(
+  _state: MedicalDocumentActionState,
+  formData: FormData,
+): Promise<MedicalDocumentActionState> {
+  const parsed = documentEventSchema.safeParse({
+    document_id: formData.get("document_id"),
+    event_type: formData.get("event_type"),
+  });
+  if (!parsed.success) return { error: "Evento de documento invalido." };
+
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clinica e autentique-se novamente." };
+  const admin = createSupabaseAdminClient();
+  const { data: document } = await admin
+    .from("medical_prescriptions")
+    .select("*")
+    .eq("id", parsed.data.document_id)
+    .eq("clinic_id", context.activeClinic.id)
+    .maybeSingle();
+  if (!document) return { error: "Documento nao encontrado." };
+
+  const timestampField = parsed.data.event_type === "printed" ? "printed_at" : "exported_at";
+  await admin
+    .from("medical_prescriptions")
+    .update({ [timestampField]: new Date().toISOString(), updated_by: context.user.id })
+    .eq("id", document.id);
+
+  await admin.from("medical_document_events").insert({
+    clinic_id: context.activeClinic.id,
+    medical_document_id: document.id,
+    medical_record_id: document.medical_record_id,
+    encounter_id: document.encounter_id,
+    patient_id: document.patient_id,
+    professional_member_id: document.professional_member_id,
+    event_type: parsed.data.event_type,
+    created_by: context.user.id,
+  });
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: parsed.data.event_type === "printed" ? "prescription_printed" : "prescription_exported",
+    module: "medical_records",
+    recordTable: "medical_prescriptions",
+    recordId: document.id,
+    level: "security",
+    notes: "Documento clinico acessado para impressao/exportacao.",
+  });
+
+  revalidateMedicalRecord(document.encounter_id);
+  return { success: "Evento registrado." };
+}
+
+export async function upsertMedicalRecordPreferencesAction(
+  _state: MedicalRecordActionState,
+  formData: FormData,
+): Promise<MedicalRecordActionState> {
+  const parsed = preferencesSchema.safeParse({
+    required_fields: formData.getAll("required_fields").map(String),
+    allow_completed_corrections: formData.get("allow_completed_corrections") === "on",
+    require_correction_reason: formData.get("require_correction_reason") === "on",
+    show_nursing_summary: formData.get("show_nursing_summary") === "on",
+  });
+  if (!parsed.success) return { error: "Preferencias invalidas." };
+
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clinica e autentique-se novamente." };
+  if (!context.access.canViewAll) return { error: "Apenas administradores podem alterar preferencias." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = await admin
+    .from("medical_record_preferences")
+    .select("*")
+    .eq("clinic_id", context.activeClinic.id)
+    .maybeSingle();
+
+  const payload = {
+    clinic_id: context.activeClinic.id,
+    required_fields: parsed.data.required_fields.length
+      ? parsed.data.required_fields
+      : DEFAULT_REQUIRED_MEDICAL_RECORD_FIELDS,
+    allow_completed_corrections: parsed.data.allow_completed_corrections,
+    require_correction_reason: parsed.data.require_correction_reason,
+    show_nursing_summary: parsed.data.show_nursing_summary,
+    created_by: previous?.created_by ?? context.user.id,
+    updated_by: context.user.id,
+    deleted_at: null,
+  };
+
+  const { error } = await admin
+    .from("medical_record_preferences")
+    .upsert(payload, { onConflict: "clinic_id" });
+  if (error) return { error: "Nao foi possivel salvar as preferencias." };
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "medical_record_preferences_updated",
+    module: "medical_records",
+    recordTable: "medical_record_preferences",
+    recordId: context.activeClinic.id,
+    oldValues: previous,
+    newValues: payload,
+    notes: "Preferencias do modulo Prontuarios atualizadas.",
+  });
+
+  revalidatePath("/prontuarios");
+  revalidatePath("/auditoria");
+  return { success: "Preferencias de prontuario salvas." };
+}
+
+export async function addPatientClinicalCommentAction(
+  _state: MedicalRecordActionState,
+  formData: FormData,
+): Promise<MedicalRecordActionState> {
+  const parsed = commentSchema.safeParse({
+    patient_id: formData.get("patient_id"),
+    encounter_id: formData.get("encounter_id"),
+    medical_record_id: formData.get("medical_record_id"),
+    comment: formData.get("comment"),
+    visibility: formData.get("visibility") || "clinical",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Comentario invalido." };
+
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clinica e autentique-se novamente." };
+  if (!context.access.canViewOwn && !context.access.canViewAll) {
+    return { error: "Seu perfil nao possui permissao para comentar em prontuarios." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const payload = {
+    clinic_id: context.activeClinic.id,
+    patient_id: parsed.data.patient_id,
+    encounter_id: parsed.data.encounter_id,
+    medical_record_id: parsed.data.medical_record_id,
+    professional_member_id: context.access.currentMemberId,
+    comment: parsed.data.comment,
+    visibility: parsed.data.visibility,
+    created_by: context.user.id,
+    updated_by: context.user.id,
+  };
+  const { data, error } = await admin
+    .from("patient_clinical_comments")
+    .insert(payload)
+    .select("id")
+    .single<{ id: string }>();
+  if (error || !data) return { error: "Nao foi possivel salvar o comentario." };
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "patient_clinical_comment_created",
+    module: "medical_records",
+    recordTable: "patient_clinical_comments",
+    recordId: data.id,
+    newValues: payload,
+    level: "security",
+    notes: "Comentario clinico vinculado ao paciente.",
+  });
+
+  revalidatePath("/prontuarios");
+  if (parsed.data.encounter_id) revalidatePath(`/prontuarios/${parsed.data.encounter_id}`);
+  return { success: "Comentario salvo." };
+}
+
+export async function acknowledgeMedicalLgpdAction(
+  _state: MedicalRecordActionState,
+  _formData: FormData,
+): Promise<MedicalRecordActionState> {
+  void _state;
+  void _formData;
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clinica e autentique-se novamente." };
+  if (!context.access.canViewOwn && !context.access.canViewAll) {
+    return { error: "Seu perfil nao possui acesso a dados clinicos sensiveis." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const payload = {
+    clinic_id: context.activeClinic.id,
+    user_id: context.user.id,
+    member_id: context.access.currentMemberId,
+    version: "2026-06-clinical-data-v1",
+    consent_text: MEDICAL_RECORD_LGPD_ACK_TEXT,
+    created_by: context.user.id,
+  };
+  const { error } = await admin
+    .from("medical_lgpd_acknowledgements")
+    .upsert(payload, { onConflict: "clinic_id,user_id,version" });
+  if (error) return { error: "Nao foi possivel registrar a ciencia LGPD." };
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "medical_lgpd_acknowledged",
+    module: "medical_records",
+    recordTable: "medical_lgpd_acknowledgements",
+    recordId: context.user.id,
+    newValues: payload,
+    level: "security",
+    notes: "Profissional confirmou ciencia sobre tratamento de dados pessoais sensiveis de saude.",
+  });
+
+  revalidatePath("/prontuarios");
+  return { success: "Ciencia LGPD registrada." };
 }

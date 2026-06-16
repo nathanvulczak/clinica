@@ -78,3 +78,5 @@ Profissional: {{professional_name}}`,
 ] as const;
 
 export type PrescriptionTemplateKey = (typeof PRESCRIPTION_TEMPLATES)[number]["key"];
+
+export const MEDICAL_RECORD_LGPD_ACK_TEXT = `Estou ciente de que prontuarios, evolucoes, prescricoes, pre-consultas, exames, anexos e demais registros assistenciais podem conter dados pessoais sensiveis de saude. Comprometo-me a acessar somente registros necessarios para minha atividade profissional, manter sigilo, nao compartilhar credenciais, nao copiar dados sem finalidade assistencial ou administrativa legitima, registrar informacoes verdadeiras e pertinentes, e comunicar imediatamente qualquer acesso indevido, incidente ou erro de lancamento. Reconheco que minhas acoes ficam registradas em auditoria, com identificacao de usuario, data, horario e contexto da clinica, para seguranca, rastreabilidade e conformidade com a LGPD.`;

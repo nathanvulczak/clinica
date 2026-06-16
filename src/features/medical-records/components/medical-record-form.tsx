@@ -1,25 +1,18 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ClipboardCheck, FileText, Pill, Save, Stethoscope, UserRound } from "lucide-react";
+import { ClipboardCheck, FileText, Save, Stethoscope, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import {
-  PRESCRIPTION_TEMPLATES,
-  type MedicalRecordFieldKey,
-} from "@/features/medical-records/config";
+import { type MedicalRecordFieldKey } from "@/features/medical-records/config";
+import { MedicalDocumentsPanel } from "@/features/medical-records/components/medical-documents-panel";
 import {
   saveMedicalRecordAction,
   type MedicalRecordActionState,
 } from "@/features/medical-records/actions";
-import type {
-  MedicalPrescription,
-  MedicalRecordEncounterDetail,
-  MedicalRecordPreferences,
-} from "@/repositories/medical-records";
+import type { MedicalRecordEncounterDetail, MedicalRecordPreferences } from "@/repositories/medical-records";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "Data nao informada";
@@ -87,20 +80,6 @@ function TextArea({
       />
     </label>
   );
-}
-
-function fillTemplate(template: string, detail: MedicalRecordEncounterDetail) {
-  const patientName = detail.patient?.social_name || detail.patient?.full_name || "Paciente";
-  const professionalName = detail.professional?.profile?.full_name || "Profissional";
-  const date = new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "short",
-    timeZone: "America/Sao_Paulo",
-  }).format(new Date());
-
-  return template
-    .replaceAll("{{patient_name}}", patientName)
-    .replaceAll("{{professional_name}}", professionalName)
-    .replaceAll("{{date}}", date);
 }
 
 function NursingSummary({ detail }: { detail: MedicalRecordEncounterDetail }) {
@@ -177,14 +156,10 @@ export function MedicalRecordForm({
   preferences: MedicalRecordPreferences;
 }) {
   const record = detail.medical_record;
-  const latestPrescription: MedicalPrescription | undefined = detail.prescriptions[0];
   const requiredFields = new Set<MedicalRecordFieldKey>(preferences.required_fields);
   const formRef = useRef<HTMLFormElement>(null);
   const modeRef = useRef<HTMLInputElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [templateKey, setTemplateKey] = useState(latestPrescription?.template_key ?? "");
-  const [prescriptionTitle, setPrescriptionTitle] = useState(latestPrescription?.title ?? "");
-  const [prescriptionContent, setPrescriptionContent] = useState(latestPrescription?.content ?? "");
   const [state, formAction, pending] = useActionState<MedicalRecordActionState, FormData>(
     saveMedicalRecordAction,
     {},
@@ -205,25 +180,10 @@ export function MedicalRecordForm({
   const canComplete = ["ready_for_consultation", "consultation_in_progress"].includes(detail.status);
   const patientName = detail.patient?.social_name || detail.patient?.full_name || "Paciente";
 
-  const selectedTemplate = useMemo(
-    () => PRESCRIPTION_TEMPLATES.find((template) => template.key === templateKey),
-    [templateKey],
-  );
-
-  function applyTemplate(key: string) {
-    const template = PRESCRIPTION_TEMPLATES.find((item) => item.key === key);
-    setTemplateKey(key);
-    if (!template) return;
-    setPrescriptionTitle(template.title);
-    setPrescriptionContent(fillTemplate(template.content, detail));
-  }
-
   return (
     <form ref={formRef} action={formAction} className="grid gap-5">
       <input type="hidden" name="encounter_id" value={detail.id} />
       <input ref={modeRef} type="hidden" name="mode" value="draft" />
-      <input type="hidden" name="prescription_id" value={latestPrescription?.id ?? ""} />
-      <input type="hidden" name="prescription_template_key" value={templateKey} />
 
       <section className="grid gap-4 rounded-lg border bg-card p-4">
         <div className="flex items-center gap-3">
@@ -233,7 +193,17 @@ export function MedicalRecordForm({
           <div>
             <p className="font-medium">{patientName}</p>
             <p className="text-sm text-muted-foreground">
-              {detail.professional?.profile?.full_name || "Profissional nao informado"} |{" "}
+              {detail.professional?.profile?.full_name || "Profissional nao informado"}{" "}
+              {detail.professional_profile?.council_number
+                ? `| ${[
+                    detail.professional_profile.council_type,
+                    detail.professional_profile.council_number,
+                    detail.professional_profile.council_state,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}`
+                : "| registro profissional nao informado"}{" "}
+              |{" "}
               {formatDate(detail.appointment?.starts_at)}
             </p>
           </div>
@@ -336,52 +306,7 @@ export function MedicalRecordForm({
         </div>
       </section>
 
-      <section className="grid gap-4 rounded-lg border bg-card p-4">
-        <div className="flex items-center gap-3">
-          <Pill className="size-5 text-primary" />
-          <div>
-            <p className="font-medium">Receitas e documentos</p>
-            <p className="text-sm text-muted-foreground">
-              Use um modelo inicial e ajuste o conteudo antes de salvar.
-            </p>
-          </div>
-        </div>
-        <div className="grid gap-3 lg:grid-cols-[280px_1fr]">
-          <label className="grid gap-2 text-sm font-medium">
-            Modelo
-            <Select value={templateKey} onChange={(event) => applyTemplate(event.target.value)}>
-              <option value="">Selecionar modelo</option>
-              {PRESCRIPTION_TEMPLATES.map((template) => (
-                <option key={template.key} value={template.key}>
-                  {template.title}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Titulo
-            <input
-              name="prescription_title"
-              value={prescriptionTitle}
-              onChange={(event) => setPrescriptionTitle(event.target.value)}
-              placeholder="Ex.: Prescricao simples"
-              className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          </label>
-        </div>
-        {selectedTemplate ? (
-          <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-            {selectedTemplate.description}
-          </div>
-        ) : null}
-        <textarea
-          name="prescription_content"
-          value={prescriptionContent}
-          onChange={(event) => setPrescriptionContent(event.target.value)}
-          className="min-h-60 rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          placeholder="Selecione um modelo ou escreva uma prescricao/orientacao."
-        />
-      </section>
+      <MedicalDocumentsPanel detail={detail} />
 
       <div className="sticky bottom-4 z-10 flex flex-wrap justify-end gap-2 rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur">
         <Button
