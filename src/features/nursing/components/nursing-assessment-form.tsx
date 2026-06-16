@@ -6,8 +6,9 @@ import { CheckCircle2, Save, Thermometer, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
+import type { NursingFieldKey } from "@/features/nursing/config";
 import { saveNursingAssessmentAction, type NursingActionState } from "@/features/nursing/actions";
-import type { NursingEncounterDetail } from "@/repositories/nursing";
+import type { NursingEncounterDetail, NursingPreferences } from "@/repositories/nursing";
 
 function Field({
   label,
@@ -31,6 +32,7 @@ function Field({
   return (
     <label className="grid gap-2 text-sm font-medium">
       {label}
+      {required ? <span className="text-xs font-normal text-primary">Obrigatório</span> : null}
       <input
         name={name}
         type={type}
@@ -59,6 +61,7 @@ function TextArea({
   return (
     <label className="grid gap-2 text-sm font-medium">
       {label}
+      {required ? <span className="text-xs font-normal text-primary">Obrigatório</span> : null}
       <textarea
         name={name}
         required={required}
@@ -69,8 +72,15 @@ function TextArea({
   );
 }
 
-export function NursingAssessmentForm({ detail }: { detail: NursingEncounterDetail }) {
+export function NursingAssessmentForm({
+  detail,
+  preferences,
+}: {
+  detail: NursingEncounterDetail;
+  preferences: NursingPreferences;
+}) {
   const assessment = detail.assessment;
+  const requiredFields = new Set<NursingFieldKey>(preferences.required_fields);
   const formRef = useRef<HTMLFormElement>(null);
   const modeRef = useRef<HTMLInputElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -123,6 +133,15 @@ export function NursingAssessmentForm({ detail }: { detail: NursingEncounterDeta
             registrada na auditoria.
           </div>
         ) : null}
+        {preferences.show_required_field_alerts && preferences.required_fields.length ? (
+          <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+            Campos obrigatórios nesta clínica:{" "}
+            <span className="font-medium text-foreground">
+              {preferences.required_fields.length}
+            </span>
+            . Se algum ficar vazio, o sistema mostrará exatamente o que precisa ser preenchido.
+          </div>
+        ) : null}
       </section>
 
       <section className="grid gap-4 rounded-lg border bg-card p-4">
@@ -135,19 +154,26 @@ export function NursingAssessmentForm({ detail }: { detail: NursingEncounterDeta
         <TextArea
           label="Queixa principal"
           name="chief_complaint"
-          required
+          required={requiredFields.has("chief_complaint")}
           defaultValue={assessment?.chief_complaint}
         />
         <div className="grid gap-4 lg:grid-cols-3">
-          <TextArea label="Alergias" name="allergies" defaultValue={assessment?.allergies} />
+          <TextArea
+            label="Alergias"
+            name="allergies"
+            required={requiredFields.has("allergies")}
+            defaultValue={assessment?.allergies}
+          />
           <TextArea
             label="Medicamentos em uso"
             name="current_medications"
+            required={requiredFields.has("current_medications")}
             defaultValue={assessment?.current_medications}
           />
           <TextArea
             label="Comorbidades"
             name="comorbidities"
+            required={requiredFields.has("comorbidities")}
             defaultValue={assessment?.comorbidities}
           />
         </div>
@@ -164,19 +190,22 @@ export function NursingAssessmentForm({ detail }: { detail: NursingEncounterDeta
           </div>
         </div>
         <div className="grid gap-4 lg:grid-cols-4">
-          <Field label="PA sistólica" name="systolic_bp" type="number" min={40} max={260} defaultValue={assessment?.systolic_bp} />
-          <Field label="PA diastólica" name="diastolic_bp" type="number" min={20} max={180} defaultValue={assessment?.diastolic_bp} />
-          <Field label="FC" name="heart_rate" type="number" min={20} max={240} defaultValue={assessment?.heart_rate} />
-          <Field label="FR" name="respiratory_rate" type="number" min={5} max={80} defaultValue={assessment?.respiratory_rate} />
-          <Field label="Temperatura °C" name="temperature_c" type="number" min={30} max={45} step={0.1} defaultValue={assessment?.temperature_c} />
-          <Field label="SpO2 %" name="oxygen_saturation" type="number" min={50} max={100} defaultValue={assessment?.oxygen_saturation} />
-          <Field label="Glicemia mg/dL" name="capillary_glucose" type="number" min={20} max={600} defaultValue={assessment?.capillary_glucose} />
-          <Field label="Dor 0-10" name="pain_score" type="number" min={0} max={10} defaultValue={assessment?.pain_score} />
-          <Field label="Peso kg" name="weight_kg" type="number" min={0} max={500} step={0.01} defaultValue={assessment?.weight_kg} />
-          <Field label="Altura cm" name="height_cm" type="number" min={20} max={260} step={0.01} defaultValue={assessment?.height_cm} />
-          <Field label="Local da dor" name="pain_location" defaultValue={assessment?.pain_location} />
+          <Field label="PA sistólica" name="systolic_bp" type="number" min={40} max={260} required={requiredFields.has("systolic_bp")} defaultValue={assessment?.systolic_bp} />
+          <Field label="PA diastólica" name="diastolic_bp" type="number" min={20} max={180} required={requiredFields.has("diastolic_bp")} defaultValue={assessment?.diastolic_bp} />
+          <Field label="FC" name="heart_rate" type="number" min={20} max={240} required={requiredFields.has("heart_rate")} defaultValue={assessment?.heart_rate} />
+          <Field label="FR" name="respiratory_rate" type="number" min={5} max={80} required={requiredFields.has("respiratory_rate")} defaultValue={assessment?.respiratory_rate} />
+          <Field label="Temperatura °C" name="temperature_c" type="number" min={30} max={45} step={0.1} required={requiredFields.has("temperature_c")} defaultValue={assessment?.temperature_c} />
+          <Field label="SpO2 %" name="oxygen_saturation" type="number" min={50} max={100} required={requiredFields.has("oxygen_saturation")} defaultValue={assessment?.oxygen_saturation} />
+          <Field label="Glicemia mg/dL" name="capillary_glucose" type="number" min={20} max={600} required={requiredFields.has("capillary_glucose")} defaultValue={assessment?.capillary_glucose} />
+          <Field label="Dor 0-10" name="pain_score" type="number" min={0} max={10} required={requiredFields.has("pain_score")} defaultValue={assessment?.pain_score} />
+          <Field label="Peso kg" name="weight_kg" type="number" min={0} max={500} step={0.01} required={requiredFields.has("weight_kg")} defaultValue={assessment?.weight_kg} />
+          <Field label="Altura cm" name="height_cm" type="number" min={20} max={260} step={0.01} required={requiredFields.has("height_cm")} defaultValue={assessment?.height_cm} />
+          <Field label="Local da dor" name="pain_location" required={requiredFields.has("pain_location")} defaultValue={assessment?.pain_location} />
           <label className="grid gap-2 text-sm font-medium">
             Classificação
+            {requiredFields.has("risk_level") ? (
+              <span className="text-xs font-normal text-primary">Obrigatório</span>
+            ) : null}
             <select
               name="risk_level"
               defaultValue={assessment?.risk_level ?? "routine"}
@@ -195,11 +224,13 @@ export function NursingAssessmentForm({ detail }: { detail: NursingEncounterDeta
           <TextArea
             label="Observações de enfermagem"
             name="nursing_notes"
+            required={requiredFields.has("nursing_notes")}
             defaultValue={assessment?.nursing_notes}
           />
           <TextArea
             label="Recomendações ao profissional"
             name="recommendations"
+            required={requiredFields.has("recommendations")}
             defaultValue={assessment?.recommendations}
           />
         </div>

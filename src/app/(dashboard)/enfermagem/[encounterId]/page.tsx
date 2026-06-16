@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { NursingAssessmentForm } from "@/features/nursing/components/nursing-assessment-form";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
-import { getNursingEncounterDetail } from "@/repositories/nursing";
+import { getNursingEncounterDetail, getNursingPreferences } from "@/repositories/nursing";
 
 export default async function NursingAssessmentPage({
   params,
@@ -43,7 +43,10 @@ export default async function NursingAssessmentPage({
     );
   }
 
-  const detail = await getNursingEncounterDetail(activeClinic.id, encounterId);
+  const [detail, preferences] = await Promise.all([
+    getNursingEncounterDetail(activeClinic.id, encounterId),
+    getNursingPreferences(activeClinic.id),
+  ]);
   if (!detail) notFound();
 
   const canEdit =
@@ -92,7 +95,7 @@ export default async function NursingAssessmentPage({
           </Card>
         ) : null}
 
-        <NursingAssessmentForm detail={detail} />
+        <NursingAssessmentForm detail={detail} preferences={preferences} />
       </div>
     </>
   );

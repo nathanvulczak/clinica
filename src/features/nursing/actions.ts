@@ -2,6 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import {
+  DEFAULT_REQUIRED_NURSING_FIELDS,
+  isNursingFieldKey,
+  nursingFieldLabels,
+} from "@/features/nursing/config";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -29,7 +34,7 @@ const integerOptional = (min: number, max: number, label: string) =>
 const assessmentSchema = z.object({
   encounter_id: z.string().uuid(),
   mode: z.enum(["draft", "complete"]),
-  chief_complaint: z.string().trim().min(3, "Informe a queixa principal.").max(2000),
+  chief_complaint: z.string().trim().max(2000).optional().transform((value) => value || null),
   current_medications: z.string().trim().max(2000).optional().transform((value) => value || null),
   allergies: z.string().trim().max(2000).optional().transform((value) => value || null),
   comorbidities: z.string().trim().max(2000).optional().transform((value) => value || null),
@@ -48,6 +53,15 @@ const assessmentSchema = z.object({
   nursing_notes: z.string().trim().max(4000).optional().transform((value) => value || null),
   recommendations: z.string().trim().max(3000).optional().transform((value) => value || null),
   correction_reason: z.string().trim().max(500).optional().transform((value) => value || null),
+});
+
+const preferencesSchema = z.object({
+  required_fields: z
+    .array(z.string())
+    .transform((values) => values.filter(isNursingFieldKey)),
+  allow_completed_corrections: z.boolean(),
+  require_correction_reason: z.boolean(),
+  show_required_field_alerts: z.boolean(),
 });
 
 async function getContext() {
@@ -73,6 +87,36 @@ function bmi(weightKg: number | null, heightCm: number | null) {
   if (!weightKg || !heightCm) return null;
   const heightMeters = heightCm / 100;
   return Number((weightKg / (heightMeters * heightMeters)).toFixed(2));
+}
+
+function hasValue(value: unknown) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  return true;
+}
+
+async function getPreferencesForAction(clinicId: string) {
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin
+    .from("nursing_preferences")
+    .select("required_fields, allow_completed_corrections, require_correction_reason")
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .maybeSingle<{
+      required_fields: string[] | null;
+      allow_completed_corrections: boolean | null;
+      require_correction_reason: boolean | null;
+    }>();
+
+  const requiredFields = (data?.required_fields ?? DEFAULT_REQUIRED_NURSING_FIELDS).filter(
+    isNursingFieldKey,
+  );
+
+  return {
+    requiredFields: requiredFields.length ? requiredFields : DEFAULT_REQUIRED_NURSING_FIELDS,
+    allowCompletedCorrections: data?.allow_completed_corrections ?? true,
+    requireCorrectionReason: data?.require_correction_reason ?? true,
+  };
 }
 
 async function transitionEncounter(
@@ -136,6 +180,16 @@ export async function saveNursingAssessmentAction(
     return { error: "Seu perfil não possui permissão para preencher pré-consulta." };
   }
 
+  const preferences = await getPreferencesForAction(context.activeClinic.id);
+  const missingFields = preferences.requiredFields.filter((field) => !hasValue(parsed.data[field]));
+  if (missingFields.length) {
+    return {
+      error: `Preencha os campos obrigatórios: ${missingFields
+        .map((field) => nursingFieldLabels[field])
+        .join(", ")}.`,
+    };
+  }
+
   const admin = createSupabaseAdminClient();
   const { data: encounter } = await admin
     .from("clinical_encounters")
@@ -163,7 +217,15 @@ export async function saveNursingAssessmentAction(
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (previous?.status === "completed" && !parsed.data.correction_reason) {
+  if (previous?.status === "completed" && !preferences.allowCompletedCorrections) {
+    return { error: "A clínica bloqueou correções em pré-consultas encerradas." };
+  }
+
+  if (
+    previous?.status === "completed" &&
+    preferences.requireCorrectionReason &&
+    !parsed.data.correction_reason
+  ) {
     return { error: "Informe o motivo para corrigir uma pré-consulta já encerrada." };
   }
 
@@ -273,4 +335,79 @@ export async function saveNursingAssessmentAction(
         ? "Pré-consulta encerrada e paciente liberado para atendimento."
         : "Ficha de pré-consulta salva.",
   };
+}
+
+export async function upsertNursingPreferencesAction(
+  _state: NursingActionState,
+  formData: FormData,
+): Promise<NursingActionState> {
+  const parsed = preferencesSchema.safeParse({
+    required_fields: formData.getAll("required_fields").map(String),
+    allow_completed_corrections: formData.get("allow_completed_corrections") === "on",
+    require_correction_reason: formData.get("require_correction_reason") === "on",
+    show_required_field_alerts: formData.get("show_required_field_alerts") === "on",
+  });
+
+  if (!parsed.success) {
+    return { error: "Preferências de Enfermagem inválidas." };
+  }
+
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clínica e autentique-se novamente." };
+
+  const canManage = context.access.canOperateNursing || context.access.canViewAll;
+  if (!canManage) {
+    await logAuditEvent({
+      clinicId: context.activeClinic.id,
+      userId: context.user.id,
+      actionType: "access_denied",
+      module: "nursing",
+      recordTable: "nursing_preferences",
+      level: "security",
+      notes: "Tentativa de alterar preferências de Enfermagem sem permissão.",
+    });
+    return { error: "Seu perfil não possui permissão para alterar preferências de Enfermagem." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = await admin
+    .from("nursing_preferences")
+    .select("*")
+    .eq("clinic_id", context.activeClinic.id)
+    .maybeSingle();
+
+  const payload = {
+    clinic_id: context.activeClinic.id,
+    required_fields: parsed.data.required_fields.length
+      ? parsed.data.required_fields
+      : DEFAULT_REQUIRED_NURSING_FIELDS,
+    allow_completed_corrections: parsed.data.allow_completed_corrections,
+    require_correction_reason: parsed.data.require_correction_reason,
+    show_required_field_alerts: parsed.data.show_required_field_alerts,
+    created_by: previous?.created_by ?? context.user.id,
+    updated_by: context.user.id,
+    deleted_at: null,
+  };
+
+  const { error } = await admin
+    .from("nursing_preferences")
+    .upsert(payload, { onConflict: "clinic_id" });
+
+  if (error) return { error: "Não foi possível salvar as preferências de Enfermagem." };
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "nursing_preferences_updated",
+    module: "nursing",
+    recordTable: "nursing_preferences",
+    recordId: context.activeClinic.id,
+    oldValues: previous,
+    newValues: payload,
+    notes: "Preferências do módulo de Enfermagem atualizadas.",
+  });
+
+  revalidatePath("/enfermagem");
+  revalidatePath("/auditoria");
+  return { success: "Preferências de Enfermagem salvas." };
 }

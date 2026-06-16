@@ -4,22 +4,55 @@ import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { ClinicalQueue } from "@/features/clinical-workflow/components/clinical-queue";
+import { NursingPreferencesForm } from "@/features/nursing/components/nursing-preferences-form";
+import { NursingRecordsPanel } from "@/features/nursing/components/nursing-records-panel";
+import {
+  NursingSectionNav,
+  type NursingSection,
+} from "@/features/nursing/components/nursing-section-nav";
 import {
   getClinicalWorkflowAccess,
   listClinicalEncounters,
 } from "@/repositories/clinical-workflow";
+import {
+  defaultNursingPreferences,
+  getNursingPreferences,
+  listNursingAssessments,
+} from "@/repositories/nursing";
 
-export default async function EnfermagemPage() {
+function normalizeSection(value?: string): NursingSection {
+  return ["queue", "records", "preferences"].includes(value ?? "")
+    ? (value as NursingSection)
+    : "queue";
+}
+
+export default async function EnfermagemPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  const params = await searchParams;
+  const section = normalizeSection(params.section);
   const { activeClinic } = await getActiveClinicContext();
   const access = await getClinicalWorkflowAccess(activeClinic?.id);
   const encounters =
     activeClinic && (access.canViewNursing || access.canViewAll)
       ? await listClinicalEncounters(activeClinic.id, { queue: "nursing" })
       : [];
+  const [records, preferences] =
+    activeClinic && (access.canViewNursing || access.canViewAll)
+      ? await Promise.all([
+          section === "records" ? listNursingAssessments(activeClinic.id) : Promise.resolve([]),
+          section === "preferences"
+            ? getNursingPreferences(activeClinic.id)
+            : Promise.resolve(defaultNursingPreferences(activeClinic.id)),
+        ])
+      : [[], defaultNursingPreferences(activeClinic?.id)];
   const waitingCount = encounters.filter((encounter) => encounter.status === "waiting_triage").length;
   const activeCount = encounters.filter(
     (encounter) => encounter.status === "triage_in_progress",
   ).length;
+  const canEditPreferences = access.canOperateNursing || access.canViewAll;
 
   return (
     <>
@@ -50,6 +83,8 @@ export default async function EnfermagemPage() {
         </Card>
       ) : (
         <div className="grid gap-5">
+          <NursingSectionNav activeSection={section} />
+
           <div className="grid gap-3 lg:grid-cols-3">
             <div className="rounded-lg border bg-card p-4">
               <div className="flex items-center justify-between gap-3">
@@ -85,25 +120,37 @@ export default async function EnfermagemPage() {
             </div>
           </div>
 
-          <div className="rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
-            <strong className="font-medium text-foreground">Fluxo:</strong> pacientes encaminhados
-            aguardam início da pré-consulta. Ao concluir esta etapa, eles saem desta fila e são
-            liberados em Atendimentos para o profissional responsável.
-          </div>
-          <div className="flex items-center gap-3 border-b pb-4">
-            <div className="flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">
-              <HeartPulse className="size-5" />
-            </div>
-            <div>
-              <p className="font-medium">Pré-consultas</p>
-              <p className="text-sm text-muted-foreground">{activeClinic.trade_name}</p>
-            </div>
-            <div className="ml-auto hidden items-center gap-2 text-xs text-muted-foreground lg:flex">
-              <History className="size-4" />
-              Histórico completo será vinculado à ficha do paciente.
-            </div>
-          </div>
-          <ClinicalQueue encounters={encounters} access={access} mode="nursing" />
+          {section === "queue" ? (
+            <>
+              <div className="rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
+                <strong className="font-medium text-foreground">Fluxo:</strong> pacientes encaminhados
+                aguardam início da pré-consulta. Ao concluir esta etapa, eles saem desta fila e são
+                liberados em Atendimentos para o profissional responsável.
+              </div>
+              <div className="flex items-center gap-3 border-b pb-4">
+                <div className="flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <HeartPulse className="size-5" />
+                </div>
+                <div>
+                  <p className="font-medium">Pré-consultas</p>
+                  <p className="text-sm text-muted-foreground">{activeClinic.trade_name}</p>
+                </div>
+                <div className="ml-auto hidden items-center gap-2 text-xs text-muted-foreground lg:flex">
+                  <History className="size-4" />
+                  Histórico completo será vinculado à ficha do paciente.
+                </div>
+              </div>
+              <ClinicalQueue encounters={encounters} access={access} mode="nursing" />
+            </>
+          ) : null}
+
+          {section === "records" ? (
+            <NursingRecordsPanel records={records} canEdit={access.canOperateNursing} />
+          ) : null}
+
+          {section === "preferences" ? (
+            <NursingPreferencesForm preferences={preferences} canEdit={canEditPreferences} />
+          ) : null}
         </div>
       )}
     </>

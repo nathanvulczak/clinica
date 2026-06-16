@@ -22,6 +22,7 @@ Execute os arquivos uma única vez e na ordem numérica:
 16. `016_clinical_role_presets.sql`
 17. `017_repair_missing_clinical_encounters.sql`
 18. `018_nursing_assessments.sql`
+19. `019_nursing_module_preferences.sql`
 
 Não execute novamente migrations já aplicadas. Para conferir o controle do
 ambiente hospedado, registre a execução em uma planilha de implantação ou adote

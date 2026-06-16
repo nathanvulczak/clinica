@@ -1,4 +1,9 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  DEFAULT_REQUIRED_NURSING_FIELDS,
+  isNursingFieldKey,
+  type NursingFieldKey,
+} from "@/features/nursing/config";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
 import type { ClinicalEncounterStatus } from "@/types/domain";
 
@@ -37,6 +42,22 @@ export type NursingAssessment = {
   created_at: string;
   updated_at: string;
 };
+
+export type NursingPreferences = {
+  clinic_id: string;
+  required_fields: NursingFieldKey[];
+  allow_completed_corrections: boolean;
+  require_correction_reason: boolean;
+  show_required_field_alerts: boolean;
+};
+
+export const defaultNursingPreferences = (clinicId = ""): NursingPreferences => ({
+  clinic_id: clinicId,
+  required_fields: DEFAULT_REQUIRED_NURSING_FIELDS,
+  allow_completed_corrections: true,
+  require_correction_reason: true,
+  show_required_field_alerts: true,
+});
 
 type NursingEncounterRow = {
   id: string;
@@ -77,6 +98,121 @@ export type NursingEncounterDetail = NursingEncounterRow & {
   } | null;
   assessment: NursingAssessment | null;
 };
+
+export type NursingAssessmentListItem = NursingAssessment & {
+  patient: {
+    id: string;
+    full_name: string;
+    social_name: string | null;
+  } | null;
+  encounter: {
+    id: string;
+    status: ClinicalEncounterStatus;
+    appointment_id: string;
+  } | null;
+  professional: {
+    id: string;
+    profile: {
+      full_name: string;
+    } | null;
+  } | null;
+};
+
+type ProfessionalRow = {
+  id: string;
+  profile: { full_name: string } | { full_name: string }[] | null;
+};
+
+function normalizeProfessional(row?: ProfessionalRow | null) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    profile: Array.isArray(row.profile) ? row.profile[0] ?? null : row.profile,
+  };
+}
+
+export async function getNursingPreferences(
+  clinicId: string | null | undefined,
+): Promise<NursingPreferences> {
+  if (!clinicId) return defaultNursingPreferences();
+
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin
+    .from("nursing_preferences")
+    .select(
+      "clinic_id, required_fields, allow_completed_corrections, require_correction_reason, show_required_field_alerts",
+    )
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .maybeSingle<{
+      clinic_id: string;
+      required_fields: string[] | null;
+      allow_completed_corrections: boolean | null;
+      require_correction_reason: boolean | null;
+      show_required_field_alerts: boolean | null;
+    }>();
+
+  if (!data) return defaultNursingPreferences(clinicId);
+
+  return {
+    clinic_id: data.clinic_id,
+    required_fields: (data.required_fields ?? []).filter(isNursingFieldKey),
+    allow_completed_corrections: data.allow_completed_corrections ?? true,
+    require_correction_reason: data.require_correction_reason ?? true,
+    show_required_field_alerts: data.show_required_field_alerts ?? true,
+  };
+}
+
+export async function listNursingAssessments(
+  clinicId: string | null | undefined,
+): Promise<NursingAssessmentListItem[]> {
+  if (!clinicId) return [];
+
+  const access = await getClinicalWorkflowAccess(clinicId);
+  if (!access.canViewAll && !access.canViewNursing) return [];
+
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin
+    .from("nursing_assessments")
+    .select("*")
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .order("updated_at", { ascending: false })
+    .limit(100);
+
+  if (error || !data?.length) return [];
+
+  const rows = data as NursingAssessment[];
+  const patientIds = [...new Set(rows.map((row) => row.patient_id))];
+  const encounterIds = [...new Set(rows.map((row) => row.encounter_id))];
+  const professionalIds = [...new Set(rows.map((row) => row.professional_member_id))];
+
+  const [{ data: patients }, { data: encounters }, { data: professionals }] = await Promise.all([
+    admin.from("patients").select("id, full_name, social_name").in("id", patientIds),
+    admin
+      .from("clinical_encounters")
+      .select("id, status, appointment_id")
+      .in("id", encounterIds),
+    admin
+      .from("clinic_members")
+      .select("id, profile:profiles!clinic_members_user_id_fkey(full_name)")
+      .in("id", professionalIds),
+  ]);
+
+  const patientMap = new Map((patients ?? []).map((item) => [item.id, item]));
+  const encounterMap = new Map((encounters ?? []).map((item) => [item.id, item]));
+  const professionalMap = new Map(
+    ((professionals ?? []) as ProfessionalRow[]).map((item) => [item.id, normalizeProfessional(item)]),
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    patient: patientMap.get(row.patient_id) ?? null,
+    encounter:
+      (encounterMap.get(row.encounter_id) as NursingAssessmentListItem["encounter"]) ?? null,
+    professional: professionalMap.get(row.professional_member_id) ?? null,
+  }));
+}
 
 export async function getNursingEncounterDetail(
   clinicId: string | null | undefined,

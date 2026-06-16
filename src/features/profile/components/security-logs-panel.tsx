@@ -53,6 +53,7 @@ const actionLabels: Record<string, string> = {
   nursing_assessment_created: "Pré-consulta criada",
   nursing_assessment_updated: "Pré-consulta atualizada",
   nursing_assessment_completed: "Pré-consulta encerrada",
+  nursing_preferences_updated: "Preferências de Enfermagem alteradas",
   patient_appointment_confirmed: "Paciente confirmou consulta",
   schedule_block_created: "Bloqueio de agenda criado",
   schedule_block_updated: "Bloqueio de agenda atualizado",
