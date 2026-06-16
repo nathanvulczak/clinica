@@ -60,17 +60,21 @@ on public.nursing_assessments
 for select
 to authenticated
 using (
-  public.user_has_permission(clinic_id, 'nursing', 'view')
-  or public.user_has_permission(clinic_id, 'schedule', 'manage')
+  public.user_has_permission(nursing_assessments.clinic_id, 'nursing', 'view')
+  or public.user_has_permission(nursing_assessments.clinic_id, 'schedule', 'manage')
   or exists (
     select 1
     from public.clinical_encounters ce
     join public.clinic_members cm on cm.id = ce.professional_member_id
-    where ce.id = encounter_id
+    where ce.id = nursing_assessments.encounter_id
       and cm.user_id = auth.uid()
       and cm.status = 'active'
       and cm.deleted_at is null
-      and public.user_has_permission(clinic_id, 'medical_records', 'access_medical_record')
+      and public.user_has_permission(
+        nursing_assessments.clinic_id,
+        'medical_records',
+        'access_medical_record'
+      )
   )
 );
 
@@ -80,8 +84,8 @@ on public.nursing_assessments
 for insert
 to authenticated
 with check (
-  public.user_has_permission(clinic_id, 'nursing', 'create')
-  or public.user_has_permission(clinic_id, 'nursing', 'edit')
+  public.user_has_permission(nursing_assessments.clinic_id, 'nursing', 'create')
+  or public.user_has_permission(nursing_assessments.clinic_id, 'nursing', 'edit')
 );
 
 drop policy if exists "nursing_assessments_update_authorized" on public.nursing_assessments;
@@ -90,12 +94,12 @@ on public.nursing_assessments
 for update
 to authenticated
 using (
-  public.user_has_permission(clinic_id, 'nursing', 'edit')
-  or public.user_has_permission(clinic_id, 'schedule', 'manage')
+  public.user_has_permission(nursing_assessments.clinic_id, 'nursing', 'edit')
+  or public.user_has_permission(nursing_assessments.clinic_id, 'schedule', 'manage')
 )
 with check (
-  public.user_has_permission(clinic_id, 'nursing', 'edit')
-  or public.user_has_permission(clinic_id, 'schedule', 'manage')
+  public.user_has_permission(nursing_assessments.clinic_id, 'nursing', 'edit')
+  or public.user_has_permission(nursing_assessments.clinic_id, 'schedule', 'manage')
 );
 
 grant select, insert, update on public.nursing_assessments to authenticated;
