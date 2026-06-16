@@ -39,7 +39,7 @@ function Field({
         min={min}
         max={max}
         step={step}
-        required={required}
+        aria-required={required}
         defaultValue={defaultValue ?? ""}
         className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
@@ -64,7 +64,7 @@ function TextArea({
       {required ? <span className="text-xs font-normal text-primary">Obrigatório</span> : null}
       <textarea
         name={name}
-        required={required}
+        aria-required={required}
         defaultValue={defaultValue ?? ""}
         className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />

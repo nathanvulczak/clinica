@@ -136,32 +136,41 @@ export async function saveNursingAssessmentAction(
   _state: NursingActionState,
   formData: FormData,
 ): Promise<NursingActionState> {
+  const formString = (name: string) => {
+    const value = formData.get(name);
+    return typeof value === "string" ? value : undefined;
+  };
+
   const parsed = assessmentSchema.safeParse({
-    encounter_id: formData.get("encounter_id"),
-    mode: formData.get("mode"),
-    chief_complaint: formData.get("chief_complaint"),
-    current_medications: formData.get("current_medications"),
-    allergies: formData.get("allergies"),
-    comorbidities: formData.get("comorbidities"),
-    pain_score: formData.get("pain_score"),
-    pain_location: formData.get("pain_location"),
-    systolic_bp: formData.get("systolic_bp"),
-    diastolic_bp: formData.get("diastolic_bp"),
-    heart_rate: formData.get("heart_rate"),
-    respiratory_rate: formData.get("respiratory_rate"),
-    temperature_c: formData.get("temperature_c"),
-    oxygen_saturation: formData.get("oxygen_saturation"),
-    capillary_glucose: formData.get("capillary_glucose"),
-    weight_kg: formData.get("weight_kg"),
-    height_cm: formData.get("height_cm"),
-    risk_level: formData.get("risk_level"),
-    nursing_notes: formData.get("nursing_notes"),
-    recommendations: formData.get("recommendations"),
-    correction_reason: formData.get("correction_reason"),
+    encounter_id: formString("encounter_id"),
+    mode: formString("mode"),
+    chief_complaint: formString("chief_complaint"),
+    current_medications: formString("current_medications"),
+    allergies: formString("allergies"),
+    comorbidities: formString("comorbidities"),
+    pain_score: formString("pain_score"),
+    pain_location: formString("pain_location"),
+    systolic_bp: formString("systolic_bp"),
+    diastolic_bp: formString("diastolic_bp"),
+    heart_rate: formString("heart_rate"),
+    respiratory_rate: formString("respiratory_rate"),
+    temperature_c: formString("temperature_c"),
+    oxygen_saturation: formString("oxygen_saturation"),
+    capillary_glucose: formString("capillary_glucose"),
+    weight_kg: formString("weight_kg"),
+    height_cm: formString("height_cm"),
+    risk_level: formString("risk_level"),
+    nursing_notes: formString("nursing_notes"),
+    recommendations: formString("recommendations"),
+    correction_reason: formString("correction_reason"),
   });
 
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Dados da pré-consulta inválidos." };
+    return {
+      error:
+        parsed.error.issues[0]?.message ??
+        "Revise os campos da pré-consulta. Algum dado está ausente ou fora do formato esperado.",
+    };
   }
 
   const context = await getContext();
