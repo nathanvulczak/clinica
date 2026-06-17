@@ -1,13 +1,15 @@
 "use client";
 
 import { useActionState, useEffect } from "react";
-import { CreditCard, Landmark, ReceiptText, Save, Settings2, Truck } from "lucide-react";
+import { CreditCard, Landmark, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import {
   createEncounterChargeAction,
+  createFinancialReconciliationAction,
   issueFinancialReceiptAction,
+  reverseFinancialReconciliationAction,
   reverseFinancialPaymentAction,
   saveCardMachineAction,
   saveFinancialAccountAction,
@@ -27,6 +29,7 @@ import type {
   FinancialPayment,
   FinancialPaymentMethod,
   FinancialPreferences,
+  FinancialReconciliation,
   FinancialVendor,
 } from "@/types/domain";
 
@@ -35,7 +38,7 @@ function useActionToast(state: FinancialActionState, onCompleted?: (state: Finan
 
   useEffect(() => {
     if (state.error) {
-      toast({ title: "Acao nao concluida", description: state.error, variant: "destructive" });
+      toast({ title: "Ação não concluída", description: state.error, variant: "destructive" });
     }
     if (state.success) {
       toast({ title: "Financeiro", description: state.success });
@@ -142,14 +145,14 @@ export function FinancialAccountForm({
           <Select name="account_type" defaultValue={account?.account_type ?? "cash"}>
             <option value="cash">Caixa interno</option>
             <option value="checking">Conta corrente</option>
-            <option value="savings">Poupanca</option>
+            <option value="savings">Poupança</option>
             <option value="digital_wallet">Carteira digital</option>
-            <option value="card_processor">Operadora/cartao</option>
+            <option value="card_processor">Operadora/cartão</option>
           </Select>
         </label>
         <Field name="bank_name" label="Banco" defaultValue={account?.bank_name} />
-        <Field name="agency" label="Agencia" defaultValue={account?.agency} />
-        <Field name="account_number" label="Numero da conta" defaultValue={account?.account_number} />
+        <Field name="agency" label="Agência" defaultValue={account?.agency} />
+        <Field name="account_number" label="Número da conta" defaultValue={account?.account_number} />
         <Field name="pix_key" label="Chave Pix" defaultValue={account?.pix_key} />
         <MoneyInput
           name="opening_balance"
@@ -157,7 +160,7 @@ export function FinancialAccountForm({
           defaultValue={account ? String((account.opening_balance_cents / 100).toFixed(2)).replace(".", ",") : "0,00"}
         />
       </div>
-      <TextArea name="notes" label="Observacoes" defaultValue={account?.notes} />
+      <TextArea name="notes" label="Observações" defaultValue={account?.notes} />
       <BooleanField name="active" label="Conta ativa" defaultChecked={account?.active ?? true} />
       <div className="flex justify-end">
         <Button disabled={pending}>
@@ -189,17 +192,17 @@ export function PaymentMethodForm({
           <Select name="method_type" defaultValue={method?.method_type ?? "pix"}>
             <option value="cash">Dinheiro</option>
             <option value="pix">Pix</option>
-            <option value="debit_card">Cartao de debito</option>
-            <option value="credit_card">Cartao de credito</option>
-            <option value="bank_transfer">Transferencia</option>
+            <option value="debit_card">Cartão de débito</option>
+            <option value="credit_card">Cartão de crédito</option>
+            <option value="bank_transfer">Transferência</option>
             <option value="boleto">Boleto</option>
-            <option value="health_plan">Convenio</option>
+            <option value="health_plan">Convênio</option>
             <option value="other">Outro</option>
           </Select>
         </label>
-        <Field name="settlement_days" label="Prazo de compensacao em dias" type="number" defaultValue={method?.settlement_days ?? 0} />
+        <Field name="settlement_days" label="Prazo de compensação em dias" type="number" defaultValue={method?.settlement_days ?? 0} />
       </div>
-      <BooleanField name="requires_card_machine" label="Exige maquina de cartao" defaultChecked={method?.requires_card_machine ?? false} />
+      <BooleanField name="requires_card_machine" label="Exige máquina de cartão" defaultChecked={method?.requires_card_machine ?? false} />
       <BooleanField name="active" label="Forma ativa" defaultChecked={method?.active ?? true} />
       <div className="flex justify-end">
         <Button disabled={pending}>
@@ -227,12 +230,12 @@ export function CardMachineForm({
     <form action={action} className="grid gap-4">
       <input type="hidden" name="id" value={machine?.id ?? ""} />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Field name="name" label="Nome da maquina" defaultValue={machine?.name} required />
+        <Field name="name" label="Nome da máquina" defaultValue={machine?.name} required />
         <Field name="provider" label="Operadora" defaultValue={machine?.provider} />
         <label className="grid gap-2 text-sm font-medium">
-          Conta de liquidacao
+          Conta de liquidação
           <Select name="account_id" defaultValue={machine?.account_id ?? "none"}>
-            <option value="none">Nao definida</option>
+            <option value="none">Não definida</option>
             {accounts.map((account) => (
               <option key={account.id} value={account.id}>
                 {account.name}
@@ -240,23 +243,23 @@ export function CardMachineForm({
             ))}
           </Select>
         </label>
-        <Field name="debit_fee" label="Taxa debito (%)" type="number" defaultValue={(machine?.debit_fee_bps ?? 0) / 100} />
-        <Field name="credit_fee" label="Taxa credito (%)" type="number" defaultValue={(machine?.credit_fee_bps ?? 0) / 100} />
+        <Field name="debit_fee" label="Taxa débito (%)" type="number" defaultValue={(machine?.debit_fee_bps ?? 0) / 100} />
+        <Field name="credit_fee" label="Taxa crédito (%)" type="number" defaultValue={(machine?.credit_fee_bps ?? 0) / 100} />
         <Field
           name="credit_installment_fee"
-          label="Taxa credito parcelado (%)"
+          label="Taxa crédito parcelado (%)"
           type="number"
           defaultValue={(machine?.credit_installment_fee_bps ?? 0) / 100}
         />
-        <Field name="debit_settlement_days" label="Prazo debito" type="number" defaultValue={machine?.debit_settlement_days ?? 1} />
-        <Field name="credit_settlement_days" label="Prazo credito" type="number" defaultValue={machine?.credit_settlement_days ?? 30} />
+        <Field name="debit_settlement_days" label="Prazo débito" type="number" defaultValue={machine?.debit_settlement_days ?? 1} />
+        <Field name="credit_settlement_days" label="Prazo crédito" type="number" defaultValue={machine?.credit_settlement_days ?? 30} />
       </div>
-      <TextArea name="notes" label="Observacoes" defaultValue={machine?.notes} />
-      <BooleanField name="active" label="Maquina ativa" defaultChecked={machine?.active ?? true} />
+      <TextArea name="notes" label="Observações" defaultValue={machine?.notes} />
+      <BooleanField name="active" label="Máquina ativa" defaultChecked={machine?.active ?? true} />
       <div className="flex justify-end">
         <Button disabled={pending}>
           <CreditCard />
-          {pending ? "Salvando..." : "Salvar maquina"}
+          {pending ? "Salvando..." : "Salvar máquina"}
         </Button>
       </div>
     </form>
@@ -279,14 +282,14 @@ export function VendorForm({ vendor, onCompleted }: { vendor?: FinancialVendor |
           Tipo
           <Select name="vendor_type" defaultValue={vendor?.vendor_type ?? "supplier"}>
             <option value="supplier">Fornecedor</option>
-            <option value="laboratory">Laboratorio</option>
+            <option value="laboratory">Laboratório</option>
             <option value="professional">Profissional</option>
             <option value="tax">Imposto/taxa</option>
             <option value="other">Outro</option>
           </Select>
         </label>
       </div>
-      <TextArea name="notes" label="Observacoes" defaultValue={vendor?.notes} />
+      <TextArea name="notes" label="Observações" defaultValue={vendor?.notes} />
       <BooleanField name="active" label="Fornecedor ativo" defaultChecked={vendor?.active ?? true} />
       <div className="flex justify-end">
         <Button disabled={pending}>
@@ -317,7 +320,7 @@ export function FinancialEntryForm({
     <form action={action} className="grid gap-4">
       <input type="hidden" name="entry_type" value={entryType} />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Field name="description" label="Descricao" required />
+        <Field name="description" label="Descrição" required />
         <Field name="document_number" label="Documento/numero" />
         <label className="grid gap-2 text-sm font-medium">
           Categoria
@@ -336,7 +339,7 @@ export function FinancialEntryForm({
           <label className="grid gap-2 text-sm font-medium">
             Fornecedor
             <Select name="vendor_id" defaultValue="none">
-              <option value="none">Nao informado</option>
+              <option value="none">Não informado</option>
               {vendors.map((vendor) => (
                 <option key={vendor.id} value={vendor.id}>
                   {vendor.name}
@@ -345,18 +348,18 @@ export function FinancialEntryForm({
             </Select>
           </label>
         ) : null}
-        <Field name="issue_date" label="Emissao" type="date" defaultValue={today} />
+        <Field name="issue_date" label="Emissão" type="date" defaultValue={today} />
         <Field name="due_date" label="Vencimento" type="date" defaultValue={today} />
-        <Field name="competence_date" label="Competencia" type="date" defaultValue={today} />
+        <Field name="competence_date" label="Competência" type="date" defaultValue={today} />
         <MoneyInput name="amount" label="Valor" required />
         <MoneyInput name="discount" label="Desconto" />
-        <MoneyInput name="addition" label="Acrescimos" />
+        <MoneyInput name="addition" label="Acréscimos" />
       </div>
-      <TextArea name="notes" label="Observacoes" />
+      <TextArea name="notes" label="Observações" />
       <div className="flex justify-end">
         <Button disabled={pending}>
           <Save />
-          {pending ? "Salvando..." : "Salvar lancamento"}
+          {pending ? "Salvando..." : "Salvar lançamento"}
         </Button>
       </div>
     </form>
@@ -392,12 +395,12 @@ export function EncounterChargeForm({
           defaultValue={String((suggestedAmountCents / 100).toFixed(2)).replace(".", ",")}
         />
         <MoneyInput name="discount" label="Desconto" />
-        <MoneyInput name="addition" label="Acrescimos" />
+        <MoneyInput name="addition" label="Acréscimos" />
         <Field name="paid_at" label="Data/hora do pagamento" type="datetime-local" />
         <label className="grid gap-2 text-sm font-medium">
           Conta/caixa
           <Select name="account_id" defaultValue={accounts[0]?.id ?? "none"}>
-            <option value="none">Nao definida</option>
+            <option value="none">Não definida</option>
             {accounts.map((account) => (
               <option key={account.id} value={account.id}>
                 {account.name}
@@ -408,7 +411,7 @@ export function EncounterChargeForm({
         <label className="grid gap-2 text-sm font-medium">
           Forma de pagamento
           <Select name="payment_method_id" defaultValue={paymentMethods[0]?.id ?? "none"}>
-            <option value="none">Nao definida</option>
+            <option value="none">Não definida</option>
             {paymentMethods.map((method) => (
               <option key={method.id} value={method.id}>
                 {method.name}
@@ -417,9 +420,9 @@ export function EncounterChargeForm({
           </Select>
         </label>
         <label className="grid gap-2 text-sm font-medium">
-          Maquina de cartao
+          Máquina de cartão
           <Select name="card_machine_id" defaultValue="none">
-            <option value="none">Nao usada</option>
+            <option value="none">Não usada</option>
             {cardMachines.map((machine) => (
               <option key={machine.id} value={machine.id}>
                 {machine.name}
@@ -429,14 +432,14 @@ export function EncounterChargeForm({
         </label>
       </div>
       <BooleanField name="paid_now" label="Paciente pagou agora" defaultChecked />
-      <TextArea name="notes" label="Observacoes da cobranca" />
+      <TextArea name="notes" label="Observações da cobrança" />
       <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
-        Se nao marcar pagamento agora, o valor ficara em aberto em Contas a receber e podera gerar ciencia de pagamento.
+        Se não marcar pagamento agora, o valor ficará em aberto em Contas a receber e poderá gerar ciência de pagamento.
       </div>
       <div className="flex justify-end">
         <Button disabled={pending}>
           <ReceiptText />
-          {pending ? "Processando..." : "Confirmar cobranca"}
+          {pending ? "Processando..." : "Confirmar cobrança"}
         </Button>
       </div>
     </form>
@@ -475,7 +478,7 @@ export function SettleEntryForm({
         <label className="grid gap-2 text-sm font-medium">
           Conta/caixa
           <Select name="account_id" defaultValue={accounts[0]?.id ?? "none"}>
-            <option value="none">Nao definida</option>
+            <option value="none">Não definida</option>
             {accounts.map((account) => (
               <option key={account.id} value={account.id}>
                 {account.name}
@@ -486,7 +489,7 @@ export function SettleEntryForm({
         <label className="grid gap-2 text-sm font-medium">
           Forma
           <Select name="payment_method_id" defaultValue={paymentMethods[0]?.id ?? "none"}>
-            <option value="none">Nao definida</option>
+            <option value="none">Não definida</option>
             {paymentMethods.map((method) => (
               <option key={method.id} value={method.id}>
                 {method.name}
@@ -495,9 +498,9 @@ export function SettleEntryForm({
           </Select>
         </label>
         <label className="grid gap-2 text-sm font-medium">
-          Maquina
+          Máquina
           <Select name="card_machine_id" defaultValue="none">
-            <option value="none">Nao usada</option>
+            <option value="none">Não usada</option>
             {cardMachines.map((machine) => (
               <option key={machine.id} value={machine.id}>
                 {machine.name}
@@ -506,7 +509,7 @@ export function SettleEntryForm({
           </Select>
         </label>
       </div>
-      <TextArea name="notes" label="Observacoes" />
+      <TextArea name="notes" label="Observações" />
       <div className="flex justify-end">
         <Button disabled={pending}>
           <Save />
@@ -525,12 +528,85 @@ export function ReversePaymentForm({ payment, onCompleted }: { payment: Financia
     <form action={action} className="grid gap-4">
       <input type="hidden" name="payment_id" value={payment.id} />
       <div className="rounded-md border bg-muted/20 p-3 text-sm">
-        Estorno de {formatCurrencyBRL(payment.amount_cents)}. Esta acao ficara marcada como critica na auditoria.
+        Estorno de {formatCurrencyBRL(payment.amount_cents)}. Esta ação ficará marcada como crítica na auditoria.
       </div>
       <TextArea name="reason" label="Motivo do estorno" />
       <div className="flex justify-end">
         <Button variant="destructive" disabled={pending}>
           {pending ? "Estornando..." : "Confirmar estorno"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export function ReconciliationForm({
+  accounts,
+  onCompleted,
+}: {
+  accounts: FinancialAccount[];
+  onCompleted?: () => void;
+}) {
+  const [state, action, pending] = useActionState(createFinancialReconciliationAction, {});
+  useActionToast(state, onCompleted);
+  const today = new Date().toISOString().slice(0, 10);
+  const firstDay = new Date();
+  firstDay.setDate(1);
+
+  return (
+    <form action={action} className="grid gap-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <label className="grid gap-2 text-sm font-medium">
+          Conta bancária/caixa
+          <Select name="account_id" defaultValue={accounts[0]?.id ?? ""} required>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <Field name="period_start" label="Início do período" type="date" defaultValue={firstDay.toISOString().slice(0, 10)} required />
+        <Field name="period_end" label="Fim do período" type="date" defaultValue={today} required />
+        <MoneyInput name="opening_balance" label="Saldo bancário inicial" required />
+        <MoneyInput name="bank_balance" label="Saldo bancário final conferido" required />
+      </div>
+      <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+        O sistema conciliará todos os movimentos confirmados, ainda pendentes de conciliação, da conta e período selecionados.
+        O fechamento só será permitido quando o saldo calculado bater com o saldo bancário final informado.
+      </div>
+      <TextArea name="notes" label="Observações da conciliação" />
+      <div className="flex justify-end">
+        <Button disabled={pending || accounts.length === 0}>
+          <ShieldCheck />
+          {pending ? "Conferindo..." : "Fechar conciliação"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export function ReverseReconciliationForm({
+  reconciliation,
+  onCompleted,
+}: {
+  reconciliation: FinancialReconciliation;
+  onCompleted?: () => void;
+}) {
+  const [state, action, pending] = useActionState(reverseFinancialReconciliationAction, {});
+  useActionToast(state, onCompleted);
+
+  return (
+    <form action={action} className="grid gap-4">
+      <input type="hidden" name="reconciliation_id" value={reconciliation.id} />
+      <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+        Esta ação reabre a conciliação e libera os movimentos para correção. O histórico permanece registrado na auditoria.
+      </div>
+      <TextArea name="reason" label="Motivo da reabertura" />
+      <div className="flex justify-end">
+        <Button variant="destructive" disabled={pending}>
+          <RotateCcw />
+          {pending ? "Reabrindo..." : "Reabrir conciliação"}
         </Button>
       </div>
     </form>
@@ -553,11 +629,11 @@ export function ReceiptForm({
     <form action={action} className="grid gap-4">
       <input type="hidden" name="entry_id" value={entryId} />
       <input type="hidden" name="receipt_type" value={type} />
-      <TextArea name="notes" label="Observacoes no documento" />
+      <TextArea name="notes" label="Observações no documento" />
       <div className="flex justify-end">
         <Button disabled={pending}>
           <ReceiptText />
-          {pending ? "Emitindo..." : type === "payment" ? "Emitir recibo" : "Emitir ciencia"}
+          {pending ? "Emitindo..." : type === "payment" ? "Emitir recibo" : "Emitir ciência"}
         </Button>
       </div>
     </form>
@@ -579,12 +655,12 @@ export function FinancialPreferencesForm({
       <div className="grid gap-3 lg:grid-cols-2">
         <BooleanField
           name="allow_reception_checkout"
-          label="Recepcao pode cobrar atendimentos"
+          label="Recepção pode cobrar atendimentos"
           defaultChecked={preferences.allow_reception_checkout}
         />
         <BooleanField
           name="allow_professional_checkout"
-          label="Profissional pode cobrar atendimento proprio"
+          label="Profissional pode cobrar atendimento próprio"
           defaultChecked={preferences.allow_professional_checkout}
         />
         <BooleanField
@@ -594,13 +670,13 @@ export function FinancialPreferencesForm({
         />
         <Field
           name="default_receivable_due_days"
-          label="Vencimento padrao em dias"
+          label="Vencimento padrão em dias"
           type="number"
           defaultValue={preferences.default_receivable_due_days}
         />
         <MoneyInput
           name="default_late_fee"
-          label="Multa padrao"
+          label="Multa padrão"
           defaultValue={String((preferences.default_late_fee_cents / 100).toFixed(2)).replace(".", ",")}
         />
         <Field
@@ -610,11 +686,11 @@ export function FinancialPreferencesForm({
           defaultValue={preferences.default_monthly_interest_bps / 100}
         />
       </div>
-      <TextArea name="receipt_footer" label="Rodape dos recibos" defaultValue={preferences.receipt_footer} />
+      <TextArea name="receipt_footer" label="Rodapé dos recibos" defaultValue={preferences.receipt_footer} />
       <div className="flex justify-end">
         <Button disabled={pending}>
           <Settings2 />
-          {pending ? "Salvando..." : "Salvar preferencias"}
+          {pending ? "Salvando..." : "Salvar preferências"}
         </Button>
       </div>
     </form>

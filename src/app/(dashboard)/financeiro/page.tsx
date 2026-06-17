@@ -38,34 +38,34 @@ export default async function FinanceiroPage({
     await auditDeniedModuleAccess(
       activeClinic.id,
       "financial",
-      "Tentativa de acesso ao modulo financeiro sem permissao de visualizacao.",
+      "Tentativa de acesso ao módulo financeiro sem permissão de visualização.",
     );
   }
 
   return (
-    <>
+    <div className="-mx-4 -my-6 min-h-[calc(100vh-4rem)] bg-[linear-gradient(180deg,#f6fbf8_0%,#eef7f2_42%,#f8faf9_100%)] px-4 py-6 lg:-mx-8 lg:px-8">
       <PageHeader
         title="Financeiro"
-        description="Recebimentos, pagamentos, caixa, conciliacao, comissoes e documentos financeiros da clinica."
+        description="Recebimentos, pagamentos, caixa, conciliação, comissões e documentos financeiros da clínica."
       />
 
       {!activeClinic ? (
         <Card>
           <CardHeader>
-            <CardTitle>Clinica ativa necessaria</CardTitle>
-            <CardDescription>Selecione uma clinica para acessar o Financeiro.</CardDescription>
+            <CardTitle>Clínica ativa necessária</CardTitle>
+            <CardDescription>Selecione uma clínica para acessar o Financeiro.</CardDescription>
           </CardHeader>
         </Card>
       ) : !data.access.canView ? (
         <Card>
           <CardHeader>
             <CardTitle>Acesso restrito</CardTitle>
-            <CardDescription>Seu perfil nao possui acesso ao modulo Financeiro.</CardDescription>
+            <CardDescription>Seu perfil não possui acesso ao módulo Financeiro.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-3 rounded-lg border p-4 text-sm text-muted-foreground">
               <LockKeyhole className="size-5 text-primary" />
-              Usuarios sem acesso ao modulo ainda podem lancar cobrancas de atendimento se a clinica liberar essa rotina.
+              Usuários sem acesso ao módulo ainda podem lançar cobranças de atendimento se a clínica liberar essa rotina.
             </div>
           </CardContent>
         </Card>
@@ -75,6 +75,6 @@ export default async function FinanceiroPage({
           <FinancialWorkspace data={data} section={section} />
         </div>
       )}
-    </>
+    </div>
   );
 }

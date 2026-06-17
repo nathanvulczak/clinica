@@ -78,7 +78,7 @@ export const paymentMethodSchema = z.object({
 export const cardMachineSchema = z.object({
   id: z.string().uuid().optional(),
   account_id: optionalUuid,
-  name: z.string().trim().min(2, "Informe o nome da maquina."),
+  name: z.string().trim().min(2, "Informe o nome da máquina."),
   provider: optionalText,
   debit_fee: z.coerce.number().min(0).max(100),
   credit_fee: z.coerce.number().min(0).max(100),
@@ -144,6 +144,30 @@ export const settleEntrySchema = z.object({
 export const reversePaymentSchema = z.object({
   payment_id: z.string().uuid(),
   reason: z.string().trim().min(5, "Informe o motivo do estorno.").max(500),
+});
+
+export const reconciliationSchema = z
+  .object({
+    account_id: z.string().uuid("Selecione a conta financeira."),
+    period_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Informe a data inicial."),
+    period_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Informe a data final."),
+    opening_balance: currencyString,
+    bank_balance: currencyString,
+    notes: optionalText,
+  })
+  .superRefine((value, context) => {
+    if (value.period_end < value.period_start) {
+      context.addIssue({
+        code: "custom",
+        path: ["period_end"],
+        message: "A data final deve ser maior ou igual à data inicial.",
+      });
+    }
+  });
+
+export const reverseReconciliationSchema = z.object({
+  reconciliation_id: z.string().uuid(),
+  reason: z.string().trim().min(8, "Informe o motivo para reabrir a conciliação.").max(700),
 });
 
 export const receiptSchema = z.object({

@@ -9,6 +9,7 @@ import type {
   FinancialPayment,
   FinancialPaymentMethod,
   FinancialPreferences,
+  FinancialReconciliation,
   FinancialReceipt,
   FinancialVendor,
   PatientSummary,
@@ -19,6 +20,7 @@ export type FinancialAccess = {
   canCreate: boolean;
   canEdit: boolean;
   canManage: boolean;
+  canApprove: boolean;
   canExport: boolean;
   canChargeEncounter: boolean;
   currentMemberId: string | null;
@@ -35,6 +37,12 @@ export type FinancialEntryWithRelations = FinancialEntry & {
   receipts: FinancialReceipt[];
 };
 
+export type FinancialReconciliationWithRelations = FinancialReconciliation & {
+  account: Pick<FinancialAccount, "id" | "name"> | null;
+  closed_by_profile: { full_name: string } | null;
+  reversed_by_profile: { full_name: string } | null;
+};
+
 export type FinancialWorkspace = {
   access: FinancialAccess;
   preferences: FinancialPreferences | null;
@@ -45,6 +53,7 @@ export type FinancialWorkspace = {
   vendors: FinancialVendor[];
   entries: FinancialEntryWithRelations[];
   payments: FinancialPayment[];
+  reconciliations: FinancialReconciliationWithRelations[];
   pendingEncounterCharges: PendingEncounterCharge[];
   metrics: FinancialMetrics;
 };
@@ -96,6 +105,7 @@ export async function getFinancialAccess(clinicId?: string | null): Promise<Fina
     canCreate,
     canEdit: authorization.can("financial", "edit"),
     canManage: authorization.can("financial", "manage"),
+    canApprove: authorization.can("financial", "approve") || authorization.can("financial", "manage"),
     canExport: authorization.can("financial", "export"),
     canChargeEncounter: canCreate || authorization.can("schedule", "manage"),
     currentMemberId: authorization.memberId,
@@ -133,6 +143,7 @@ export async function getFinancialWorkspace(
     vendors: [],
     entries: [],
     payments: [],
+    reconciliations: [],
     pendingEncounterCharges: [],
     metrics: emptyMetrics(),
   };
@@ -150,6 +161,7 @@ export async function getFinancialWorkspace(
     { data: categories },
     { data: vendors },
     entries,
+    reconciliations,
     pendingEncounterCharges,
   ] = await Promise.all([
     getFinancialPreferences(clinicId),
@@ -184,6 +196,7 @@ export async function getFinancialWorkspace(
       .is("deleted_at", null)
       .order("name"),
     access.canView ? listFinancialEntries(clinicId) : Promise.resolve([]),
+    access.canView ? listFinancialReconciliations(clinicId) : Promise.resolve([]),
     listPendingEncounterCharges(clinicId, access),
   ]);
 
@@ -199,6 +212,7 @@ export async function getFinancialWorkspace(
     vendors: (vendors ?? []) as FinancialVendor[],
     entries,
     payments,
+    reconciliations,
     pendingEncounterCharges,
     metrics: calculateMetrics(entries),
   };
@@ -271,6 +285,48 @@ export async function listFinancialEntries(clinicId: string): Promise<FinancialE
       : null,
     payments: paymentsByEntry.get(entry.id) ?? [],
     receipts: receiptsByEntry.get(entry.id) ?? [],
+  }));
+}
+
+export async function listFinancialReconciliations(
+  clinicId: string,
+): Promise<FinancialReconciliationWithRelations[]> {
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin
+    .from("financial_reconciliations")
+    .select("*")
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .order("period_end", { ascending: false })
+    .limit(100);
+
+  if (error || !data?.length) return [];
+
+  const reconciliations = data as FinancialReconciliation[];
+  const accountIds = [...new Set(reconciliations.map((item) => item.account_id))];
+  const profileIds = [
+    ...new Set(
+      reconciliations.flatMap((item) => [item.closed_by, item.reversed_by]).filter(Boolean),
+    ),
+  ] as string[];
+
+  const [{ data: accounts }, { data: profiles }] = await Promise.all([
+    accountIds.length
+      ? admin.from("financial_accounts").select("id, name").in("id", accountIds)
+      : Promise.resolve({ data: [] }),
+    profileIds.length
+      ? admin.from("profiles").select("id, full_name").in("id", profileIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const accountMap = new Map((accounts ?? []).map((item) => [item.id, item]));
+  const profileMap = new Map((profiles ?? []).map((item) => [item.id, item]));
+
+  return reconciliations.map((item) => ({
+    ...item,
+    account: accountMap.get(item.account_id) ?? null,
+    closed_by_profile: item.closed_by ? profileMap.get(item.closed_by) ?? null : null,
+    reversed_by_profile: item.reversed_by ? profileMap.get(item.reversed_by) ?? null : null,
   }));
 }
 

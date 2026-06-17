@@ -6,7 +6,7 @@ export default function FinanceiroLoading() {
       <div className="h-16 animate-pulse rounded-lg bg-muted" />
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <LoaderCircle className="size-4 animate-spin" />
-        Carregando modulo financeiro...
+        Carregando módulo financeiro...
       </div>
       <div className="grid gap-3 xl:grid-cols-5">
         {Array.from({ length: 5 }).map((_, index) => (

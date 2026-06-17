@@ -15,13 +15,13 @@ export type FinancialSection =
   | "settings";
 
 const sections: Array<{ key: FinancialSection; label: string }> = [
-  { key: "overview", label: "Visao geral" },
+  { key: "overview", label: "Visão geral" },
   { key: "receivables", label: "Recebimentos" },
   { key: "payables", label: "Pagamentos" },
   { key: "accounts", label: "Cadastros" },
-  { key: "reconciliation", label: "Contas e conciliacao" },
-  { key: "commissions", label: "Comissoes" },
-  { key: "settings", label: "Preferencias" },
+  { key: "reconciliation", label: "Contas e conciliação" },
+  { key: "commissions", label: "Comissões" },
+  { key: "settings", label: "Preferências" },
 ];
 
 export function FinancialSectionNav({ activeSection }: { activeSection: FinancialSection }) {
@@ -45,7 +45,7 @@ export function FinancialSectionNav({ activeSection }: { activeSection: Financia
       {pending ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
           <LoaderCircle className="size-3 animate-spin" />
-          Carregando area financeira...
+          Carregando área financeira...
         </div>
       ) : null}
     </div>

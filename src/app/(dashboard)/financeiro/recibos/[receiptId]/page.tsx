@@ -5,7 +5,7 @@ import { getFinancialReceiptDetail } from "@/repositories/financial";
 import { formatCurrencyBRL } from "@/lib/utils";
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return "Nao informado";
+  if (!value) return "Não informado";
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
     timeStyle: "short",
@@ -53,14 +53,14 @@ export default async function FinancialReceiptPage({
           <div className="rounded-md border bg-muted/20 p-3">
             <p className="text-xs text-muted-foreground">Clinica</p>
             <p className="mt-1 font-medium">{detail.clinic?.trade_name ?? activeClinic.trade_name}</p>
-            <p className="text-muted-foreground">{detail.clinic?.document ?? "Documento nao informado"}</p>
+            <p className="text-muted-foreground">{detail.clinic?.document ?? "Documento não informado"}</p>
           </div>
           <div className="rounded-md border bg-muted/20 p-3">
             <p className="text-xs text-muted-foreground">Paciente</p>
             <p className="mt-1 font-medium">
               {detail.entry.patient?.social_name || detail.entry.patient?.full_name || "Paciente"}
             </p>
-            <p className="text-muted-foreground">{detail.entry.patient?.phone ?? "Telefone nao informado"}</p>
+            <p className="text-muted-foreground">{detail.entry.patient?.phone ?? "Telefone não informado"}</p>
           </div>
           <div className="rounded-md border bg-muted/20 p-3">
             <p className="text-xs text-muted-foreground">Lancamento</p>
@@ -80,7 +80,7 @@ export default async function FinancialReceiptPage({
         </article>
         <footer className="mt-10 border-t pt-5 text-xs text-muted-foreground">
           Documento financeiro gerado pelo CliniCore com rastreabilidade em auditoria. Este documento deve ser
-          conferido pela clinica antes de entrega ao paciente.
+          conferido pela clínica antes de entrega ao paciente.
         </footer>
       </section>
     </main>

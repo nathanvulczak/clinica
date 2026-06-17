@@ -388,6 +388,7 @@ export type FinancialMethodType =
 export type FinancialEntryType = "receivable" | "payable";
 export type FinancialEntryStatus = "pending" | "partial" | "paid" | "overdue" | "cancelled" | "refunded";
 export type FinancialPaymentStatus = "confirmed" | "reversed";
+export type FinancialReconciliationStatus = "closed" | "reversed";
 
 export type FinancialPreferences = {
   clinic_id: string;
@@ -504,11 +505,36 @@ export type FinancialPayment = {
   net_amount_cents: number;
   paid_at: string;
   expected_settlement_date: string | null;
+  reconciliation_id: string | null;
   reconciled_at: string | null;
+  reconciled_by: string | null;
   notes: string | null;
   reversal_reason: string | null;
   reversed_at: string | null;
   created_at: string;
+};
+
+export type FinancialReconciliation = {
+  id: string;
+  clinic_id: string;
+  account_id: string;
+  status: FinancialReconciliationStatus;
+  period_start: string;
+  period_end: string;
+  opening_balance_cents: number;
+  total_in_cents: number;
+  total_out_cents: number;
+  expected_balance_cents: number;
+  bank_balance_cents: number;
+  difference_cents: number;
+  closed_at: string;
+  closed_by: string | null;
+  reversed_at: string | null;
+  reversed_by: string | null;
+  reversal_reason: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type FinancialReceipt = {

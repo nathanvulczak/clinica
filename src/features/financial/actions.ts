@@ -10,6 +10,8 @@ import {
   financialEntrySchema,
   paymentMethodSchema,
   preferencesSchema,
+  reconciliationSchema,
+  reverseReconciliationSchema,
   receiptSchema,
   reversePaymentSchema,
   settleEntrySchema,
@@ -43,13 +45,16 @@ function percentToBps(value: number) {
 function financialError(error: { message?: string } | null, fallback: string) {
   const message = error?.message?.toLowerCase() ?? "";
   if (message.includes("does not exist") || message.includes("schema cache")) {
-    return "A estrutura do Financeiro ainda nao esta disponivel. Execute a migration 023 no Supabase.";
+    return "A estrutura do Financeiro ainda não está disponível. Execute a migration 023 no Supabase.";
   }
   if (message.includes("permission") || message.includes("policy")) {
-    return "O banco bloqueou a operacao por seguranca. Revise as permissoes e o RLS.";
+    return "O banco bloqueou a operação por segurança. Revise as permissões e o RLS.";
   }
   if (message.includes("duplicate") || message.includes("unique")) {
     return "Ja existe um registro financeiro com estes dados.";
+  }
+  if (message.includes("financial_reconciliation_locked")) {
+    return "Este lançamento faz parte de uma conciliação bancária fechada. Reabra a conciliação antes de alterar.";
   }
   return fallback;
 }
@@ -64,7 +69,7 @@ async function getFinancialContext() {
   } = await supabase.auth.getUser();
 
   if (!user) redirect("/login");
-  if (!activeClinic) return { error: "Selecione uma clinica antes de acessar o Financeiro." as const };
+  if (!activeClinic) return { error: "Selecione uma clínica antes de acessar o Financeiro." as const };
 
   const access = await getFinancialAccess(activeClinic.id);
   return { activeClinic, user, access };
@@ -75,6 +80,31 @@ function revalidateFinancial() {
   revalidatePath("/atendimentos");
   revalidatePath("/prontuarios");
   revalidatePath("/auditoria");
+}
+
+async function entryHasClosedReconciliation(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  entryId: string,
+) {
+  const { data: payments } = await admin
+    .from("financial_payments")
+    .select("reconciliation_id")
+    .eq("entry_id", entryId)
+    .is("deleted_at", null)
+    .not("reconciliation_id", "is", null);
+
+  const reconciliationIds = [...new Set((payments ?? []).map((payment) => payment.reconciliation_id).filter(Boolean))];
+  if (!reconciliationIds.length) return false;
+
+  const { data } = await admin
+    .from("financial_reconciliations")
+    .select("id")
+    .in("id", reconciliationIds)
+    .eq("status", "closed")
+    .is("deleted_at", null)
+    .limit(1);
+
+  return Boolean(data?.length);
 }
 
 export async function saveFinancialAccountAction(
@@ -97,7 +127,7 @@ export async function saveFinancialAccountAction(
 
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
-  if (!context.access.canManage) return { error: "Voce nao possui permissao para gerenciar contas financeiras." };
+  if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar contas financeiras." };
 
   const admin = createSupabaseAdminClient();
   const openingBalance = parseCurrencyToCents(parsed.data.opening_balance);
@@ -123,10 +153,10 @@ export async function saveFinancialAccountAction(
       .eq("clinic_id", context.activeClinic.id)
       .is("deleted_at", null)
       .maybeSingle();
-    if (!previous) return { error: "Conta financeira nao encontrada." };
+    if (!previous) return { error: "Conta financeira não encontrada." };
 
     const { error } = await admin.from("financial_accounts").update(payload).eq("id", parsed.data.id);
-    if (error) return { error: financialError(error, "Nao foi possivel atualizar a conta.") };
+    if (error) return { error: financialError(error, "Não foi possível atualizar a conta.") };
 
     await logAuditEvent({
       clinicId: context.activeClinic.id,
@@ -144,7 +174,7 @@ export async function saveFinancialAccountAction(
       .insert({ clinic_id: context.activeClinic.id, ...payload, created_by: context.user.id })
       .select("id")
       .single();
-    if (error || !data) return { error: financialError(error, "Nao foi possivel criar a conta.") };
+    if (error || !data) return { error: financialError(error, "Não foi possível criar a conta.") };
 
     await logAuditEvent({
       clinicId: context.activeClinic.id,
@@ -177,7 +207,7 @@ export async function savePaymentMethodAction(
 
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
-  if (!context.access.canManage) return { error: "Voce nao possui permissao para gerenciar formas de pagamento." };
+  if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar formas de pagamento." };
 
   const admin = createSupabaseAdminClient();
   const payload = { ...parsed.data, id: undefined, updated_by: context.user.id };
@@ -190,7 +220,7 @@ export async function savePaymentMethodAction(
         .single();
 
   if (result.error || !result.data) {
-    return { error: financialError(result.error, "Nao foi possivel salvar a forma de pagamento.") };
+    return { error: financialError(result.error, "Não foi possível salvar a forma de pagamento.") };
   }
 
   await logAuditEvent({
@@ -228,7 +258,7 @@ export async function saveCardMachineAction(
 
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
-  if (!context.access.canManage) return { error: "Voce nao possui permissao para gerenciar maquinas." };
+  if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar máquinas." };
 
   const admin = createSupabaseAdminClient();
   const payload = {
@@ -253,7 +283,7 @@ export async function saveCardMachineAction(
         .single();
 
   if (result.error || !result.data) {
-    return { error: financialError(result.error, "Nao foi possivel salvar a maquina de cartao.") };
+    return { error: financialError(result.error, "Não foi possível salvar a máquina de cartão.") };
   }
 
   await logAuditEvent({
@@ -267,7 +297,7 @@ export async function saveCardMachineAction(
   });
 
   revalidateFinancial();
-  return { success: parsed.data.id ? "Maquina atualizada." : "Maquina cadastrada." };
+  return { success: parsed.data.id ? "Máquina atualizada." : "Máquina cadastrada." };
 }
 
 export async function saveVendorAction(
@@ -288,7 +318,7 @@ export async function saveVendorAction(
 
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
-  if (!context.access.canManage) return { error: "Voce nao possui permissao para gerenciar fornecedores." };
+  if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar fornecedores." };
 
   const admin = createSupabaseAdminClient();
   const payload = { ...parsed.data, id: undefined, updated_by: context.user.id };
@@ -301,7 +331,7 @@ export async function saveVendorAction(
         .single();
 
   if (result.error || !result.data) {
-    return { error: financialError(result.error, "Nao foi possivel salvar o fornecedor.") };
+    return { error: financialError(result.error, "Não foi possível salvar o fornecedor.") };
   }
 
   await logAuditEvent({
@@ -344,10 +374,17 @@ export async function saveFinancialEntryAction(
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
   if (parsed.data.id ? !context.access.canEdit : !context.access.canCreate) {
-    return { error: "Voce nao possui permissao para salvar lancamentos financeiros." };
+    return { error: "Você não possui permissão para salvar lançamentos financeiros." };
   }
 
   const admin = createSupabaseAdminClient();
+  if (parsed.data.id && (await entryHasClosedReconciliation(admin, parsed.data.id))) {
+    return {
+      error:
+        "Este lançamento possui pagamento em conciliação bancária fechada. Reabra a conciliação antes de editar.",
+    };
+  }
+
   const payload = {
     entry_type: parsed.data.entry_type,
     origin: "manual",
@@ -375,7 +412,7 @@ export async function saveFinancialEntryAction(
         .single();
 
   if (result.error || !result.data) {
-    return { error: financialError(result.error, "Nao foi possivel salvar o lancamento.") };
+    return { error: financialError(result.error, "Não foi possível salvar o lançamento.") };
   }
 
   await logAuditEvent({
@@ -389,7 +426,7 @@ export async function saveFinancialEntryAction(
   });
 
   revalidateFinancial();
-  return { success: parsed.data.id ? "Lancamento atualizado." : "Lancamento criado." };
+  return { success: parsed.data.id ? "Lançamento atualizado." : "Lançamento criado." };
 }
 
 export async function createEncounterChargeAction(
@@ -413,7 +450,7 @@ export async function createEncounterChargeAction(
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
   if (!context.access.canChargeEncounter) {
-    return { error: "Voce nao possui permissao para cobrar atendimentos." };
+    return { error: "Você não possui permissão para cobrar atendimentos." };
   }
 
   const admin = createSupabaseAdminClient();
@@ -433,7 +470,7 @@ export async function createEncounterChargeAction(
     }>();
 
   if (!encounter || !["consultation_completed", "billing_pending"].includes(encounter.status)) {
-    return { error: "Este atendimento ainda nao esta liberado para cobranca." };
+    return { error: "Este atendimento ainda não esta liberado para cobrança." };
   }
 
   const { data: existing } = await admin
@@ -443,7 +480,7 @@ export async function createEncounterChargeAction(
     .eq("encounter_id", encounter.id)
     .is("deleted_at", null)
     .maybeSingle();
-  if (existing) return { error: "Este atendimento ja possui cobranca financeira." };
+  if (existing) return { error: "Este atendimento já possui cobrança financeira." };
 
   const { data: appointment } = await admin
     .from("appointments")
@@ -459,7 +496,7 @@ export async function createEncounterChargeAction(
     : { data: null };
   const preferences = await getFinancialPreferences(context.activeClinic.id);
   if (preferences?.require_payment_method_on_checkout && parsed.data.paid_now && !parsed.data.payment_method_id) {
-    return { error: "Informe a forma de pagamento para baixar a cobranca agora." };
+    return { error: "Informe a forma de pagamento para baixar a cobrança agora." };
   }
 
   const amount = parseCurrencyToCents(parsed.data.amount);
@@ -492,7 +529,7 @@ export async function createEncounterChargeAction(
     .insert({ clinic_id: context.activeClinic.id, ...payload, created_by: context.user.id })
     .select("id")
     .single<{ id: string }>();
-  if (error || !entry) return { error: financialError(error, "Nao foi possivel criar a cobranca.") };
+  if (error || !entry) return { error: financialError(error, "Não foi possível criar a cobrança.") };
 
   let receiptId: string | undefined;
   if (parsed.data.paid_now && total > 0) {
@@ -566,7 +603,7 @@ export async function settleFinancialEntryAction(
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
   if (!context.access.canManage && !context.access.canEdit) {
-    return { error: "Voce nao possui permissao para baixar lancamentos." };
+    return { error: "Você não possui permissão para baixar lançamentos." };
   }
 
   const admin = createSupabaseAdminClient();
@@ -577,15 +614,15 @@ export async function settleFinancialEntryAction(
     .eq("clinic_id", context.activeClinic.id)
     .is("deleted_at", null)
     .maybeSingle<FinancialEntry>();
-  if (!entry) return { error: "Lancamento financeiro nao encontrado." };
+  if (!entry) return { error: "Lançamento financeiro não encontrado." };
   if (["paid", "cancelled", "refunded"].includes(entry.status)) {
-    return { error: "Este lancamento nao pode ser baixado no status atual." };
+    return { error: "Este lançamento não pode ser baixado no status atual." };
   }
 
   const total = entry.amount_cents - entry.discount_cents + entry.addition_cents;
   const openAmount = Math.max(total - entry.paid_cents, 0);
   const amount = parseCurrencyToCents(parsed.data.amount);
-  if (amount > openAmount) return { error: "O valor baixado nao pode ultrapassar o saldo em aberto." };
+  if (amount > openAmount) return { error: "O valor baixado não pode ultrapassar o saldo em aberto." };
 
   const payment = await createPayment({
     admin,
@@ -658,7 +695,7 @@ export async function reverseFinancialPaymentAction(
 
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
-  if (!context.access.canManage) return { error: "Voce nao possui permissao para estornar pagamentos." };
+  if (!context.access.canManage) return { error: "Você não possui permissão para estornar pagamentos." };
 
   const admin = createSupabaseAdminClient();
   const { data: payment } = await admin
@@ -669,14 +706,20 @@ export async function reverseFinancialPaymentAction(
     .eq("status", "confirmed")
     .is("deleted_at", null)
     .maybeSingle<FinancialPayment>();
-  if (!payment) return { error: "Pagamento/recebimento nao encontrado ou ja estornado." };
+  if (!payment) return { error: "Pagamento/recebimento não encontrado ou já estornado." };
+  if (payment.reconciliation_id) {
+    return {
+      error:
+        "Este pagamento está em conciliação bancária fechada. Reabra a conciliação antes de estornar.",
+    };
+  }
 
   const { data: entry } = await admin
     .from("financial_entries")
     .select("*")
     .eq("id", payment.entry_id)
     .maybeSingle<FinancialEntry>();
-  if (!entry) return { error: "Lancamento vinculado nao encontrado." };
+  if (!entry) return { error: "Lançamento vinculado não encontrado." };
 
   await admin
     .from("financial_payments")
@@ -738,6 +781,213 @@ export async function reverseFinancialPaymentAction(
   return { success: "Estorno registrado com auditoria." };
 }
 
+export async function createFinancialReconciliationAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = reconciliationSchema.safeParse({
+    account_id: formData.get("account_id"),
+    period_start: formData.get("period_start"),
+    period_end: formData.get("period_end"),
+    opening_balance: formData.get("opening_balance"),
+    bank_balance: formData.get("bank_balance"),
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "Você não possui permissão para fechar conciliação bancária." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: account } = await admin
+    .from("financial_accounts")
+    .select("id, name")
+    .eq("id", parsed.data.account_id)
+    .eq("clinic_id", context.activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle<{ id: string; name: string }>();
+  if (!account) return { error: "Conta financeira não encontrada." };
+
+  const periodStart = `${parsed.data.period_start}T00:00:00.000`;
+  const periodEnd = `${parsed.data.period_end}T23:59:59.999`;
+  const { data: payments, error } = await admin
+    .from("financial_payments")
+    .select("id, direction, net_amount_cents, amount_cents, fee_cents, paid_at")
+    .eq("clinic_id", context.activeClinic.id)
+    .eq("account_id", parsed.data.account_id)
+    .eq("status", "confirmed")
+    .is("deleted_at", null)
+    .is("reconciliation_id", null)
+    .gte("paid_at", periodStart)
+    .lte("paid_at", periodEnd);
+
+  if (error) return { error: financialError(error, "Não foi possível buscar os movimentos do período.") };
+  if (!payments?.length) {
+    return { error: "Não existem movimentos confirmados e pendentes de conciliação para esta conta no período." };
+  }
+
+  const totalIn = payments
+    .filter((payment) => payment.direction === "in")
+    .reduce((sum, payment) => sum + Number(payment.net_amount_cents ?? 0), 0);
+  const totalOut = payments
+    .filter((payment) => payment.direction === "out")
+    .reduce((sum, payment) => sum + Number(payment.net_amount_cents ?? 0), 0);
+  const openingBalance = parseCurrencyToCents(parsed.data.opening_balance);
+  const bankBalance = parseCurrencyToCents(parsed.data.bank_balance);
+  const expectedBalance = openingBalance + totalIn - totalOut;
+  const difference = bankBalance - expectedBalance;
+
+  if (difference !== 0) {
+    return {
+      error: `A conciliação não fecha. Diferença encontrada: ${formatCurrencyBRL(difference)}. Revise lançamentos ou saldo bancário antes de fechar.`,
+    };
+  }
+
+  const { data: reconciliation, error: insertError } = await admin
+    .from("financial_reconciliations")
+    .insert({
+      clinic_id: context.activeClinic.id,
+      account_id: parsed.data.account_id,
+      period_start: parsed.data.period_start,
+      period_end: parsed.data.period_end,
+      opening_balance_cents: openingBalance,
+      total_in_cents: totalIn,
+      total_out_cents: totalOut,
+      expected_balance_cents: expectedBalance,
+      bank_balance_cents: bankBalance,
+      difference_cents: difference,
+      closed_by: context.user.id,
+      notes: parsed.data.notes,
+      created_by: context.user.id,
+      updated_by: context.user.id,
+    })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (insertError || !reconciliation) {
+    return { error: financialError(insertError, "Não foi possível fechar a conciliação.") };
+  }
+
+  const paymentIds = payments.map((payment) => payment.id);
+  const { error: updateError } = await admin
+    .from("financial_payments")
+    .update({
+      reconciliation_id: reconciliation.id,
+      reconciled_at: new Date().toISOString(),
+      reconciled_by: context.user.id,
+      updated_by: context.user.id,
+    })
+    .in("id", paymentIds);
+
+  if (updateError) {
+    await admin
+      .from("financial_reconciliations")
+      .update({
+        status: "reversed",
+        reversed_at: new Date().toISOString(),
+        reversed_by: context.user.id,
+        reversal_reason: "Falha automática ao vincular movimentos.",
+        updated_by: context.user.id,
+      })
+      .eq("id", reconciliation.id);
+    return { error: financialError(updateError, "A conciliação foi criada, mas os movimentos não foram vinculados.") };
+  }
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "financial_reconciliation_closed",
+    module: "financial",
+    recordTable: "financial_reconciliations",
+    recordId: reconciliation.id,
+    newValues: {
+      account_id: parsed.data.account_id,
+      account_name: account.name,
+      period_start: parsed.data.period_start,
+      period_end: parsed.data.period_end,
+      movement_count: paymentIds.length,
+      expected_balance_cents: expectedBalance,
+      bank_balance_cents: bankBalance,
+    },
+    level: "critical",
+    notes: "Conciliação bancária fechada e movimentos travados.",
+  });
+
+  revalidateFinancial();
+  return { success: "Conciliação bancária fechada. Movimentos do período foram travados." };
+}
+
+export async function reverseFinancialReconciliationAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = reverseReconciliationSchema.safeParse({
+    reconciliation_id: formData.get("reconciliation_id"),
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canApprove) return { error: "Você não possui permissão para reabrir conciliações bancárias." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: reconciliation } = await admin
+    .from("financial_reconciliations")
+    .select("*")
+    .eq("id", parsed.data.reconciliation_id)
+    .eq("clinic_id", context.activeClinic.id)
+    .eq("status", "closed")
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!reconciliation) return { error: "Conciliação fechada não encontrada." };
+
+  const { error: reverseError } = await admin
+    .from("financial_reconciliations")
+    .update({
+      status: "reversed",
+      reversed_at: new Date().toISOString(),
+      reversed_by: context.user.id,
+      reversal_reason: parsed.data.reason,
+      updated_by: context.user.id,
+    })
+    .eq("id", parsed.data.reconciliation_id);
+
+  if (reverseError) return { error: financialError(reverseError, "Não foi possível reabrir a conciliação.") };
+
+  const { error: paymentsError } = await admin
+    .from("financial_payments")
+    .update({
+      reconciliation_id: null,
+      reconciled_at: null,
+      reconciled_by: null,
+      updated_by: context.user.id,
+    })
+    .eq("reconciliation_id", parsed.data.reconciliation_id);
+
+  if (paymentsError) {
+    return { error: financialError(paymentsError, "A conciliação foi reaberta, mas os movimentos não foram liberados.") };
+  }
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "financial_reconciliation_reversed",
+    module: "financial",
+    recordTable: "financial_reconciliations",
+    recordId: parsed.data.reconciliation_id,
+    oldValues: reconciliation,
+    newValues: { status: "reversed", reason: parsed.data.reason },
+    level: "critical",
+    notes: "Conciliação bancária reaberta. Movimentos liberados para correção.",
+  });
+
+  revalidateFinancial();
+  return { success: "Conciliação reaberta. Movimentos liberados para ajuste." };
+}
+
 export async function issueFinancialReceiptAction(
   _state: FinancialActionState,
   formData: FormData,
@@ -752,7 +1002,7 @@ export async function issueFinancialReceiptAction(
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
   if (!context.access.canCreate && !context.access.canView) {
-    return { error: "Voce nao possui permissao para emitir recibos." };
+    return { error: "Você não possui permissão para emitir recibos." };
   }
 
   const admin = createSupabaseAdminClient();
@@ -763,7 +1013,7 @@ export async function issueFinancialReceiptAction(
     .eq("clinic_id", context.activeClinic.id)
     .is("deleted_at", null)
     .maybeSingle<FinancialEntry>();
-  if (!entry) return { error: "Lancamento nao encontrado." };
+  if (!entry) return { error: "Lançamento não encontrado." };
 
   const receiptId = await createReceipt({
     admin,
@@ -807,7 +1057,7 @@ export async function saveFinancialPreferencesAction(
 
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
-  if (!context.access.canManage) return { error: "Voce nao possui permissao para alterar preferencias financeiras." };
+  if (!context.access.canManage) return { error: "Você não possui permissão para alterar preferências financeiras." };
 
   const admin = createSupabaseAdminClient();
   const { data: previous } = await admin
@@ -829,7 +1079,7 @@ export async function saveFinancialPreferencesAction(
     updated_by: context.user.id,
   };
   const { error } = await admin.from("financial_preferences").upsert(payload, { onConflict: "clinic_id" });
-  if (error) return { error: financialError(error, "Nao foi possivel salvar as preferencias.") };
+  if (error) return { error: financialError(error, "Não foi possível salvar as preferências.") };
 
   await logAuditEvent({
     clinicId: context.activeClinic.id,
@@ -925,7 +1175,7 @@ async function createPayment({
     .insert(payload)
     .select("id")
     .single<{ id: string }>();
-  if (error || !data) return { error: financialError(error, "Nao foi possivel registrar a baixa.") };
+  if (error || !data) return { error: financialError(error, "Não foi possível registrar a baixa.") };
 
   if (accountId) {
     const { data: account } = await admin
@@ -983,8 +1233,8 @@ async function createReceipt({
   const title = receiptType === "payment" ? "Recibo de pagamento" : "Ciencia de pagamento em aberto";
   const content =
     receiptType === "payment"
-      ? `Recebemos de ${patientName} o valor de ${formatCurrencyBRL(entry?.paid_cents ?? total)} referente a ${entry?.description ?? "atendimento"}.\n\nObservacoes: ${notes ?? "Sem observacoes."}`
-      : `${patientName} declara ciencia do valor em aberto de ${formatCurrencyBRL(open)} referente a ${entry?.description ?? "atendimento"}, com vencimento em ${entry?.due_date ?? "data nao informada"}.\n\nObservacoes: ${notes ?? "Sem observacoes."}`;
+      ? `Recebemos de ${patientName} o valor de ${formatCurrencyBRL(entry?.paid_cents ?? total)} referente a ${entry?.description ?? "atendimento"}.\n\nObservações: ${notes ?? "Sem observações."}`
+      : `${patientName} declara ciência do valor em aberto de ${formatCurrencyBRL(open)} referente a ${entry?.description ?? "atendimento"}, com vencimento em ${entry?.due_date ?? "data não informada"}.\n\nObservações: ${notes ?? "Sem observações."}`;
 
   const { data } = await admin
     .from("financial_receipts")
