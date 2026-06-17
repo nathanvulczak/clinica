@@ -89,6 +89,48 @@ export type PatientClinicalComment = {
   author: { full_name: string } | null;
 };
 
+export type MedicalRecordAttachment = {
+  id: string;
+  clinic_id: string;
+  medical_record_id: string;
+  encounter_id: string;
+  patient_id: string;
+  professional_member_id: string;
+  category: "exam" | "report" | "image" | "attachment" | "other";
+  title: string;
+  description: string | null;
+  file_name: string;
+  file_path: string;
+  mime_type: string;
+  file_size: number;
+  status: "active" | "deleted";
+  deleted_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  signed_url?: string | null;
+};
+
+export type MedicalCorrectionRequest = {
+  id: string;
+  medical_record_id: string;
+  encounter_id: string;
+  reason: string;
+  status: "opened" | "applied" | "cancelled";
+  applied_at: string | null;
+  created_at: string;
+  created_by: string | null;
+};
+
+export type MedicalTimelineEvent = {
+  id: string;
+  occurred_at: string;
+  type: string;
+  title: string;
+  description: string;
+  tone: "info" | "success" | "warning" | "critical";
+};
+
 export type MedicalRecordEncounterDetail = {
   id: string;
   clinic_id: string;
@@ -156,6 +198,9 @@ export type MedicalRecordEncounterDetail = {
   prescriptions: MedicalPrescription[];
   document_events: MedicalDocumentEvent[];
   patient_comments: PatientClinicalComment[];
+  attachments: MedicalRecordAttachment[];
+  correction_requests: MedicalCorrectionRequest[];
+  timeline: MedicalTimelineEvent[];
 };
 
 export type MedicalRecordListItem = MedicalRecord & {
@@ -329,7 +374,13 @@ export async function getMedicalRecordEncounterDetail(
       .maybeSingle<MedicalRecord>(),
   ]);
 
-  const [{ data: prescriptions }, { data: comments }] = await Promise.all([
+  const [
+    { data: prescriptions },
+    { data: comments },
+    { data: encounterEvents },
+    { data: attachments },
+    { data: correctionRequests },
+  ] = await Promise.all([
     medicalRecord?.id
       ? admin
           .from("medical_prescriptions")
@@ -347,6 +398,26 @@ export async function getMedicalRecordEncounterDetail(
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(20),
+    admin
+      .from("clinical_encounter_events")
+      .select("id, from_status, to_status, reason, created_at")
+      .eq("encounter_id", encounter.id)
+      .order("created_at", { ascending: false })
+      .limit(50),
+    medicalRecord?.id
+      ? admin
+          .from("medical_record_attachments")
+          .select("*")
+          .eq("medical_record_id", medicalRecord.id)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] }),
+    medicalRecord?.id
+      ? admin
+          .from("medical_record_correction_requests")
+          .select("id, medical_record_id, encounter_id, reason, status, applied_at, created_at, created_by")
+          .eq("medical_record_id", medicalRecord.id)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] }),
   ]);
 
   const documentIds = ((prescriptions ?? []) as MedicalPrescription[]).map((item) => item.id);
@@ -362,6 +433,32 @@ export async function getMedicalRecordEncounterDetail(
     ? await admin.from("profiles").select("id, full_name").in("id", authorIds)
     : { data: [] };
   const authorMap = new Map((authors ?? []).map((item) => [item.id, item]));
+  const attachmentsWithUrls = await Promise.all(
+    ((attachments ?? []) as MedicalRecordAttachment[]).map(async (attachment) => {
+      if (attachment.status === "deleted") return { ...attachment, signed_url: null };
+      const { data } = await admin.storage
+        .from("clinical-attachments")
+        .createSignedUrl(attachment.file_path, 60 * 15);
+      return { ...attachment, signed_url: data?.signedUrl ?? null };
+    }),
+  );
+  const timeline = buildTimeline({
+    encounter,
+    encounterEvents: (encounterEvents ?? []) as Array<{
+      id: string;
+      from_status: string | null;
+      to_status: string;
+      reason: string | null;
+      created_at: string;
+    }>,
+    nursingAssessment,
+    medicalRecord,
+    prescriptions: (prescriptions ?? []) as MedicalPrescription[],
+    documentEvents: (documentEvents ?? []) as MedicalDocumentEvent[],
+    comments: (comments ?? []) as PatientClinicalComment[],
+    attachments: attachmentsWithUrls,
+    correctionRequests: (correctionRequests ?? []) as MedicalCorrectionRequest[],
+  });
 
   return {
     ...encounter,
@@ -377,7 +474,137 @@ export async function getMedicalRecordEncounterDetail(
       ...comment,
       author: comment.created_by ? authorMap.get(comment.created_by) ?? null : null,
     })),
+    attachments: attachmentsWithUrls,
+    correction_requests: (correctionRequests ?? []) as MedicalCorrectionRequest[],
+    timeline,
   };
+}
+
+function buildTimeline({
+  encounter,
+  encounterEvents,
+  nursingAssessment,
+  medicalRecord,
+  prescriptions,
+  documentEvents,
+  comments,
+  attachments,
+  correctionRequests,
+}: {
+  encounter: { id: string; arrived_at: string | null; consultation_started_at: string | null; consultation_completed_at: string | null };
+  encounterEvents: Array<{ id: string; from_status: string | null; to_status: string; reason: string | null; created_at: string }>;
+  nursingAssessment: MedicalRecordEncounterDetail["nursing_assessment"];
+  medicalRecord: MedicalRecord | null;
+  prescriptions: MedicalPrescription[];
+  documentEvents: MedicalDocumentEvent[];
+  comments: PatientClinicalComment[];
+  attachments: MedicalRecordAttachment[];
+  correctionRequests: MedicalCorrectionRequest[];
+}): MedicalTimelineEvent[] {
+  const events: MedicalTimelineEvent[] = [];
+
+  if (encounter.arrived_at) {
+    events.push({
+      id: `${encounter.id}-arrival`,
+      occurred_at: encounter.arrived_at,
+      type: "arrival",
+      title: "Paciente chegou",
+      description: "Chegada registrada na agenda.",
+      tone: "info",
+    });
+  }
+
+  for (const event of encounterEvents) {
+    events.push({
+      id: event.id,
+      occurred_at: event.created_at,
+      type: "workflow",
+      title: "Etapa assistencial atualizada",
+      description: `${event.from_status ?? "inicio"} -> ${event.to_status}${event.reason ? ` | ${event.reason}` : ""}`,
+      tone: "info",
+    });
+  }
+
+  if (nursingAssessment?.completed_at) {
+    events.push({
+      id: nursingAssessment.id,
+      occurred_at: nursingAssessment.completed_at,
+      type: "nursing",
+      title: "Pre-consulta encerrada",
+      description: nursingAssessment.chief_complaint ?? "Ficha de enfermagem concluida.",
+      tone: "success",
+    });
+  }
+
+  if (medicalRecord) {
+    events.push({
+      id: medicalRecord.id,
+      occurred_at: medicalRecord.updated_at,
+      type: "medical_record",
+      title: medicalRecord.status === "completed" ? "Prontuario concluido" : "Prontuario atualizado",
+      description: medicalRecord.assessment ?? medicalRecord.plan ?? "Evolucao clinica registrada.",
+      tone: medicalRecord.status === "completed" ? "success" : "info",
+    });
+  }
+
+  for (const document of prescriptions) {
+    events.push({
+      id: document.id,
+      occurred_at: document.updated_at,
+      type: "document",
+      title: document.status === "deleted" ? "Documento excluido" : "Documento clinico",
+      description: `${document.title}${document.deleted_reason ? ` | Motivo: ${document.deleted_reason}` : ""}`,
+      tone: document.status === "deleted" ? "warning" : "info",
+    });
+  }
+
+  for (const event of documentEvents) {
+    events.push({
+      id: event.id,
+      occurred_at: event.created_at,
+      type: "document_event",
+      title: "Evento de documento",
+      description: `${event.event_type}${event.reason ? ` | ${event.reason}` : ""}`,
+      tone: event.event_type === "deleted" ? "warning" : "info",
+    });
+  }
+
+  for (const comment of comments) {
+    events.push({
+      id: comment.id,
+      occurred_at: comment.created_at,
+      type: "comment",
+      title: "Comentario clinico",
+      description: comment.comment,
+      tone: "info",
+    });
+  }
+
+  for (const attachment of attachments) {
+    events.push({
+      id: attachment.id,
+      occurred_at: attachment.created_at,
+      type: "attachment",
+      title: attachment.category === "exam" ? "Exame anexado" : "Anexo clinico",
+      description: `${attachment.title} (${attachment.file_name})`,
+      tone: attachment.status === "deleted" ? "warning" : "info",
+    });
+  }
+
+  for (const request of correctionRequests) {
+    events.push({
+      id: request.id,
+      occurred_at: request.created_at,
+      type: "correction",
+      title: "Correcao formal solicitada",
+      description: request.reason,
+      tone: request.status === "applied" ? "success" : "warning",
+    });
+  }
+
+  return events.sort(
+    (a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime(),
+  );
 }
 
 export async function listMedicalRecords(
