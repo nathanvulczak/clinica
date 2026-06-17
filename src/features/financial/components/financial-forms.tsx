@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { CreditCard, Landmark, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -35,16 +35,26 @@ import type {
 
 function useActionToast(state: FinancialActionState, onCompleted?: (state: FinancialActionState) => void) {
   const { toast } = useToast();
+  const completedRef = useRef(onCompleted);
+  const lastToastRef = useRef<string | null>(null);
 
   useEffect(() => {
+    completedRef.current = onCompleted;
+  }, [onCompleted]);
+
+  useEffect(() => {
+    const signature = state.error ? `error:${state.error}` : state.success ? `success:${state.success}:${state.receiptId ?? ""}` : null;
+    if (!signature || lastToastRef.current === signature) return;
+    lastToastRef.current = signature;
+
     if (state.error) {
       toast({ title: "Ação não concluída", description: state.error, variant: "destructive" });
     }
     if (state.success) {
       toast({ title: "Financeiro", description: state.success });
-      onCompleted?.(state);
+      completedRef.current?.(state);
     }
-  }, [onCompleted, state, toast]);
+  }, [state, toast]);
 }
 
 function MoneyInput({
@@ -549,23 +559,35 @@ export function ReconciliationForm({
 }) {
   const [state, action, pending] = useActionState(createFinancialReconciliationAction, {});
   useActionToast(state, onCompleted);
+  const [selectedAccountId, setSelectedAccountId] = useState(accounts[0]?.id ?? "");
   const today = new Date().toISOString().slice(0, 10);
   const firstDay = new Date();
   firstDay.setDate(1);
 
   return (
     <form action={action} className="grid gap-4">
+      <input type="hidden" name="account_id" value={selectedAccountId} />
+      <div className="grid gap-2">
+        <p className="text-sm font-medium">Conta para conciliar</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {accounts.map((account) => (
+            <button
+              key={account.id}
+              type="button"
+              onClick={() => setSelectedAccountId(account.id)}
+              className={`flex items-center justify-between gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${
+                selectedAccountId === account.id ? "border-primary bg-primary/5 text-primary" : "bg-background hover:bg-muted/30"
+              }`}
+            >
+              <span className="truncate">{account.name}</span>
+              <span className={`flex size-4 items-center justify-center rounded border text-[10px] ${selectedAccountId === account.id ? "border-primary bg-primary text-primary-foreground" : "bg-card"}`}>
+                {selectedAccountId === account.id ? "?" : ""}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <label className="grid gap-2 text-sm font-medium">
-          Conta bancária/caixa
-          <Select name="account_id" defaultValue={accounts[0]?.id ?? ""} required>
-            {accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.name}
-              </option>
-            ))}
-          </Select>
-        </label>
         <Field name="period_start" label="Início do período" type="date" defaultValue={firstDay.toISOString().slice(0, 10)} required />
         <Field name="period_end" label="Fim do período" type="date" defaultValue={today} required />
         <MoneyInput name="opening_balance" label="Saldo bancário inicial" required />

@@ -7,17 +7,21 @@ import {
   BarChart3,
   CheckCircle2,
   CreditCard,
+  Eye,
+  FileText,
   Landmark,
   Plus,
   ReceiptText,
   RotateCcw,
   Settings2,
+  SlidersHorizontal,
   Sparkles,
   Truck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import {
   CardMachineForm,
   EncounterChargeForm,
@@ -510,6 +514,13 @@ function ListBox({ title, items }: { title: string; items: string[] }) {
 
 type ReconciliationRange = "today" | "week" | "month";
 
+type MovementRow = {
+  entry: FinancialEntryWithRelations;
+  payment: FinancialPayment;
+  account: FinancialWorkspaceData["accounts"][number] | null;
+  reconciliation: FinancialWorkspaceData["reconciliations"][number] | null;
+};
+
 function getRangeStart(range: ReconciliationRange) {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
@@ -521,11 +532,20 @@ function getRangeStart(range: ReconciliationRange) {
   return date;
 }
 
+function rangeLabel(range: ReconciliationRange) {
+  if (range === "today") return "Hoje";
+  if (range === "week") return "Semana";
+  return "Mes";
+}
+
 function ReconciliationPanel({ data }: { data: FinancialWorkspaceData }) {
-  const [range, setRange] = useState<ReconciliationRange>("month");
+  const [range, setRange] = useState<ReconciliationRange>("week");
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const [reversing, setReversing] = useState<(typeof data.reconciliations)[number] | null>(null);
+  const [detailing, setDetailing] = useState<(typeof data.reconciliations)[number] | null>(null);
   const accountMap = useMemo(() => new Map(data.accounts.map((account) => [account.id, account])), [data.accounts]);
   const reconciliationMap = useMemo(
     () => new Map(data.reconciliations.map((item) => [item.id, item])),
@@ -539,7 +559,7 @@ function ReconciliationPanel({ data }: { data: FinancialWorkspaceData }) {
     return date;
   }, []);
 
-  const rows = useMemo(
+  const rows = useMemo<MovementRow[]>(
     () =>
       data.entries
         .flatMap((entry) =>
@@ -563,212 +583,87 @@ function ReconciliationPanel({ data }: { data: FinancialWorkspaceData }) {
   const pendingRows = rows.filter(({ payment }) => !payment.reconciliation_id);
   const totalIn = rows.filter(({ payment }) => payment.direction === "in").reduce((sum, row) => sum + row.payment.net_amount_cents, 0);
   const totalOut = rows.filter(({ payment }) => payment.direction === "out").reduce((sum, row) => sum + row.payment.net_amount_cents, 0);
-
-  function toggleAccount(accountId: string) {
-    setSelectedAccounts((current) =>
-      current.includes(accountId) ? current.filter((id) => id !== accountId) : [...current, accountId],
-    );
-  }
+  const accountSummary = activeAccountIds.length === data.accounts.length ? "Todas as contas" : activeAccountIds.length + " conta(s)";
 
   return (
     <div className="grid gap-5">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
         <div>
-          <h2 className="font-semibold">Contas e conciliação</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Conferência por conta, período e saldo bancário. Movimentos conciliados ficam protegidos contra alteração.
-          </p>
-        </div>
-        <Button disabled={!data.access.canManage || data.accounts.length === 0} onClick={() => setCreating(true)}>
-          <BarChart3 />
-          Conciliar período
-        </Button>
-      </header>
-
-      <section className="grid gap-3 rounded-lg border bg-card p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="font-medium">Filtros rápidos</p>
-            <p className="text-sm text-muted-foreground">Use para conferir saldos e movimentos antes de fechar uma conciliação.</p>
-          </div>
-          <div className="flex rounded-md border bg-background p-1">
-            {[
-              ["today", "Hoje"],
-              ["week", "Semana"],
-              ["month", "Mês"],
-            ].map(([key, label]) => (
-              <Button
-                key={key}
-                size="sm"
-                variant={range === key ? "secondary" : "ghost"}
-                type="button"
-                onClick={() => setRange(key as ReconciliationRange)}
-              >
-                {label}
-              </Button>
-            ))}
-          </div>
+          <h2 className="font-semibold">Contas e conciliacao</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Conferencia por conta, periodo e saldo bancario. Movimentos conciliados ficam protegidos contra alteracao.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {data.accounts.map((account) => (
-            <label key={account.id} className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm">
-              <input
-                type="checkbox"
-                checked={!selectedAccounts.length || selectedAccounts.includes(account.id)}
-                onChange={() => toggleAccount(account.id)}
-                className="size-4"
-              />
-              {account.name}
-            </label>
-          ))}
+          <Button variant="outline" onClick={() => setReportOpen(true)}><FileText />Movimentos</Button>
+          <Button disabled={!data.access.canManage || data.accounts.length === 0} onClick={() => setCreating(true)}><BarChart3 />Conciliar periodo</Button>
         </div>
+      </header>
+
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4">
+        <div>
+          <p className="font-medium">Filtros rapidos</p>
+          <p className="text-sm text-muted-foreground">{rangeLabel(range)} | {accountSummary}</p>
+        </div>
+        <Button variant="outline" onClick={() => setFiltersOpen(true)}><SlidersHorizontal />Selecionar contas e periodo</Button>
       </section>
 
       <div className="grid gap-3 xl:grid-cols-4">
         <MetricCard label="Entradas no filtro" value={formatCurrencyBRL(totalIn)} description="Recebimentos confirmados" tone="success" />
-        <MetricCard label="Saídas no filtro" value={formatCurrencyBRL(totalOut)} description="Pagamentos confirmados" />
-        <MetricCard label="Movimentos pendentes" value={String(pendingRows.length)} description="Ainda sem conciliação" tone={pendingRows.length ? "warning" : "default"} />
-        <MetricCard label="Saldo líquido" value={formatCurrencyBRL(totalIn - totalOut)} description="Entradas menos saídas do período" />
+        <MetricCard label="Saidas no filtro" value={formatCurrencyBRL(totalOut)} description="Pagamentos confirmados" />
+        <MetricCard label="Movimentos pendentes" value={String(pendingRows.length)} description="Ainda sem conciliacao" tone={pendingRows.length ? "warning" : "default"} />
+        <MetricCard label="Saldo liquido" value={formatCurrencyBRL(totalIn - totalOut)} description="Entradas menos saidas do periodo" />
       </div>
 
       <div className="grid gap-3 lg:grid-cols-3">
-        {data.accounts
-          .filter((account) => activeAccountIds.includes(account.id))
-          .map((account) => {
-            const accountRows = rows.filter(({ payment }) => payment.account_id === account.id);
-            const periodNet = accountRows.reduce(
-              (sum, row) => sum + (row.payment.direction === "in" ? row.payment.net_amount_cents : -row.payment.net_amount_cents),
-              0,
-            );
-            return (
-              <div key={account.id} className="rounded-lg border bg-card p-4">
-                <p className="text-sm font-medium">{account.name}</p>
-                <p className="mt-3 text-2xl font-semibold">{formatCurrencyBRL(account.current_balance_cents)}</p>
-                <p className="mt-1 text-xs text-muted-foreground">Movimento no filtro: {formatCurrencyBRL(periodNet)}</p>
-              </div>
-            );
-          })}
+        {data.accounts.filter((account) => activeAccountIds.includes(account.id)).map((account) => {
+          const accountRows = rows.filter(({ payment }) => payment.account_id === account.id);
+          const periodNet = accountRows.reduce((sum, row) => sum + (row.payment.direction === "in" ? row.payment.net_amount_cents : -row.payment.net_amount_cents), 0);
+          return <div key={account.id} className="rounded-lg border bg-card p-4"><p className="text-sm font-medium">{account.name}</p><p className="mt-3 text-2xl font-semibold">{formatCurrencyBRL(account.current_balance_cents)}</p><p className="mt-1 text-xs text-muted-foreground">Movimento no filtro: {formatCurrencyBRL(periodNet)}</p></div>;
+        })}
       </div>
 
-      <section className="rounded-lg border bg-card">
-        <div className="flex items-center gap-3 border-b p-4">
-          <BarChart3 className="size-5 text-primary" />
-          <div>
-            <p className="font-medium">Movimentos financeiros</p>
-            <p className="text-sm text-muted-foreground">
-              Cada registro aparece em coluna própria, com status de conciliação e responsável pelo fechamento.
-            </p>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-sm">
-            <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-medium">Data</th>
-                <th className="px-4 py-3 font-medium">Conta</th>
-                <th className="px-4 py-3 font-medium">Tipo</th>
-                <th className="px-4 py-3 font-medium">Lançamento</th>
-                <th className="px-4 py-3 text-right font-medium">Bruto</th>
-                <th className="px-4 py-3 text-right font-medium">Taxa</th>
-                <th className="px-4 py-3 text-right font-medium">Líquido</th>
-                <th className="px-4 py-3 font-medium">Conciliação</th>
-                <th className="px-4 py-3 font-medium">Responsável</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length ? (
-                rows.slice(0, 120).map(({ entry, payment, account, reconciliation }) => (
-                  <tr key={payment.id} className="border-t">
-                    <td className="px-4 py-3">{formatDate(payment.paid_at)}</td>
-                    <td className="px-4 py-3">{account?.name ?? "Sem conta"}</td>
-                    <td className="px-4 py-3">
-                      <Badge className={payment.direction === "in" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}>
-                        {payment.direction === "in" ? "Entrada" : "Saída"}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium">{entry.description}</p>
-                      <p className="text-xs text-muted-foreground">{entry.patient?.social_name || entry.patient?.full_name || entry.vendor?.name || "Sem vinculação"}</p>
-                    </td>
-                    <td className="px-4 py-3 text-right">{formatCurrencyBRL(payment.amount_cents)}</td>
-                    <td className="px-4 py-3 text-right">{formatCurrencyBRL(payment.fee_cents)}</td>
-                    <td className="px-4 py-3 text-right font-medium">{formatCurrencyBRL(payment.net_amount_cents)}</td>
-                    <td className="px-4 py-3">
-                      <Badge className={payment.reconciliation_id ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground"}>
-                        {payment.reconciliation_id ? "Conciliado" : "Pendente"}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3">{reconciliation?.closed_by_profile?.full_name ?? "-"}</td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td className="px-4 py-8 text-center text-muted-foreground" colSpan={9}>
-                    Nenhum movimento encontrado para os filtros selecionados.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <MovementTable rows={rows} />
 
       <section className="rounded-lg border bg-card p-4">
-        <div className="flex items-center justify-between gap-3 border-b pb-3">
-          <div>
-            <p className="font-medium">Histórico de conciliações</p>
-            <p className="text-sm text-muted-foreground">Fechamentos por período, conta, responsável e status.</p>
-          </div>
-        </div>
+        <div className="flex items-center justify-between gap-3 border-b pb-3"><div><p className="font-medium">Historico de conciliacoes</p><p className="text-sm text-muted-foreground">Fechamentos por periodo, conta, responsavel e status.</p></div></div>
         <div className="mt-3 grid gap-2">
-          {data.reconciliations.length ? (
-            data.reconciliations.slice(0, 12).map((reconciliation) => (
-              <article key={reconciliation.id} className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[1fr_auto] lg:items-center">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium">{reconciliation.account?.name ?? "Conta"}</p>
-                    <Badge className={reconciliation.status === "closed" ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground"}>
-                      {reconciliation.status === "closed" ? "Fechada" : "Reaberta"}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {formatDate(reconciliation.period_start)} até {formatDate(reconciliation.period_end)} | saldo {formatCurrencyBRL(reconciliation.bank_balance_cents)}
-                    {" | "}fechada por {reconciliation.closed_by_profile?.full_name ?? "usuário não identificado"}
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={reconciliation.status !== "closed" || !data.access.canApprove}
-                  onClick={() => setReversing(reconciliation)}
-                >
-                  <RotateCcw />
-                  Reabrir
-                </Button>
-              </article>
-            ))
-          ) : (
-            <EmptyState title="Nenhuma conciliação fechada" description="Feche uma conciliação bancária para travar os movimentos conferidos." />
-          )}
+          {data.reconciliations.length ? data.reconciliations.slice(0, 12).map((reconciliation) => (
+            <article key={reconciliation.id} className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[1fr_auto] lg:items-center">
+              <div><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{reconciliation.account?.name ?? "Conta"}</p><Badge className={reconciliation.status === "closed" ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground"}>{reconciliation.status === "closed" ? "Fechada" : "Reaberta"}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{formatDate(reconciliation.period_start)} ate {formatDate(reconciliation.period_end)} | saldo {formatCurrencyBRL(reconciliation.bank_balance_cents)}{" | "}fechada por {reconciliation.closed_by_profile?.full_name ?? "usuario nao identificado"}</p></div>
+              <div className="flex flex-wrap gap-2 lg:justify-end"><Button size="sm" variant="outline" onClick={() => setDetailing(reconciliation)}><Eye />Detalhar</Button><Button size="sm" variant="outline" disabled={reconciliation.status !== "closed" || !data.access.canApprove} onClick={() => setReversing(reconciliation)}><RotateCcw />Reabrir</Button></div>
+            </article>
+          )) : <EmptyState title="Nenhuma conciliacao fechada" description="Feche uma conciliacao bancaria para travar os movimentos conferidos." />}
         </div>
       </section>
 
-      <Modal open={creating} onOpenChange={setCreating} title="Fechar conciliação bancária" className="max-w-4xl">
-        <ReconciliationForm accounts={data.accounts} onCompleted={() => setCreating(false)} />
-      </Modal>
-      <Modal
-        open={Boolean(reversing)}
-        onOpenChange={(open) => {
-          if (!open) setReversing(null);
-        }}
-        title="Reabrir conciliação"
-        description="Use somente para correção auditada de movimentos já conferidos."
-        className="max-w-lg"
-      >
-        {reversing ? <ReverseReconciliationForm reconciliation={reversing} onCompleted={() => setReversing(null)} /> : null}
-      </Modal>
+      <Modal open={filtersOpen} onOpenChange={setFiltersOpen} title="Filtros rapidos" className="max-w-2xl"><QuickReconciliationFilters accounts={data.accounts} range={range} selectedAccounts={selectedAccounts} onApply={(nextRange, nextAccounts) => { setRange(nextRange); setSelectedAccounts(nextAccounts); setFiltersOpen(false); }} /></Modal>
+      <Modal open={creating} onOpenChange={setCreating} title="Fechar conciliacao bancaria" className="max-w-4xl"><ReconciliationForm accounts={data.accounts} onCompleted={() => setCreating(false)} /></Modal>
+      <Modal open={reportOpen} onOpenChange={setReportOpen} title="Relatorio de movimentos" className="max-w-4xl"><MovementReportForm accounts={data.accounts} onCompleted={() => setReportOpen(false)} /></Modal>
+      <Modal open={Boolean(detailing)} onOpenChange={(open) => { if (!open) setDetailing(null); }} title="Detalhes da conciliacao" description="Resumo somente para consulta. Nenhum dado pode ser alterado aqui." className="max-w-4xl">{detailing ? <ReconciliationDetail reconciliation={detailing} rows={data.payments.filter((payment) => payment.reconciliation_id === detailing.id).length} /> : null}</Modal>
+      <Modal open={Boolean(reversing)} onOpenChange={(open) => { if (!open) setReversing(null); }} title="Reabrir conciliacao" description="Use somente para correcao auditada de movimentos ja conferidos." className="max-w-lg">{reversing ? <ReverseReconciliationForm reconciliation={reversing} onCompleted={() => setReversing(null)} /> : null}</Modal>
     </div>
   );
+}
+
+function MovementTable({ rows }: { rows: MovementRow[] }) {
+  return <section className="rounded-lg border bg-card"><div className="flex items-center gap-3 border-b p-4"><BarChart3 className="size-5 text-primary" /><div><p className="font-medium">Movimentos financeiros</p><p className="text-sm text-muted-foreground">Cada registro aparece em coluna propria, com status de conciliacao e responsavel pelo fechamento.</p></div></div><div className="overflow-x-auto"><table className="w-full min-w-[980px] text-sm"><thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-4 py-3 font-medium">Data</th><th className="px-4 py-3 font-medium">Conta</th><th className="px-4 py-3 font-medium">Tipo</th><th className="px-4 py-3 font-medium">Lancamento</th><th className="px-4 py-3 text-right font-medium">Bruto</th><th className="px-4 py-3 text-right font-medium">Taxa</th><th className="px-4 py-3 text-right font-medium">Liquido</th><th className="px-4 py-3 font-medium">Conciliacao</th><th className="px-4 py-3 font-medium">Responsavel</th></tr></thead><tbody>{rows.length ? rows.slice(0, 120).map(({ entry, payment, account, reconciliation }) => <tr key={payment.id} className="border-t"><td className="px-4 py-3">{formatDate(payment.paid_at)}</td><td className="px-4 py-3">{account?.name ?? "Sem conta"}</td><td className="px-4 py-3"><Badge className={payment.direction === "in" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}>{payment.direction === "in" ? "Entrada" : "Saida"}</Badge></td><td className="px-4 py-3"><p className="font-medium">{entry.description}</p><p className="text-xs text-muted-foreground">{entry.patient?.social_name || entry.patient?.full_name || entry.vendor?.name || "Sem vinculacao"}</p></td><td className="px-4 py-3 text-right">{formatCurrencyBRL(payment.amount_cents)}</td><td className="px-4 py-3 text-right">{formatCurrencyBRL(payment.fee_cents)}</td><td className="px-4 py-3 text-right font-medium">{formatCurrencyBRL(payment.net_amount_cents)}</td><td className="px-4 py-3"><Badge className={payment.reconciliation_id ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground"}>{payment.reconciliation_id ? "Conciliado" : "Pendente"}</Badge></td><td className="px-4 py-3">{reconciliation?.closed_by_profile?.full_name ?? "-"}</td></tr>) : <tr><td className="px-4 py-8 text-center text-muted-foreground" colSpan={9}>Nenhum movimento encontrado para os filtros selecionados.</td></tr>}</tbody></table></div></section>;
+}
+
+function QuickReconciliationFilters({ accounts, range, selectedAccounts, onApply }: { accounts: FinancialWorkspaceData["accounts"]; range: ReconciliationRange; selectedAccounts: string[]; onApply: (range: ReconciliationRange, accounts: string[]) => void; }) {
+  const [draftRange, setDraftRange] = useState(range);
+  const [draftAccounts, setDraftAccounts] = useState(selectedAccounts);
+  function toggle(accountId: string) { setDraftAccounts((current) => current.includes(accountId) ? current.filter((id) => id !== accountId) : [...current, accountId]); }
+  return <div className="grid gap-4"><div className="grid gap-2"><p className="text-sm font-medium">Periodo</p><div className="flex rounded-md border bg-background p-1">{[["today", "Hoje"], ["week", "Semana"], ["month", "Mes"]].map(([key, label]) => <Button key={key} size="sm" variant={draftRange === key ? "secondary" : "ghost"} onClick={() => setDraftRange(key as ReconciliationRange)}>{label}</Button>)}</div></div><div className="grid gap-2"><p className="text-sm font-medium">Contas exibidas</p><div className="grid gap-2 sm:grid-cols-2">{accounts.map((account) => <label key={account.id} className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-2 text-xs"><input type="checkbox" className="size-3.5" checked={!draftAccounts.length || draftAccounts.includes(account.id)} onChange={() => toggle(account.id)} /><span className="truncate">{account.name}</span></label>)}</div></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => onApply(draftRange, [])}>Todas as contas</Button><Button onClick={() => onApply(draftRange, draftAccounts)}>Aplicar filtros</Button></div></div>;
+}
+
+function MovementReportForm({ accounts, onCompleted }: { accounts: FinancialWorkspaceData["accounts"]; onCompleted: () => void }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const weekStart = getRangeStart("week").toISOString().slice(0, 10);
+  function submit(formData: FormData) { const params = new URLSearchParams(); for (const key of ["date_from", "date_to", "reconciled", "account_id", "min_amount", "max_amount"] as const) { const value = String(formData.get(key) ?? ""); if (value && value !== "all") params.set(key, value); } params.set("include_in", formData.get("include_in") ? "1" : "0"); params.set("include_out", formData.get("include_out") ? "1" : "0"); if (formData.get("save_filter")) localStorage.setItem("financial-movement-report-filter", params.toString()); window.open("/api/financeiro/movimentos?" + params.toString(), "_blank"); onCompleted(); }
+  return <form action={submit} className="grid gap-4"><div className="grid gap-4 lg:grid-cols-2"><label className="grid gap-2 text-sm font-medium">Data inicial<input name="date_from" type="date" defaultValue={weekStart} className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring" /></label><label className="grid gap-2 text-sm font-medium">Data final<input name="date_to" type="date" defaultValue={today} className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring" /></label><label className="grid gap-2 text-sm font-medium">Conciliado<Select name="reconciled" defaultValue="all"><option value="all">Todos</option><option value="yes">Sim</option><option value="no">Nao</option></Select></label><label className="grid gap-2 text-sm font-medium">Conta<Select name="account_id" defaultValue="all"><option value="all">Todas as contas</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</Select></label><label className="grid gap-2 text-sm font-medium">Valor inicial<input name="min_amount" inputMode="decimal" placeholder="0,00" className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring" /></label><label className="grid gap-2 text-sm font-medium">Valor final<input name="max_amount" inputMode="decimal" placeholder="0,00" className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring" /></label></div><div className="grid gap-2 sm:grid-cols-3"><label className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm"><input type="checkbox" name="include_in" defaultChecked className="size-4" /> Entradas</label><label className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm"><input type="checkbox" name="include_out" defaultChecked className="size-4" /> Saidas</label><label className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm"><input type="checkbox" name="save_filter" className="size-4" /> Salvar filtro</label></div><div className="flex justify-end"><Button><FileText />Gerar relatorio</Button></div></form>;
+}
+
+function ReconciliationDetail({ reconciliation, rows }: { reconciliation: FinancialWorkspaceData["reconciliations"][number]; rows: number }) {
+  return <div className="grid gap-4 text-sm"><div className="grid gap-3 lg:grid-cols-3"><MetricCard label="Conta" value={reconciliation.account?.name ?? "Conta"} description="Conta conciliada" /><MetricCard label="Movimentos" value={String(rows)} description="Pagamentos vinculados" /><MetricCard label="Status" value={reconciliation.status === "closed" ? "Fechada" : "Reaberta"} description="Situacao atual" /></div><div className="grid gap-3 lg:grid-cols-2"><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Periodo</p><p className="font-medium">{formatDate(reconciliation.period_start)} ate {formatDate(reconciliation.period_end)}</p></div><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Fechada por</p><p className="font-medium">{reconciliation.closed_by_profile?.full_name ?? "Usuario nao identificado"}</p></div><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Saldo inicial</p><p className="font-medium">{formatCurrencyBRL(reconciliation.opening_balance_cents)}</p></div><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Saldo bancario final</p><p className="font-medium">{formatCurrencyBRL(reconciliation.bank_balance_cents)}</p></div><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Entradas</p><p className="font-medium">{formatCurrencyBRL(reconciliation.total_in_cents)}</p></div><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Saidas</p><p className="font-medium">{formatCurrencyBRL(reconciliation.total_out_cents)}</p></div></div>{reconciliation.reversal_reason ? <div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Motivo da reabertura</p><p>{reconciliation.reversal_reason}</p></div> : null}{reconciliation.notes ? <div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Observacoes</p><p>{reconciliation.notes}</p></div> : null}</div>;
 }
 
 function CommissionsPanel({ data }: { data: FinancialWorkspaceData }) {

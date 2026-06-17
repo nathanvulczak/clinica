@@ -43,7 +43,7 @@ export default async function FinanceiroPage({
   }
 
   return (
-    <div className="-mx-4 -my-6 min-h-[calc(100vh-4rem)] bg-[linear-gradient(180deg,#f6fbf8_0%,#eef7f2_42%,#f8faf9_100%)] px-4 py-6 lg:-mx-8 lg:px-8">
+    <>
       <PageHeader
         title="Financeiro"
         description="Recebimentos, pagamentos, caixa, conciliação, comissões e documentos financeiros da clínica."
@@ -75,6 +75,6 @@ export default async function FinanceiroPage({
           <FinancialWorkspace data={data} section={section} />
         </div>
       )}
-    </div>
+    </>
   );
 }
