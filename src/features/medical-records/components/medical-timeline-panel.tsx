@@ -1,0 +1,55 @@
+import type { MedicalTimelineEvent } from "@/repositories/medical-records";
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "America/Sao_Paulo",
+  }).format(new Date(value));
+}
+
+function toneClass(tone: MedicalTimelineEvent["tone"]) {
+  if (tone === "success") return "border-emerald-500 bg-emerald-500";
+  if (tone === "warning") return "border-amber-500 bg-amber-500";
+  if (tone === "critical") return "border-destructive bg-destructive";
+  return "border-primary bg-primary";
+}
+
+export function MedicalTimelinePanel({ events }: { events: MedicalTimelineEvent[] }) {
+  return (
+    <section className="grid gap-4 rounded-lg border bg-card p-4">
+      <div>
+        <p className="font-medium">Linha do tempo clinica</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Historico consolidado do atendimento, documentos, anexos, comentarios e correcoes.
+        </p>
+      </div>
+
+      {events.length ? (
+        <div className="grid gap-0">
+          {events.slice(0, 40).map((event, index) => (
+            <div key={`${event.type}-${event.id}`} className="grid grid-cols-[18px_1fr] gap-3">
+              <div className="relative flex justify-center">
+                <span className={`mt-1 size-3 rounded-full border ${toneClass(event.tone)}`} />
+                {index < events.length - 1 ? <span className="absolute top-5 h-full w-px bg-border" /> : null}
+              </div>
+              <div className="pb-4">
+                <div className="rounded-md border bg-background p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium">{event.title}</p>
+                    <p className="text-xs text-muted-foreground">{formatDate(event.occurred_at)}</p>
+                  </div>
+                  <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{event.description}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+          A linha do tempo sera preenchida conforme o atendimento avancar.
+        </div>
+      )}
+    </section>
+  );
+}

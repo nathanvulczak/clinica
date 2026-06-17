@@ -2,13 +2,20 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ClipboardCheck, FileText, Save, Stethoscope, UserRound } from "lucide-react";
+import { ClipboardCheck, FileText, RotateCcw, Save, Sparkles, Stethoscope, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { type MedicalRecordFieldKey } from "@/features/medical-records/config";
-import { MedicalDocumentsPanel } from "@/features/medical-records/components/medical-documents-panel";
 import {
+  EVOLUTION_TEMPLATES,
+  type MedicalRecordFieldKey,
+} from "@/features/medical-records/config";
+import { MedicalDocumentsPanel } from "@/features/medical-records/components/medical-documents-panel";
+import { MedicalAttachmentsPanel } from "@/features/medical-records/components/medical-attachments-panel";
+import { MedicalTimelinePanel } from "@/features/medical-records/components/medical-timeline-panel";
+import {
+  openMedicalRecordCorrectionAction,
   saveMedicalRecordAction,
   type MedicalRecordActionState,
 } from "@/features/medical-records/actions";
@@ -29,12 +36,14 @@ function Field({
   defaultValue,
   required,
   placeholder,
+  disabled,
 }: {
   label: string;
   name: string;
   defaultValue?: string | null;
   required?: boolean;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="grid gap-2 text-sm font-medium">
@@ -47,6 +56,7 @@ function Field({
         defaultValue={defaultValue ?? ""}
         placeholder={placeholder}
         aria-required={required}
+        disabled={disabled}
         className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
     </label>
@@ -59,12 +69,14 @@ function TextArea({
   defaultValue,
   required,
   minHeight = "min-h-28",
+  disabled,
 }: {
   label: string;
   name: string;
   defaultValue?: string | null;
   required?: boolean;
   minHeight?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="grid gap-2 text-sm font-medium">
@@ -76,6 +88,7 @@ function TextArea({
         name={name}
         defaultValue={defaultValue ?? ""}
         aria-required={required}
+        disabled={disabled}
         className={`${minHeight} rounded-md border bg-background px-3 py-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring`}
       />
     </label>
@@ -160,10 +173,18 @@ export function MedicalRecordForm({
   const formRef = useRef<HTMLFormElement>(null);
   const modeRef = useRef<HTMLInputElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correctionMode, setCorrectionMode] = useState(false);
+  const [correctionReason, setCorrectionReason] = useState(record?.correction_reason ?? "");
   const [state, formAction, pending] = useActionState<MedicalRecordActionState, FormData>(
     saveMedicalRecordAction,
     {},
   );
+  const [correctionState, correctionAction, correctionPending] = useActionState<
+    MedicalRecordActionState,
+    FormData
+  >(openMedicalRecordCorrectionAction, {});
   const { toast } = useToast();
   const router = useRouter();
 
@@ -177,13 +198,39 @@ export function MedicalRecordForm({
     }
   }, [router, state.error, state.redirectTo, state.success, toast]);
 
+  useEffect(() => {
+    if (correctionState.error) {
+      toast({ title: "Correcao nao aberta", description: correctionState.error, variant: "destructive" });
+    }
+    if (correctionState.success) {
+      toast({ title: "Correcao formal", description: correctionState.success });
+      setCorrectionMode(true);
+      setCorrectionOpen(false);
+    }
+  }, [correctionState.error, correctionState.success, toast]);
+
   const canComplete = ["ready_for_consultation", "consultation_in_progress"].includes(detail.status);
   const patientName = detail.patient?.social_name || detail.patient?.full_name || "Paciente";
+  const isCompleted = record?.status === "completed";
+  const locked = isCompleted && !correctionMode;
+  const templateTargets = ["history", "physical_exam", "assessment", "plan", "patient_guidance"] as const;
+
+  function applyEvolutionTemplate(template: (typeof EVOLUTION_TEMPLATES)[number]) {
+    const form = formRef.current;
+    if (!form) return;
+    for (const field of templateTargets) {
+      const element = form.elements.namedItem(field) as HTMLTextAreaElement | null;
+      if (element) element.value = template.values[field];
+    }
+    setTemplatesOpen(false);
+    toast({ title: "Modelo aplicado", description: "Revise e ajuste a evolucao antes de salvar." });
+  }
 
   return (
     <form ref={formRef} action={formAction} className="grid gap-5">
       <input type="hidden" name="encounter_id" value={detail.id} />
       <input ref={modeRef} type="hidden" name="mode" value="draft" />
+      <input type="hidden" name="correction_reason" value={correctionReason} />
 
       <section className="grid gap-4 rounded-lg border bg-card p-4">
         <div className="flex items-center gap-3">
@@ -213,14 +260,26 @@ export function MedicalRecordForm({
             Alerta clinico cadastrado: {detail.patient.clinical_alerts}
           </div>
         ) : null}
-        {record?.status === "completed" && preferences.require_correction_reason ? (
-          <TextArea
-            label="Motivo da correcao"
-            name="correction_reason"
-            defaultValue={record.correction_reason}
-            required
-            minHeight="min-h-20"
-          />
+        {locked ? (
+          <div className="grid gap-3 rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground lg:grid-cols-[1fr_auto] lg:items-center">
+            <p>
+              Este prontuario foi concluido e esta bloqueado para edicao direta. Para alterar,
+              abra uma correcao formal com motivo auditavel.
+            </p>
+            <Button type="button" variant="outline" onClick={() => setCorrectionOpen(true)}>
+              <RotateCcw />
+              Corrigir prontuario
+            </Button>
+          </div>
+        ) : correctionMode ? (
+          <label className="grid gap-2 text-sm font-medium">
+            Motivo da correcao formal
+            <textarea
+              value={correctionReason}
+              onChange={(event) => setCorrectionReason(event.target.value)}
+              className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </label>
         ) : null}
       </section>
 
@@ -229,12 +288,16 @@ export function MedicalRecordForm({
       <section className="grid gap-4 rounded-lg border bg-card p-4">
         <div className="flex items-center gap-3">
           <Stethoscope className="size-5 text-primary" />
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="font-medium">Evolucao clinica</p>
             <p className="text-sm text-muted-foreground">
               Registre avaliacao, exame, hipotese diagnostica e conduta.
             </p>
           </div>
+          <Button type="button" variant="outline" size="sm" disabled={locked} onClick={() => setTemplatesOpen(true)}>
+            <Sparkles />
+            Modelos
+          </Button>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           <TextArea
@@ -242,30 +305,35 @@ export function MedicalRecordForm({
             name="chief_complaint"
             defaultValue={record?.chief_complaint ?? detail.nursing_assessment?.chief_complaint}
             required={requiredFields.has("chief_complaint")}
+            disabled={locked}
           />
           <TextArea
             label="Historia clinica"
             name="history"
             defaultValue={record?.history}
             required={requiredFields.has("history")}
+            disabled={locked}
           />
           <TextArea
             label="Exame fisico"
             name="physical_exam"
             defaultValue={record?.physical_exam}
             required={requiredFields.has("physical_exam")}
+            disabled={locked}
           />
           <TextArea
             label="Avaliacao / hipotese"
             name="assessment"
             defaultValue={record?.assessment}
             required={requiredFields.has("assessment")}
+            disabled={locked}
           />
           <Field
             label="Diagnostico"
             name="diagnosis"
             defaultValue={record?.diagnosis}
             required={requiredFields.has("diagnosis")}
+            disabled={locked}
           />
           <Field
             label="CID-10"
@@ -273,6 +341,7 @@ export function MedicalRecordForm({
             defaultValue={record?.cid10}
             required={requiredFields.has("cid10")}
             placeholder="Ex.: J00"
+            disabled={locked}
           />
         </div>
         <TextArea
@@ -280,12 +349,14 @@ export function MedicalRecordForm({
           name="plan"
           defaultValue={record?.plan}
           required={requiredFields.has("plan")}
+          disabled={locked}
         />
         <TextArea
           label="Orientacoes ao paciente"
           name="patient_guidance"
           defaultValue={record?.patient_guidance}
           required={requiredFields.has("patient_guidance")}
+          disabled={locked}
         />
         <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
           <label className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm font-medium">
@@ -294,6 +365,7 @@ export function MedicalRecordForm({
               name="follow_up_required"
               defaultChecked={record?.follow_up_required ?? false}
               className="size-4"
+              disabled={locked}
             />
             Solicitar retorno
           </label>
@@ -302,17 +374,20 @@ export function MedicalRecordForm({
             name="follow_up_notes"
             defaultValue={record?.follow_up_notes}
             required={requiredFields.has("follow_up_notes")}
+            disabled={locked}
           />
         </div>
       </section>
 
       <MedicalDocumentsPanel detail={detail} />
+      <MedicalAttachmentsPanel detail={detail} />
+      <MedicalTimelinePanel events={detail.timeline} />
 
       <div className="sticky bottom-4 z-10 flex flex-wrap justify-end gap-2 rounded-lg border bg-background/95 p-3 shadow-sm backdrop-blur">
         <Button
           type="submit"
           variant="outline"
-          disabled={pending}
+          disabled={pending || locked}
           onClick={() => {
             if (modeRef.current) modeRef.current.value = "draft";
           }}
@@ -341,6 +416,62 @@ export function MedicalRecordForm({
           formRef.current?.requestSubmit();
         }}
       />
+
+      <Modal
+        open={templatesOpen}
+        onOpenChange={setTemplatesOpen}
+        title="Modelos de evolucao"
+        description="Aplique um modelo e ajuste os campos antes de salvar."
+        className="max-w-3xl"
+      >
+        <div className="grid gap-3">
+          {EVOLUTION_TEMPLATES.map((template) => (
+            <article key={template.key} className="rounded-md border bg-background p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-medium">{template.title}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{template.description}</p>
+                </div>
+                <Button type="button" size="sm" onClick={() => applyEvolutionTemplate(template)}>
+                  Aplicar
+                </Button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </Modal>
+
+      <Modal
+        open={correctionOpen}
+        onOpenChange={setCorrectionOpen}
+        title="Abrir correcao formal"
+        description="A justificativa ficara registrada na auditoria e na linha do tempo do prontuario."
+        className="max-w-lg"
+      >
+        <form action={correctionAction} className="grid gap-4">
+          <input type="hidden" name="medical_record_id" value={record?.id ?? ""} />
+          <input type="hidden" name="encounter_id" value={detail.id} />
+          <label className="grid gap-2 text-sm font-medium">
+            Motivo da correcao
+            <textarea
+              name="reason"
+              value={correctionReason}
+              onChange={(event) => setCorrectionReason(event.target.value)}
+              className="min-h-28 rounded-md border bg-background px-3 py-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder="Explique o motivo da alteracao no prontuario concluido."
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setCorrectionOpen(false)}>
+              Cancelar
+            </Button>
+            <Button disabled={correctionPending}>
+              <RotateCcw />
+              {correctionPending ? "Abrindo..." : "Abrir correcao"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </form>
   );
 }

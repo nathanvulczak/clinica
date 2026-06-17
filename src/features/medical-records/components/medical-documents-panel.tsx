@@ -64,7 +64,6 @@ function DocumentForm({
   const [templateKey, setTemplateKey] = useState(document?.template_key ?? "");
   const [title, setTitle] = useState(document?.title ?? "");
   const [content, setContent] = useState(document?.content ?? "");
-  const [actionType, setActionType] = useState<"draft" | "issue">("draft");
   const [state, formAction, pending] = useActionState<MedicalDocumentActionState, FormData>(
     saveMedicalDocumentAction,
     {},
@@ -95,7 +94,6 @@ function DocumentForm({
       <input type="hidden" name="medical_record_id" value={detail.medical_record?.id ?? ""} />
       <input type="hidden" name="document_id" value={document?.id ?? ""} />
       <input type="hidden" name="template_key" value={templateKey} />
-      <input type="hidden" name="action" value={actionType} />
 
       <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
         <label className="grid gap-2 text-sm font-medium">
@@ -145,14 +143,15 @@ function DocumentForm({
           type="submit"
           variant="outline"
           disabled={pending}
-          onClick={() => setActionType("draft")}
+          name="action"
+          value="draft"
         >
           <Save />
-          {pending && actionType === "draft" ? "Salvando..." : "Salvar rascunho"}
+          {pending ? "Salvando..." : "Salvar rascunho"}
         </Button>
-        <Button type="submit" disabled={pending} onClick={() => setActionType("issue")}>
+        <Button type="submit" disabled={pending} name="action" value="issue">
           <FileText />
-          {pending && actionType === "issue" ? "Emitindo..." : "Emitir documento"}
+          {pending ? "Emitindo..." : "Emitir documento"}
         </Button>
       </div>
     </form>
@@ -212,6 +211,7 @@ export function MedicalDocumentsPanel({
   const [editing, setEditing] = useState<MedicalPrescription | null>(null);
   const [deleting, setDeleting] = useState<MedicalPrescription | null>(null);
   const [previewing, setPreviewing] = useState<MedicalPrescription | null>(null);
+  const [printingDocument, setPrintingDocument] = useState<MedicalPrescription | null>(null);
   const [confirmPrint, setConfirmPrint] = useState<"printed" | "exported_pdf" | null>(null);
   const [, startTransition] = useTransition();
   const eventFormRef = useRef<HTMLFormElement>(null);
@@ -238,22 +238,92 @@ export function MedicalDocumentsPanel({
   }, [eventState.success, toast]);
 
   function requestPrint(type: "printed" | "exported_pdf", document: MedicalPrescription) {
-    setPreviewing(document);
+    setPrintingDocument(document);
     setConfirmPrint(type);
   }
 
+  function escapeHtml(value: string) {
+    return value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function openPrintableDocument(document: MedicalPrescription) {
+    const patientName = detail.patient?.social_name || detail.patient?.full_name || "Paciente";
+    const professionalName = detail.professional?.profile?.full_name || "Profissional";
+    const registry = document.professional_registry || registryFromDetail(detail) || "Nao informado";
+    const printable = window.open("", "_blank", "width=900,height=1000");
+    if (!printable) {
+      toast({
+        title: "Impressao bloqueada",
+        description: "Permita pop-ups para abrir a janela de impressao/PDF.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    printable.document.write(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(document.title)}</title>
+    <style>
+      @page { size: A4; margin: 18mm; }
+      * { box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; color: #111827; margin: 0; line-height: 1.55; }
+      header { border-bottom: 1px solid #d1d5db; padding-bottom: 14px; margin-bottom: 24px; }
+      h1 { font-size: 18px; margin: 0 0 8px; }
+      .meta { font-size: 12px; color: #4b5563; }
+      pre { white-space: pre-wrap; font-family: Arial, sans-serif; font-size: 13px; margin: 0; }
+      footer { border-top: 1px solid #d1d5db; margin-top: 36px; padding-top: 16px; font-size: 12px; color: #4b5563; }
+      .signature { margin-top: 48px; text-align: center; }
+      .line { border-top: 1px solid #111827; width: 280px; margin: 0 auto 8px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>${escapeHtml(document.title)}</h1>
+      <div class="meta">Paciente: ${escapeHtml(patientName)}</div>
+      <div class="meta">Data: ${escapeHtml(formatDate(document.updated_at))}</div>
+    </header>
+    <main>
+      <pre>${escapeHtml(document.content)}</pre>
+      <div class="signature">
+        <div class="line"></div>
+        <strong>${escapeHtml(professionalName)}</strong><br />
+        ${escapeHtml(registry)}
+      </div>
+    </main>
+    <footer>
+      Documento emitido pelo CliniCore com rastreabilidade no prontuario do paciente.
+    </footer>
+    <script>
+      window.onload = function () {
+        window.focus();
+        window.print();
+      };
+    </script>
+  </body>
+</html>`);
+    printable.document.close();
+  }
+
   function printCurrentDocument() {
-    if (!previewing || !confirmPrint) return;
+    if (!printingDocument || !confirmPrint) return;
     const form = eventFormRef.current;
     if (form) {
       const eventInput = form.elements.namedItem("event_type") as HTMLInputElement | null;
       const documentInput = form.elements.namedItem("document_id") as HTMLInputElement | null;
       if (eventInput) eventInput.value = confirmPrint;
-      if (documentInput) documentInput.value = previewing.id;
+      if (documentInput) documentInput.value = printingDocument.id;
       startTransition(() => eventAction(new FormData(form)));
     }
-    window.print();
+    openPrintableDocument(printingDocument);
     setConfirmPrint(null);
+    setPrintingDocument(null);
   }
 
   return (

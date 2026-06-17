@@ -82,6 +82,34 @@ const commentSchema = z.object({
   visibility: z.enum(["clinical", "private"]),
 });
 
+const attachmentSchema = z.object({
+  encounter_id: z.string().uuid(),
+  medical_record_id: z.string().uuid().optional().or(z.literal("")).transform((value) => value || null),
+  category: z.enum(["exam", "report", "image", "attachment", "other"]),
+  title: z.string().trim().min(2, "Informe o titulo do anexo.").max(180),
+  description: optionalText(1000),
+});
+
+const deleteAttachmentSchema = z.object({
+  attachment_id: z.string().uuid(),
+  reason: z.string().trim().min(10, "Informe um motivo com pelo menos 10 caracteres.").max(800),
+});
+
+const correctionSchema = z.object({
+  medical_record_id: z.string().uuid(),
+  encounter_id: z.string().uuid(),
+  reason: z.string().trim().min(10, "Informe um motivo com pelo menos 10 caracteres.").max(1000),
+});
+
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const ALLOWED_ATTACHMENT_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/plain",
+]);
+
 async function getContext() {
   const [{ activeClinic }, supabase] = await Promise.all([
     getActiveClinicContext(),
@@ -326,7 +354,7 @@ export async function saveMedicalRecordAction(
     preferences.requireCorrectionReason &&
     !parsed.data.correction_reason
   ) {
-    return { error: "Informe o motivo para corrigir um prontuario ja concluido." };
+    return { error: "Abra o fluxo formal de correcao e informe o motivo antes de alterar um prontuario concluido." };
   }
 
   if (encounter.status === "ready_for_consultation") {
@@ -393,6 +421,18 @@ export async function saveMedicalRecordAction(
     level: parsed.data.mode === "complete" ? "security" : "info",
     notes: "Prontuario registrado com rastreabilidade do atendimento.",
   });
+
+  if (previous?.status === "completed" && parsed.data.correction_reason) {
+    await admin
+      .from("medical_record_correction_requests")
+      .update({
+        status: "applied",
+        applied_at: new Date().toISOString(),
+        updated_by: context.user.id,
+      })
+      .eq("medical_record_id", saved.id)
+      .eq("status", "opened");
+  }
 
   if (parsed.data.mode === "complete") {
     const { error: transitionError } = await transitionEncounter(
@@ -519,6 +559,213 @@ export async function saveMedicalDocumentAction(
 
   revalidateMedicalRecord(encounter.id);
   return { success: parsed.data.action === "issue" ? "Documento emitido." : "Documento salvo." };
+}
+
+export async function uploadMedicalAttachmentAction(
+  _state: MedicalDocumentActionState,
+  formData: FormData,
+): Promise<MedicalDocumentActionState> {
+  const parsed = attachmentSchema.safeParse({
+    encounter_id: formData.get("encounter_id"),
+    medical_record_id: formData.get("medical_record_id"),
+    category: formData.get("category"),
+    title: formData.get("title"),
+    description: formData.get("description"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Anexo invalido." };
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "Selecione um arquivo para anexar." };
+  }
+  if (file.size > MAX_ATTACHMENT_SIZE) {
+    return { error: "O arquivo deve ter no maximo 10 MB." };
+  }
+  if (!ALLOWED_ATTACHMENT_TYPES.has(file.type)) {
+    return { error: "Formato nao permitido. Use PDF, JPG, PNG, WEBP ou TXT." };
+  }
+
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clinica e autentique-se novamente." };
+  if (!context.access.canViewOwn && !context.access.canViewAll) {
+    return { error: "Seu perfil nao possui permissao para anexar documentos clinicos." };
+  }
+
+  const encounter = await resolveEncounterForAction(parsed.data.encounter_id, context.activeClinic.id);
+  if (!encounter) return { error: "Atendimento nao encontrado." };
+  if (!context.access.canViewAll && encounter.professional_member_id !== context.access.currentMemberId) {
+    return { error: "Este atendimento nao esta vinculado ao seu usuario." };
+  }
+
+  const medicalRecordId =
+    parsed.data.medical_record_id ??
+    (await getOrCreateMedicalRecordForDocument({ encounter, userId: context.user.id }));
+  if (!medicalRecordId) return { error: "Nao foi possivel preparar o prontuario para o anexo." };
+
+  const admin = createSupabaseAdminClient();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-120);
+  const filePath = `${context.activeClinic.id}/${encounter.patient_id}/${encounter.id}/${crypto.randomUUID()}-${safeName}`;
+  const { error: uploadError } = await admin.storage
+    .from("clinical-attachments")
+    .upload(filePath, file, {
+      cacheControl: "3600",
+      contentType: file.type,
+      upsert: false,
+    });
+  if (uploadError) return { error: "Nao foi possivel enviar o arquivo." };
+
+  const payload = {
+    clinic_id: context.activeClinic.id,
+    medical_record_id: medicalRecordId,
+    encounter_id: encounter.id,
+    patient_id: encounter.patient_id,
+    professional_member_id: encounter.professional_member_id,
+    category: parsed.data.category,
+    title: parsed.data.title,
+    description: parsed.data.description,
+    file_name: file.name,
+    file_path: filePath,
+    mime_type: file.type,
+    file_size: file.size,
+    created_by: context.user.id,
+    updated_by: context.user.id,
+  };
+
+  const { data, error } = await admin
+    .from("medical_record_attachments")
+    .insert(payload)
+    .select("id")
+    .single<{ id: string }>();
+  if (error || !data) return { error: "Arquivo enviado, mas nao foi possivel registrar o anexo." };
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "medical_attachment_created",
+    module: "medical_records",
+    recordTable: "medical_record_attachments",
+    recordId: data.id,
+    newValues: payload,
+    level: "security",
+    notes: "Anexo/exame vinculado ao prontuario.",
+  });
+
+  revalidateMedicalRecord(encounter.id);
+  return { success: "Anexo registrado no prontuario." };
+}
+
+export async function deleteMedicalAttachmentAction(
+  _state: MedicalDocumentActionState,
+  formData: FormData,
+): Promise<MedicalDocumentActionState> {
+  const parsed = deleteAttachmentSchema.safeParse({
+    attachment_id: formData.get("attachment_id"),
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Exclusao invalida." };
+
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clinica e autentique-se novamente." };
+  const admin = createSupabaseAdminClient();
+  const { data: attachment } = await admin
+    .from("medical_record_attachments")
+    .select("*")
+    .eq("id", parsed.data.attachment_id)
+    .eq("clinic_id", context.activeClinic.id)
+    .maybeSingle();
+  if (!attachment) return { error: "Anexo nao encontrado." };
+  if (!context.access.canViewAll && attachment.professional_member_id !== context.access.currentMemberId) {
+    return { error: "Este anexo nao esta vinculado ao seu usuario." };
+  }
+
+  const payload = {
+    status: "deleted",
+    deleted_at: new Date().toISOString(),
+    deleted_reason: parsed.data.reason,
+    deleted_by: context.user.id,
+    updated_by: context.user.id,
+  };
+  const { error } = await admin
+    .from("medical_record_attachments")
+    .update(payload)
+    .eq("id", attachment.id);
+  if (error) return { error: "Nao foi possivel excluir o anexo." };
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "medical_attachment_deleted",
+    module: "medical_records",
+    recordTable: "medical_record_attachments",
+    recordId: attachment.id,
+    oldValues: attachment,
+    newValues: payload,
+    level: "security",
+    notes: "Anexo clinico excluido logicamente com motivo preservado.",
+  });
+
+  revalidateMedicalRecord(attachment.encounter_id);
+  return { success: "Anexo removido do uso operacional e preservado no historico." };
+}
+
+export async function openMedicalRecordCorrectionAction(
+  _state: MedicalRecordActionState,
+  formData: FormData,
+): Promise<MedicalRecordActionState> {
+  const parsed = correctionSchema.safeParse({
+    medical_record_id: formData.get("medical_record_id"),
+    encounter_id: formData.get("encounter_id"),
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Correcao invalida." };
+
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clinica e autentique-se novamente." };
+  const admin = createSupabaseAdminClient();
+  const { data: record } = await admin
+    .from("medical_records")
+    .select("*")
+    .eq("id", parsed.data.medical_record_id)
+    .eq("clinic_id", context.activeClinic.id)
+    .maybeSingle();
+  if (!record) return { error: "Prontuario nao encontrado." };
+  if (record.status !== "completed") return { error: "A correcao formal e aplicada apenas a prontuarios concluidos." };
+  if (!context.access.canViewAll && record.professional_member_id !== context.access.currentMemberId) {
+    return { error: "Este prontuario nao esta vinculado ao seu usuario." };
+  }
+
+  const payload = {
+    clinic_id: context.activeClinic.id,
+    medical_record_id: record.id,
+    encounter_id: record.encounter_id,
+    patient_id: record.patient_id,
+    professional_member_id: record.professional_member_id,
+    reason: parsed.data.reason,
+    status: "opened",
+    created_by: context.user.id,
+    updated_by: context.user.id,
+  };
+  const { data, error } = await admin
+    .from("medical_record_correction_requests")
+    .insert(payload)
+    .select("id")
+    .single<{ id: string }>();
+  if (error || !data) return { error: "Nao foi possivel abrir a correcao formal." };
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "medical_record_correction_opened",
+    module: "medical_records",
+    recordTable: "medical_record_correction_requests",
+    recordId: data.id,
+    newValues: payload,
+    level: "security",
+    notes: "Fluxo formal de correcao do prontuario aberto.",
+  });
+
+  revalidateMedicalRecord(record.encounter_id);
+  return { success: "Correcao formal aberta. Agora edite e salve a justificativa junto ao prontuario." };
 }
 
 export async function deleteMedicalDocumentAction(

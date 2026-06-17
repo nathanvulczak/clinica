@@ -80,3 +80,59 @@ Profissional: {{professional_name}}`,
 export type PrescriptionTemplateKey = (typeof PRESCRIPTION_TEMPLATES)[number]["key"];
 
 export const MEDICAL_RECORD_LGPD_ACK_TEXT = `Estou ciente de que prontuarios, evolucoes, prescricoes, pre-consultas, exames, anexos e demais registros assistenciais podem conter dados pessoais sensiveis de saude. Comprometo-me a acessar somente registros necessarios para minha atividade profissional, manter sigilo, nao compartilhar credenciais, nao copiar dados sem finalidade assistencial ou administrativa legitima, registrar informacoes verdadeiras e pertinentes, e comunicar imediatamente qualquer acesso indevido, incidente ou erro de lancamento. Reconheco que minhas acoes ficam registradas em auditoria, com identificacao de usuario, data, horario e contexto da clinica, para seguranca, rastreabilidade e conformidade com a LGPD.`;
+
+export const EVOLUTION_TEMPLATES = [
+  {
+    key: "consulta_clinica_inicial",
+    title: "Consulta clinica inicial",
+    description: "Estrutura ampla para primeira avaliacao.",
+    values: {
+      history:
+        "Paciente comparece para avaliacao inicial. Refere quadro iniciado ha [tempo], com [sintomas principais]. Nega/relata alergias, comorbidades e medicacoes conforme registrado.",
+      physical_exam:
+        "Paciente em bom estado geral, orientado, hidratado, eupneico. Exame fisico direcionado sem/ com alteracoes relevantes: [descrever achados].",
+      assessment:
+        "Quadro compativel com [hipotese diagnostica]. Considerar diagnosticos diferenciais: [listar se aplicavel].",
+      plan:
+        "Orientado sobre sinais de alerta. Prescritas condutas conforme necessidade clinica. Solicitados exames/encaminhamentos quando indicados. Programar retorno conforme evolucao.",
+      patient_guidance:
+        "Manter cuidados orientados, observar sinais de piora e retornar/procurar atendimento se houver agravamento, febre persistente, dor intensa ou novos sintomas.",
+    },
+  },
+  {
+    key: "retorno_reavaliacao",
+    title: "Retorno / reavaliacao",
+    description: "Modelo para acompanhamento de evolucao.",
+    values: {
+      history:
+        "Paciente retorna para reavaliacao. Relata evolucao desde a ultima consulta: [melhora/piora/estavel]. Adesao as orientacoes: [descrever].",
+      physical_exam:
+        "Reavaliacao clinica direcionada. Achados atuais: [descrever]. Comparacao com consulta anterior: [descrever].",
+      assessment:
+        "Evolucao [favoravel/desfavoravel/estavel] de [condicao]. Necessidade de ajuste de conduta: [sim/nao].",
+      plan:
+        "Manter/ajustar tratamento conforme evolucao. Reforcadas orientacoes e definido plano de acompanhamento.",
+      patient_guidance:
+        "Seguir plano atualizado. Retornar em [prazo] ou antes se sinais de alerta.",
+    },
+  },
+  {
+    key: "teleorientacao",
+    title: "Teleorientacao / orientacao breve",
+    description: "Modelo para orientacoes clinicas objetivas.",
+    values: {
+      history:
+        "Atendimento realizado para orientacao breve. Queixa/duvida principal: [descrever]. Dados relevantes informados pelo paciente: [descrever].",
+      physical_exam:
+        "Exame fisico nao realizado/limitado pela modalidade. Avaliacao baseada em relato e informacoes disponiveis.",
+      assessment:
+        "Orientacao compativel com quadro relatado, sem sinais de alarme informados no momento / com sinais de alerta orientando atendimento presencial.",
+      plan:
+        "Fornecidas orientacoes, sinais de alerta e recomendacao de atendimento presencial se houver piora ou persistencia.",
+      patient_guidance:
+        "Procurar atendimento presencial imediatamente em caso de piora, falta de ar, dor intensa, febre persistente, sangramento, alteracao neurologica ou outros sinais de alerta.",
+    },
+  },
+] as const;
+
+export type EvolutionTemplateKey = (typeof EVOLUTION_TEMPLATES)[number]["key"];
