@@ -137,6 +137,7 @@ export const ROLE_PERMISSION_PRESETS: Record<AppRole, PermissionKey[]> = {
     "schedule:edit",
     "schedule:manage",
     "schedule:export",
+    "financial:create",
   ],
   financial: [
     "billing:view",

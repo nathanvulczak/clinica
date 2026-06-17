@@ -374,3 +374,152 @@ export type AppointmentWorkflowEvent = {
   notes: string | null;
   created_at: string;
 };
+
+export type FinancialAccountType = "cash" | "checking" | "savings" | "digital_wallet" | "card_processor";
+export type FinancialMethodType =
+  | "cash"
+  | "pix"
+  | "debit_card"
+  | "credit_card"
+  | "bank_transfer"
+  | "boleto"
+  | "health_plan"
+  | "other";
+export type FinancialEntryType = "receivable" | "payable";
+export type FinancialEntryStatus = "pending" | "partial" | "paid" | "overdue" | "cancelled" | "refunded";
+export type FinancialPaymentStatus = "confirmed" | "reversed";
+
+export type FinancialPreferences = {
+  clinic_id: string;
+  allow_reception_checkout: boolean;
+  allow_professional_checkout: boolean;
+  require_payment_method_on_checkout: boolean;
+  default_receivable_due_days: number;
+  default_late_fee_cents: number;
+  default_monthly_interest_bps: number;
+  receipt_footer: string | null;
+};
+
+export type FinancialAccount = {
+  id: string;
+  clinic_id: string;
+  name: string;
+  account_type: FinancialAccountType;
+  bank_name: string | null;
+  agency: string | null;
+  account_number: string | null;
+  pix_key: string | null;
+  opening_balance_cents: number;
+  current_balance_cents: number;
+  active: boolean;
+  notes: string | null;
+};
+
+export type FinancialPaymentMethod = {
+  id: string;
+  clinic_id: string;
+  name: string;
+  method_type: FinancialMethodType;
+  requires_card_machine: boolean;
+  settlement_days: number;
+  active: boolean;
+};
+
+export type FinancialCardMachine = {
+  id: string;
+  clinic_id: string;
+  account_id: string | null;
+  name: string;
+  provider: string | null;
+  debit_fee_bps: number;
+  credit_fee_bps: number;
+  credit_installment_fee_bps: number;
+  debit_settlement_days: number;
+  credit_settlement_days: number;
+  active: boolean;
+  notes: string | null;
+};
+
+export type FinancialCategory = {
+  id: string;
+  clinic_id: string;
+  name: string;
+  direction: "income" | "expense";
+  parent_id: string | null;
+  active: boolean;
+};
+
+export type FinancialVendor = {
+  id: string;
+  clinic_id: string;
+  name: string;
+  document: string | null;
+  email: string | null;
+  phone: string | null;
+  vendor_type: "supplier" | "laboratory" | "professional" | "tax" | "other";
+  active: boolean;
+  notes: string | null;
+};
+
+export type FinancialEntry = {
+  id: string;
+  clinic_id: string;
+  entry_type: FinancialEntryType;
+  origin: "appointment" | "manual" | "subscription" | "commission" | "adjustment";
+  status: FinancialEntryStatus;
+  patient_id: string | null;
+  vendor_id: string | null;
+  appointment_id: string | null;
+  encounter_id: string | null;
+  medical_record_id: string | null;
+  professional_member_id: string | null;
+  category_id: string | null;
+  description: string;
+  document_number: string | null;
+  issue_date: string;
+  due_date: string;
+  competence_date: string;
+  amount_cents: number;
+  discount_cents: number;
+  addition_cents: number;
+  paid_cents: number;
+  notes: string | null;
+  cancelled_reason: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialPayment = {
+  id: string;
+  clinic_id: string;
+  entry_id: string;
+  account_id: string | null;
+  payment_method_id: string | null;
+  card_machine_id: string | null;
+  direction: "in" | "out";
+  status: FinancialPaymentStatus;
+  amount_cents: number;
+  fee_cents: number;
+  net_amount_cents: number;
+  paid_at: string;
+  expected_settlement_date: string | null;
+  reconciled_at: string | null;
+  notes: string | null;
+  reversal_reason: string | null;
+  reversed_at: string | null;
+  created_at: string;
+};
+
+export type FinancialReceipt = {
+  id: string;
+  clinic_id: string;
+  entry_id: string;
+  patient_id: string | null;
+  receipt_type: "payment" | "payment_acknowledgement";
+  title: string;
+  content: string;
+  issued_at: string;
+  printed_at: string | null;
+  exported_at: string | null;
+};

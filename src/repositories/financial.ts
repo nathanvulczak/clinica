@@ -1,0 +1,447 @@
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getClinicAuthorization } from "@/services/authorization/clinic-access";
+import type {
+  AppRole,
+  FinancialAccount,
+  FinancialCardMachine,
+  FinancialCategory,
+  FinancialEntry,
+  FinancialPayment,
+  FinancialPaymentMethod,
+  FinancialPreferences,
+  FinancialReceipt,
+  FinancialVendor,
+  PatientSummary,
+} from "@/types/domain";
+
+export type FinancialAccess = {
+  canView: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canManage: boolean;
+  canExport: boolean;
+  canChargeEncounter: boolean;
+  currentMemberId: string | null;
+  currentRole: AppRole | null;
+  userId: string | null;
+};
+
+export type FinancialEntryWithRelations = FinancialEntry & {
+  patient: Pick<PatientSummary, "id" | "full_name" | "social_name" | "phone"> | null;
+  vendor: Pick<FinancialVendor, "id" | "name"> | null;
+  category: Pick<FinancialCategory, "id" | "name" | "direction"> | null;
+  professional: { id: string; profile: { full_name: string } | null } | null;
+  payments: FinancialPayment[];
+  receipts: FinancialReceipt[];
+};
+
+export type FinancialWorkspace = {
+  access: FinancialAccess;
+  preferences: FinancialPreferences | null;
+  accounts: FinancialAccount[];
+  paymentMethods: FinancialPaymentMethod[];
+  cardMachines: FinancialCardMachine[];
+  categories: FinancialCategory[];
+  vendors: FinancialVendor[];
+  entries: FinancialEntryWithRelations[];
+  payments: FinancialPayment[];
+  pendingEncounterCharges: PendingEncounterCharge[];
+  metrics: FinancialMetrics;
+};
+
+export type PendingEncounterCharge = {
+  encounter_id: string;
+  appointment_id: string;
+  patient_id: string;
+  professional_member_id: string;
+  consultation_completed_at: string | null;
+  patient_name: string;
+  professional_name: string;
+  service_name: string;
+  suggested_amount_cents: number;
+};
+
+export type FinancialMetrics = {
+  receivableOpenCents: number;
+  receivablePaidCents: number;
+  payableOpenCents: number;
+  payablePaidCents: number;
+  overdueCents: number;
+  netCashCents: number;
+};
+
+export type FinancialReceiptDetail = {
+  receipt: FinancialReceipt;
+  entry: FinancialEntryWithRelations;
+  clinic: { trade_name: string; legal_name: string; document: string | null; phone: string | null; email: string | null } | null;
+};
+
+const defaultPreferences = (clinicId: string): FinancialPreferences => ({
+  clinic_id: clinicId,
+  allow_reception_checkout: true,
+  allow_professional_checkout: false,
+  require_payment_method_on_checkout: true,
+  default_receivable_due_days: 0,
+  default_late_fee_cents: 0,
+  default_monthly_interest_bps: 0,
+  receipt_footer: null,
+});
+
+export async function getFinancialAccess(clinicId?: string | null): Promise<FinancialAccess> {
+  const authorization = await getClinicAuthorization(clinicId ?? undefined);
+  const canCreate = authorization.can("financial", "create");
+
+  return {
+    canView: authorization.can("financial", "view"),
+    canCreate,
+    canEdit: authorization.can("financial", "edit"),
+    canManage: authorization.can("financial", "manage"),
+    canExport: authorization.can("financial", "export"),
+    canChargeEncounter: canCreate || authorization.can("schedule", "manage"),
+    currentMemberId: authorization.memberId,
+    currentRole: authorization.role,
+    userId: authorization.userId,
+  };
+}
+
+export async function getFinancialPreferences(clinicId?: string | null) {
+  if (!clinicId) return null;
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin
+    .from("financial_preferences")
+    .select(
+      "clinic_id, allow_reception_checkout, allow_professional_checkout, require_payment_method_on_checkout, default_receivable_due_days, default_late_fee_cents, default_monthly_interest_bps, receipt_footer",
+    )
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .maybeSingle<FinancialPreferences>();
+
+  return data ?? defaultPreferences(clinicId);
+}
+
+export async function getFinancialWorkspace(
+  clinicId?: string | null,
+): Promise<FinancialWorkspace> {
+  const access = await getFinancialAccess(clinicId);
+  const empty: FinancialWorkspace = {
+    access,
+    preferences: clinicId ? defaultPreferences(clinicId) : null,
+    accounts: [],
+    paymentMethods: [],
+    cardMachines: [],
+    categories: [],
+    vendors: [],
+    entries: [],
+    payments: [],
+    pendingEncounterCharges: [],
+    metrics: emptyMetrics(),
+  };
+
+  if (!clinicId || (!access.canView && !access.canChargeEncounter)) {
+    return empty;
+  }
+
+  const admin = createSupabaseAdminClient();
+  const [
+    preferences,
+    { data: accounts },
+    { data: paymentMethods },
+    { data: cardMachines },
+    { data: categories },
+    { data: vendors },
+    entries,
+    pendingEncounterCharges,
+  ] = await Promise.all([
+    getFinancialPreferences(clinicId),
+    admin
+      .from("financial_accounts")
+      .select("id, clinic_id, name, account_type, bank_name, agency, account_number, pix_key, opening_balance_cents, current_balance_cents, active, notes")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .order("name"),
+    admin
+      .from("financial_payment_methods")
+      .select("id, clinic_id, name, method_type, requires_card_machine, settlement_days, active")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .order("name"),
+    admin
+      .from("financial_card_machines")
+      .select("id, clinic_id, account_id, name, provider, debit_fee_bps, credit_fee_bps, credit_installment_fee_bps, debit_settlement_days, credit_settlement_days, active, notes")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .order("name"),
+    admin
+      .from("financial_categories")
+      .select("id, clinic_id, name, direction, parent_id, active")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .order("name"),
+    admin
+      .from("financial_vendors")
+      .select("id, clinic_id, name, document, email, phone, vendor_type, active, notes")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .order("name"),
+    access.canView ? listFinancialEntries(clinicId) : Promise.resolve([]),
+    listPendingEncounterCharges(clinicId, access),
+  ]);
+
+  const payments = entries.flatMap((entry) => entry.payments);
+
+  return {
+    access,
+    preferences,
+    accounts: (accounts ?? []) as FinancialAccount[],
+    paymentMethods: (paymentMethods ?? []) as FinancialPaymentMethod[],
+    cardMachines: (cardMachines ?? []) as FinancialCardMachine[],
+    categories: (categories ?? []) as FinancialCategory[],
+    vendors: (vendors ?? []) as FinancialVendor[],
+    entries,
+    payments,
+    pendingEncounterCharges,
+    metrics: calculateMetrics(entries),
+  };
+}
+
+export async function listFinancialEntries(clinicId: string): Promise<FinancialEntryWithRelations[]> {
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin
+    .from("financial_entries")
+    .select("*")
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .order("due_date", { ascending: true })
+    .limit(250);
+
+  if (error || !data?.length) return [];
+
+  const entries = data as FinancialEntry[];
+  const patientIds = [...new Set(entries.map((entry) => entry.patient_id).filter(Boolean))] as string[];
+  const vendorIds = [...new Set(entries.map((entry) => entry.vendor_id).filter(Boolean))] as string[];
+  const categoryIds = [...new Set(entries.map((entry) => entry.category_id).filter(Boolean))] as string[];
+  const professionalIds = [...new Set(entries.map((entry) => entry.professional_member_id).filter(Boolean))] as string[];
+  const entryIds = entries.map((entry) => entry.id);
+
+  const [{ data: patients }, { data: vendors }, { data: categories }, { data: professionals }, { data: payments }, { data: receipts }] =
+    await Promise.all([
+      patientIds.length
+        ? admin.from("patients").select("id, full_name, social_name, phone").in("id", patientIds)
+        : Promise.resolve({ data: [] }),
+      vendorIds.length
+        ? admin.from("financial_vendors").select("id, name").in("id", vendorIds)
+        : Promise.resolve({ data: [] }),
+      categoryIds.length
+        ? admin.from("financial_categories").select("id, name, direction").in("id", categoryIds)
+        : Promise.resolve({ data: [] }),
+      professionalIds.length
+        ? admin
+            .from("clinic_members")
+            .select("id, profile:profiles!clinic_members_user_id_fkey(full_name)")
+            .in("id", professionalIds)
+        : Promise.resolve({ data: [] }),
+      admin
+        .from("financial_payments")
+        .select("*")
+        .in("entry_id", entryIds)
+        .is("deleted_at", null)
+        .order("paid_at", { ascending: false }),
+      admin
+        .from("financial_receipts")
+        .select("id, clinic_id, entry_id, patient_id, receipt_type, title, content, issued_at, printed_at, exported_at")
+        .in("entry_id", entryIds)
+        .is("deleted_at", null)
+        .order("issued_at", { ascending: false }),
+    ]);
+
+  const patientMap = new Map((patients ?? []).map((item) => [item.id, item]));
+  const vendorMap = new Map((vendors ?? []).map((item) => [item.id, item]));
+  const categoryMap = new Map((categories ?? []).map((item) => [item.id, item]));
+  const professionalMap = new Map((professionals ?? []).map((item) => [item.id, item]));
+  const paymentsByEntry = groupBy((payments ?? []) as FinancialPayment[], "entry_id");
+  const receiptsByEntry = groupBy((receipts ?? []) as FinancialReceipt[], "entry_id");
+
+  return entries.map((entry) => ({
+    ...entry,
+    patient: entry.patient_id ? patientMap.get(entry.patient_id) ?? null : null,
+    vendor: entry.vendor_id ? vendorMap.get(entry.vendor_id) ?? null : null,
+    category: entry.category_id ? categoryMap.get(entry.category_id) ?? null : null,
+    professional: entry.professional_member_id
+      ? normalizeProfessional(professionalMap.get(entry.professional_member_id))
+      : null,
+    payments: paymentsByEntry.get(entry.id) ?? [],
+    receipts: receiptsByEntry.get(entry.id) ?? [],
+  }));
+}
+
+function normalizeProfessional(
+  row:
+    | { id: string; profile?: { full_name: string } | { full_name: string }[] | null }
+    | undefined,
+): FinancialEntryWithRelations["professional"] {
+  if (!row) return null;
+  return {
+    id: row.id,
+    profile: Array.isArray(row.profile) ? row.profile[0] ?? null : row.profile ?? null,
+  };
+}
+
+export async function listPendingEncounterCharges(
+  clinicId: string,
+  access: FinancialAccess,
+): Promise<PendingEncounterCharge[]> {
+  if (!access.canChargeEncounter && !access.canView) return [];
+
+  const admin = createSupabaseAdminClient();
+  let query = admin
+    .from("clinical_encounters")
+    .select("id, appointment_id, patient_id, professional_member_id, consultation_completed_at")
+    .eq("clinic_id", clinicId)
+    .in("status", ["consultation_completed", "billing_pending"])
+    .is("deleted_at", null)
+    .order("consultation_completed_at", { ascending: false })
+    .limit(100);
+
+  if (!access.canView && access.currentMemberId) {
+    query = query.eq("professional_member_id", access.currentMemberId);
+  }
+
+  const { data: encounters } = await query;
+  if (!encounters?.length) return [];
+
+  const encounterIds = encounters.map((item) => item.id);
+  const { data: existingEntries } = await admin
+    .from("financial_entries")
+    .select("encounter_id")
+    .eq("clinic_id", clinicId)
+    .in("encounter_id", encounterIds)
+    .is("deleted_at", null);
+  const chargedEncounters = new Set((existingEntries ?? []).map((item) => item.encounter_id));
+  const visible = encounters.filter((encounter) => !chargedEncounters.has(encounter.id));
+  if (!visible.length) return [];
+
+  const appointmentIds = [...new Set(visible.map((item) => item.appointment_id))];
+  const patientIds = [...new Set(visible.map((item) => item.patient_id))];
+  const professionalIds = [...new Set(visible.map((item) => item.professional_member_id))];
+  const [{ data: appointments }, { data: patients }, { data: professionals }] = await Promise.all([
+    admin.from("appointments").select("id, service_id, appointment_type").in("id", appointmentIds),
+    admin.from("patients").select("id, full_name, social_name").in("id", patientIds),
+    admin
+      .from("clinic_members")
+      .select("id, profile:profiles!clinic_members_user_id_fkey(full_name)")
+      .in("id", professionalIds),
+  ]);
+
+  const serviceIds = [...new Set((appointments ?? []).map((item) => item.service_id).filter(Boolean))] as string[];
+  const { data: services } = serviceIds.length
+    ? await admin.from("clinic_services").select("id, name, price_cents").in("id", serviceIds)
+    : { data: [] };
+  const appointmentMap = new Map((appointments ?? []).map((item) => [item.id, item]));
+  const patientMap = new Map((patients ?? []).map((item) => [item.id, item]));
+  const professionalMap = new Map((professionals ?? []).map((item) => [item.id, item]));
+  const serviceMap = new Map((services ?? []).map((item) => [item.id, item]));
+
+  return visible.map((encounter) => {
+    const appointment = appointmentMap.get(encounter.appointment_id);
+    const service = appointment?.service_id ? serviceMap.get(appointment.service_id) : null;
+    const patient = patientMap.get(encounter.patient_id);
+    const professional = professionalMap.get(encounter.professional_member_id) as
+      | { profile?: { full_name?: string | null } | null }
+      | undefined;
+
+    return {
+      encounter_id: encounter.id,
+      appointment_id: encounter.appointment_id,
+      patient_id: encounter.patient_id,
+      professional_member_id: encounter.professional_member_id,
+      consultation_completed_at: encounter.consultation_completed_at,
+      patient_name: patient?.social_name || patient?.full_name || "Paciente",
+      professional_name: professional?.profile?.full_name || "Profissional",
+      service_name: service?.name || appointment?.appointment_type || "Consulta",
+      suggested_amount_cents: service?.price_cents ?? 0,
+    };
+  });
+}
+
+export async function getFinancialReceiptDetail(
+  clinicId: string | null | undefined,
+  receiptId: string,
+): Promise<FinancialReceiptDetail | null> {
+  if (!clinicId) return null;
+  const access = await getFinancialAccess(clinicId);
+  if (!access.canView && !access.canChargeEncounter) return null;
+
+  const admin = createSupabaseAdminClient();
+  const { data: receipt } = await admin
+    .from("financial_receipts")
+    .select("id, clinic_id, entry_id, patient_id, receipt_type, title, content, issued_at, printed_at, exported_at")
+    .eq("id", receiptId)
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .maybeSingle<FinancialReceipt>();
+
+  if (!receipt) return null;
+
+  const [entry] = await listFinancialEntries(clinicId).then((entries) =>
+    entries.filter((item) => item.id === receipt.entry_id),
+  );
+  if (!entry) return null;
+
+  const { data: clinic } = await admin
+    .from("clinics")
+    .select("trade_name, legal_name, document, phone, email")
+    .eq("id", clinicId)
+    .maybeSingle<FinancialReceiptDetail["clinic"]>();
+
+  return { receipt, entry, clinic: clinic ?? null };
+}
+
+function groupBy<T extends Record<string, unknown>>(items: T[], key: keyof T) {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const id = String(item[key] ?? "");
+    const list = map.get(id) ?? [];
+    list.push(item);
+    map.set(id, list);
+  }
+  return map;
+}
+
+function emptyMetrics(): FinancialMetrics {
+  return {
+    receivableOpenCents: 0,
+    receivablePaidCents: 0,
+    payableOpenCents: 0,
+    payablePaidCents: 0,
+    overdueCents: 0,
+    netCashCents: 0,
+  };
+}
+
+function calculateMetrics(entries: FinancialEntryWithRelations[]): FinancialMetrics {
+  const metrics = emptyMetrics();
+  const today = new Date().toISOString().slice(0, 10);
+
+  for (const entry of entries) {
+    const total = entry.amount_cents - entry.discount_cents + entry.addition_cents;
+    const open = Math.max(total - entry.paid_cents, 0);
+    const confirmedPayments = entry.payments.filter((payment) => payment.status === "confirmed");
+    const paid = confirmedPayments.reduce((sum, payment) => sum + payment.amount_cents, 0);
+
+    if (entry.entry_type === "receivable") {
+      metrics.receivableOpenCents += open;
+      metrics.receivablePaidCents += paid;
+      metrics.netCashCents += confirmedPayments.reduce((sum, payment) => sum + payment.net_amount_cents, 0);
+    } else {
+      metrics.payableOpenCents += open;
+      metrics.payablePaidCents += paid;
+      metrics.netCashCents -= confirmedPayments.reduce((sum, payment) => sum + payment.net_amount_cents, 0);
+    }
+
+    if (entry.status !== "paid" && entry.due_date < today) {
+      metrics.overdueCents += open;
+    }
+  }
+
+  return metrics;
+}

@@ -4,23 +4,26 @@ import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { ClinicalQueue } from "@/features/clinical-workflow/components/clinical-queue";
+import { PendingEncounterChargesPanel } from "@/features/financial/components/financial-workspace";
 import {
   getClinicalWorkflowAccess,
   listClinicalEncounters,
 } from "@/repositories/clinical-workflow";
+import { getFinancialWorkspace } from "@/repositories/financial";
 import { getRegistrationPreferences } from "@/repositories/registrations";
 
 export default async function AtendimentosPage() {
   const { activeClinic } = await getActiveClinicContext();
   const access = await getClinicalWorkflowAccess(activeClinic?.id);
   const canView = access.canViewAll || access.canViewOwn;
-  const [encounters, preferences] =
+  const [encounters, preferences, financialData] =
     activeClinic && canView
       ? await Promise.all([
           listClinicalEncounters(activeClinic.id, { statuses: ACTIVE_CARE_STATUSES }),
           getRegistrationPreferences(activeClinic.id),
+          getFinancialWorkspace(activeClinic.id),
         ])
-      : [[], null];
+      : [[], null, null];
 
   return (
     <>
@@ -78,6 +81,9 @@ export default async function AtendimentosPage() {
             </div>
           </div>
           <ClinicalQueue encounters={encounters} access={access} mode="care" />
+          {financialData?.pendingEncounterCharges.length ? (
+            <PendingEncounterChargesPanel data={financialData} />
+          ) : null}
         </div>
       )}
     </>

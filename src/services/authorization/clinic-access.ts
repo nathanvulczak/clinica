@@ -129,7 +129,8 @@ export type NavigationKey =
   | "schedule"
   | "encounters"
   | "medicalRecords"
-  | "nursing";
+  | "nursing"
+  | "financial";
 
 export function getAllowedNavigation(
   authorization: ClinicAuthorization,
@@ -168,6 +169,7 @@ export function getAllowedNavigation(
     allowed.add("medicalRecords");
   }
   if (authorization.can("nursing", "view")) allowed.add("nursing");
+  if (authorization.can("financial", "view")) allowed.add("financial");
 
   return [...allowed];
 }
