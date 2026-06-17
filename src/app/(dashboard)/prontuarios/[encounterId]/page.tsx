@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, ClipboardCheck, LockKeyhole } from "lucide-react";
+import { ArrowLeft, ClipboardCheck, Eye, LockKeyhole } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,12 +56,24 @@ export default async function MedicalRecordPage({
         title="Prontuario do atendimento"
         description="Evolucao medica, conduta, prescricoes e fechamento da consulta."
         action={
-          <Button asChild variant="outline">
-            <Link href="/prontuarios">
-              <ArrowLeft />
-              Voltar aos prontuarios
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link href="/prontuarios">
+                <ArrowLeft />
+                Voltar aos prontuarios
+              </Link>
+            </Button>
+            <Button asChild>
+              <a
+                href={`/api/prontuarios/${detail.id}/resumo`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Eye />
+                Visualizar PDF
+              </a>
+            </Button>
+          </div>
         }
       />
 

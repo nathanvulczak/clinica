@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { ClinicalQueue } from "@/features/clinical-workflow/components/clinical-queue";
 import { MedicalLgpdAckCard } from "@/features/medical-records/components/medical-lgpd-ack-card";
+import { medicalRecordStatusLabel } from "@/features/medical-records/labels";
 import { MedicalRecordPreferencesForm } from "@/features/medical-records/components/medical-record-preferences-form";
 import {
   MedicalRecordSectionNav,
@@ -156,7 +157,7 @@ export default async function ProntuariosPage({
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Badge>{record.status}</Badge>
+                        <Badge>{medicalRecordStatusLabel(record.status)}</Badge>
                         <Button asChild size="sm" variant="outline">
                           <Link href={`/prontuarios/${record.encounter_id}`}>Abrir</Link>
                         </Button>
@@ -211,7 +212,7 @@ export default async function ProntuariosPage({
                   <CardContent className="grid gap-2">
                     {reports.recordsByStatus.map((item) => (
                       <div key={item.status} className="flex justify-between rounded-md border bg-muted/20 p-3 text-sm">
-                        <span>{item.status}</span>
+                        <span>{medicalRecordStatusLabel(item.status)}</span>
                         <strong>{item.count}</strong>
                       </div>
                     ))}

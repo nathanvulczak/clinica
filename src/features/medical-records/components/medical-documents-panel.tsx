@@ -9,6 +9,10 @@ import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { PRESCRIPTION_TEMPLATES } from "@/features/medical-records/config";
 import {
+  medicalDocumentEventLabel,
+  medicalDocumentStatusLabel,
+} from "@/features/medical-records/labels";
+import {
   deleteMedicalDocumentAction,
   logMedicalDocumentEventAction,
   saveMedicalDocumentAction,
@@ -352,7 +356,8 @@ export function MedicalDocumentsPanel({
                   <div>
                     <p className="font-medium">{document.title}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {document.status} | atualizado em {formatDate(document.updated_at)}
+                      {medicalDocumentStatusLabel(document.status)} | atualizado em{" "}
+                      {formatDate(document.updated_at)}
                     </p>
                     {deleted ? (
                       <p className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
@@ -388,7 +393,10 @@ export function MedicalDocumentsPanel({
                 <div className="mt-3 text-xs text-muted-foreground">
                   Historico: {(eventsByDocument.get(document.id) ?? [])
                     .slice(0, 4)
-                    .map((event) => `${event.event_type} em ${formatDate(event.created_at)}`)
+                    .map(
+                      (event) =>
+                        `${medicalDocumentEventLabel(event.event_type)} em ${formatDate(event.created_at)}`,
+                    )
                     .join(" | ") || "Sem eventos adicionais"}
                 </div>
               </article>

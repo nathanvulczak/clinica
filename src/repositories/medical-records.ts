@@ -4,6 +4,10 @@ import {
   isMedicalRecordFieldKey,
   type MedicalRecordFieldKey,
 } from "@/features/medical-records/config";
+import {
+  clinicalStatusLabel,
+  medicalDocumentEventLabel,
+} from "@/features/medical-records/labels";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
 import { getClinicAuthorization } from "@/services/authorization/clinic-access";
 import type { ClinicalEncounterStatus } from "@/types/domain";
@@ -515,12 +519,14 @@ function buildTimeline({
   }
 
   for (const event of encounterEvents) {
+    const fromStatus = clinicalStatusLabel(event.from_status);
+    const toStatus = clinicalStatusLabel(event.to_status);
     events.push({
       id: event.id,
       occurred_at: event.created_at,
       type: "workflow",
       title: "Etapa assistencial atualizada",
-      description: `${event.from_status ?? "inicio"} -> ${event.to_status}${event.reason ? ` | ${event.reason}` : ""}`,
+      description: `${fromStatus} para ${toStatus}${event.reason ? ` | ${event.reason}` : ""}`,
       tone: "info",
     });
   }
@@ -564,7 +570,7 @@ function buildTimeline({
       occurred_at: event.created_at,
       type: "document_event",
       title: "Evento de documento",
-      description: `${event.event_type}${event.reason ? ` | ${event.reason}` : ""}`,
+      description: `${medicalDocumentEventLabel(event.event_type)}${event.reason ? ` | ${event.reason}` : ""}`,
       tone: event.event_type === "deleted" ? "warning" : "info",
     });
   }
