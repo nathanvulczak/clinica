@@ -5,12 +5,18 @@ import type {
   FinancialAccount,
   FinancialCardMachine,
   FinancialCategory,
+  FinancialCostCenter,
   FinancialEntry,
+  FinancialEntryEvent,
+  FinancialEntryItem,
+  FinancialHealthPlan,
+  FinancialLedgerEntry,
   FinancialPayment,
   FinancialPaymentMethod,
   FinancialPreferences,
   FinancialReconciliation,
   FinancialReceipt,
+  FinancialRecurringEntry,
   FinancialVendor,
   PatientSummary,
 } from "@/types/domain";
@@ -32,9 +38,20 @@ export type FinancialEntryWithRelations = FinancialEntry & {
   patient: Pick<PatientSummary, "id" | "full_name" | "social_name" | "phone"> | null;
   vendor: Pick<FinancialVendor, "id" | "name"> | null;
   category: Pick<FinancialCategory, "id" | "name" | "direction"> | null;
+  costCenter: Pick<FinancialCostCenter, "id" | "name" | "code"> | null;
+  healthPlan: Pick<FinancialHealthPlan, "id" | "name"> | null;
   professional: { id: string; profile: { full_name: string } | null } | null;
   payments: FinancialPayment[];
   receipts: FinancialReceipt[];
+  items: FinancialEntryItem[];
+  events: FinancialEntryEvent[];
+  ledgerEntries: FinancialLedgerEntry[];
+};
+
+export type FinancialRecurringEntryWithRelations = FinancialRecurringEntry & {
+  vendor: Pick<FinancialVendor, "id" | "name"> | null;
+  category: Pick<FinancialCategory, "id" | "name" | "direction"> | null;
+  costCenter: Pick<FinancialCostCenter, "id" | "name" | "code"> | null;
 };
 
 export type FinancialReconciliationWithRelations = FinancialReconciliation & {
@@ -50,9 +67,12 @@ export type FinancialWorkspace = {
   paymentMethods: FinancialPaymentMethod[];
   cardMachines: FinancialCardMachine[];
   categories: FinancialCategory[];
+  costCenters: FinancialCostCenter[];
+  healthPlans: FinancialHealthPlan[];
   vendors: FinancialVendor[];
   entries: FinancialEntryWithRelations[];
   payments: FinancialPayment[];
+  recurringEntries: FinancialRecurringEntryWithRelations[];
   reconciliations: FinancialReconciliationWithRelations[];
   pendingEncounterCharges: PendingEncounterCharge[];
   metrics: FinancialMetrics;
@@ -140,9 +160,12 @@ export async function getFinancialWorkspace(
     paymentMethods: [],
     cardMachines: [],
     categories: [],
+    costCenters: [],
+    healthPlans: [],
     vendors: [],
     entries: [],
     payments: [],
+    recurringEntries: [],
     reconciliations: [],
     pendingEncounterCharges: [],
     metrics: emptyMetrics(),
@@ -159,8 +182,11 @@ export async function getFinancialWorkspace(
     { data: paymentMethods },
     { data: cardMachines },
     { data: categories },
+    { data: costCenters },
+    { data: healthPlans },
     { data: vendors },
     entries,
+    recurringEntries,
     reconciliations,
     pendingEncounterCharges,
   ] = await Promise.all([
@@ -190,12 +216,25 @@ export async function getFinancialWorkspace(
       .is("deleted_at", null)
       .order("name"),
     admin
+      .from("financial_cost_centers")
+      .select("id, clinic_id, name, code, active, notes")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .order("name"),
+    admin
+      .from("financial_health_plans")
+      .select("id, clinic_id, name, document, email, phone, active, notes")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .order("name"),
+    admin
       .from("financial_vendors")
       .select("id, clinic_id, name, document, email, phone, vendor_type, active, notes")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
       .order("name"),
     access.canView ? listFinancialEntries(clinicId) : Promise.resolve([]),
+    access.canView ? listFinancialRecurringEntries(clinicId) : Promise.resolve([]),
     access.canView ? listFinancialReconciliations(clinicId) : Promise.resolve([]),
     listPendingEncounterCharges(clinicId, access),
   ]);
@@ -209,9 +248,12 @@ export async function getFinancialWorkspace(
     paymentMethods: (paymentMethods ?? []) as FinancialPaymentMethod[],
     cardMachines: (cardMachines ?? []) as FinancialCardMachine[],
     categories: (categories ?? []) as FinancialCategory[],
+    costCenters: (costCenters ?? []) as FinancialCostCenter[],
+    healthPlans: (healthPlans ?? []) as FinancialHealthPlan[],
     vendors: (vendors ?? []) as FinancialVendor[],
     entries,
     payments,
+    recurringEntries,
     reconciliations,
     pendingEncounterCharges,
     metrics: calculateMetrics(entries),
@@ -234,10 +276,24 @@ export async function listFinancialEntries(clinicId: string): Promise<FinancialE
   const patientIds = [...new Set(entries.map((entry) => entry.patient_id).filter(Boolean))] as string[];
   const vendorIds = [...new Set(entries.map((entry) => entry.vendor_id).filter(Boolean))] as string[];
   const categoryIds = [...new Set(entries.map((entry) => entry.category_id).filter(Boolean))] as string[];
+  const costCenterIds = [...new Set(entries.map((entry) => entry.cost_center_id).filter(Boolean))] as string[];
+  const healthPlanIds = [...new Set(entries.map((entry) => entry.health_plan_id).filter(Boolean))] as string[];
   const professionalIds = [...new Set(entries.map((entry) => entry.professional_member_id).filter(Boolean))] as string[];
   const entryIds = entries.map((entry) => entry.id);
 
-  const [{ data: patients }, { data: vendors }, { data: categories }, { data: professionals }, { data: payments }, { data: receipts }] =
+  const [
+    { data: patients },
+    { data: vendors },
+    { data: categories },
+    { data: costCenters },
+    { data: healthPlans },
+    { data: professionals },
+    { data: payments },
+    { data: receipts },
+    { data: items },
+    { data: events },
+    { data: ledgerEntries },
+  ] =
     await Promise.all([
       patientIds.length
         ? admin.from("patients").select("id, full_name, social_name, phone").in("id", patientIds)
@@ -247,6 +303,12 @@ export async function listFinancialEntries(clinicId: string): Promise<FinancialE
         : Promise.resolve({ data: [] }),
       categoryIds.length
         ? admin.from("financial_categories").select("id, name, direction").in("id", categoryIds)
+        : Promise.resolve({ data: [] }),
+      costCenterIds.length
+        ? admin.from("financial_cost_centers").select("id, name, code").in("id", costCenterIds)
+        : Promise.resolve({ data: [] }),
+      healthPlanIds.length
+        ? admin.from("financial_health_plans").select("id, name").in("id", healthPlanIds)
         : Promise.resolve({ data: [] }),
       professionalIds.length
         ? admin
@@ -266,25 +328,51 @@ export async function listFinancialEntries(clinicId: string): Promise<FinancialE
         .in("entry_id", entryIds)
         .is("deleted_at", null)
         .order("issued_at", { ascending: false }),
+      admin
+        .from("financial_entry_items")
+        .select("id, clinic_id, entry_id, description, quantity, unit_amount_cents, total_amount_cents, sort_order, created_at, updated_at")
+        .in("entry_id", entryIds)
+        .is("deleted_at", null)
+        .order("sort_order", { ascending: true }),
+      admin
+        .from("financial_entry_events")
+        .select("id, clinic_id, entry_id, event_type, old_values, new_values, notes, created_at, created_by")
+        .in("entry_id", entryIds)
+        .order("created_at", { ascending: false }),
+      admin
+        .from("financial_ledger_entries")
+        .select("id, clinic_id, account_id, entry_id, payment_id, reconciliation_id, direction, amount_cents, fee_cents, net_amount_cents, occurred_at, description, source_type, source_id, metadata, created_at, created_by")
+        .in("entry_id", entryIds)
+        .order("occurred_at", { ascending: false }),
     ]);
 
   const patientMap = new Map((patients ?? []).map((item) => [item.id, item]));
   const vendorMap = new Map((vendors ?? []).map((item) => [item.id, item]));
   const categoryMap = new Map((categories ?? []).map((item) => [item.id, item]));
+  const costCenterMap = new Map((costCenters ?? []).map((item) => [item.id, item]));
+  const healthPlanMap = new Map((healthPlans ?? []).map((item) => [item.id, item]));
   const professionalMap = new Map((professionals ?? []).map((item) => [item.id, item]));
   const paymentsByEntry = groupBy((payments ?? []) as FinancialPayment[], "entry_id");
   const receiptsByEntry = groupBy((receipts ?? []) as FinancialReceipt[], "entry_id");
+  const itemsByEntry = groupBy((items ?? []) as FinancialEntryItem[], "entry_id");
+  const eventsByEntry = groupBy((events ?? []) as FinancialEntryEvent[], "entry_id");
+  const ledgerByEntry = groupBy((ledgerEntries ?? []) as FinancialLedgerEntry[], "entry_id");
 
   return entries.map((entry) => ({
     ...entry,
     patient: entry.patient_id ? patientMap.get(entry.patient_id) ?? null : null,
     vendor: entry.vendor_id ? vendorMap.get(entry.vendor_id) ?? null : null,
     category: entry.category_id ? categoryMap.get(entry.category_id) ?? null : null,
+    costCenter: entry.cost_center_id ? costCenterMap.get(entry.cost_center_id) ?? null : null,
+    healthPlan: entry.health_plan_id ? healthPlanMap.get(entry.health_plan_id) ?? null : null,
     professional: entry.professional_member_id
       ? normalizeProfessional(professionalMap.get(entry.professional_member_id))
       : null,
     payments: paymentsByEntry.get(entry.id) ?? [],
     receipts: receiptsByEntry.get(entry.id) ?? [],
+    items: itemsByEntry.get(entry.id) ?? [],
+    events: eventsByEntry.get(entry.id) ?? [],
+    ledgerEntries: ledgerByEntry.get(entry.id) ?? [],
   }));
 }
 
@@ -327,6 +415,47 @@ export async function listFinancialReconciliations(
     account: accountMap.get(item.account_id) ?? null,
     closed_by_profile: item.closed_by ? profileMap.get(item.closed_by) ?? null : null,
     reversed_by_profile: item.reversed_by ? profileMap.get(item.reversed_by) ?? null : null,
+  }));
+}
+
+export async function listFinancialRecurringEntries(clinicId: string): Promise<FinancialRecurringEntryWithRelations[]> {
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin
+    .from("financial_recurring_entries")
+    .select("*")
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .order("next_due_date", { ascending: true })
+    .limit(100);
+
+  if (error || !data?.length) return [];
+
+  const recurringEntries = data as FinancialRecurringEntry[];
+  const vendorIds = [...new Set(recurringEntries.map((item) => item.vendor_id).filter(Boolean))] as string[];
+  const categoryIds = [...new Set(recurringEntries.map((item) => item.category_id).filter(Boolean))] as string[];
+  const costCenterIds = [...new Set(recurringEntries.map((item) => item.cost_center_id).filter(Boolean))] as string[];
+
+  const [{ data: vendors }, { data: categories }, { data: costCenters }] = await Promise.all([
+    vendorIds.length
+      ? admin.from("financial_vendors").select("id, name").in("id", vendorIds)
+      : Promise.resolve({ data: [] }),
+    categoryIds.length
+      ? admin.from("financial_categories").select("id, name, direction").in("id", categoryIds)
+      : Promise.resolve({ data: [] }),
+    costCenterIds.length
+      ? admin.from("financial_cost_centers").select("id, name, code").in("id", costCenterIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const vendorMap = new Map((vendors ?? []).map((item) => [item.id, item]));
+  const categoryMap = new Map((categories ?? []).map((item) => [item.id, item]));
+  const costCenterMap = new Map((costCenters ?? []).map((item) => [item.id, item]));
+
+  return recurringEntries.map((item) => ({
+    ...item,
+    vendor: item.vendor_id ? vendorMap.get(item.vendor_id) ?? null : null,
+    category: item.category_id ? categoryMap.get(item.category_id) ?? null : null,
+    costCenter: item.cost_center_id ? costCenterMap.get(item.cost_center_id) ?? null : null,
   }));
 }
 
@@ -479,7 +608,7 @@ function calculateMetrics(entries: FinancialEntryWithRelations[]): FinancialMetr
   const today = new Date().toISOString().slice(0, 10);
 
   for (const entry of entries) {
-    const total = entry.amount_cents - entry.discount_cents + entry.addition_cents;
+    const total = entry.amount_cents - entry.discount_cents + (entry.freight_cents ?? 0) + entry.addition_cents;
     const open = Math.max(total - entry.paid_cents, 0);
     const confirmedPayments = entry.payments.filter((payment) => payment.status === "confirmed");
     const paid = confirmedPayments.reduce((sum, payment) => sum + payment.amount_cents, 0);

@@ -1,20 +1,25 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
-import { Check, CreditCard, Landmark, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Truck } from "lucide-react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { Building2, Check, CreditCard, Landmark, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Tags, Truck, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import {
+  cancelFinancialEntryAction,
   createEncounterChargeAction,
   createFinancialReconciliationAction,
   issueFinancialReceiptAction,
   reverseFinancialReconciliationAction,
   reverseFinancialPaymentAction,
   saveCardMachineAction,
+  saveCostCenterAction,
   saveFinancialAccountAction,
+  saveFinancialCategoryAction,
   saveFinancialEntryAction,
   saveFinancialPreferencesAction,
+  saveFinancialRecurringEntryAction,
+  saveHealthPlanAction,
   savePaymentMethodAction,
   saveVendorAction,
   settleFinancialEntryAction,
@@ -25,11 +30,16 @@ import type {
   FinancialAccount,
   FinancialCardMachine,
   FinancialCategory,
+  FinancialCostCenter,
+  FinancialEntry,
+  FinancialEntryItem,
   FinancialEntryType,
+  FinancialHealthPlan,
   FinancialPayment,
   FinancialPaymentMethod,
   FinancialPreferences,
   FinancialReconciliation,
+  FinancialRecurringEntry,
   FinancialVendor,
 } from "@/types/domain";
 
@@ -133,6 +143,34 @@ function BooleanField({ name, label, defaultChecked = true }: { name: string; la
       {label}
     </label>
   );
+}
+
+function centsToInput(value?: number | null) {
+  return String(((value ?? 0) / 100).toFixed(2)).replace(".", ",");
+}
+
+function inputToCents(value: string) {
+  const normalized = value.includes(",")
+    ? value.replace(/\./g, "").replace(",", ".")
+    : value;
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
+}
+
+type PayableItemDraft = {
+  id: string;
+  description: string;
+  quantity: string;
+  unit_amount: string;
+};
+
+function createPayableItemDraft(item?: FinancialEntryItem, index = 0): PayableItemDraft {
+  return {
+    id: item?.id ?? `item-${Date.now()}-${index}`,
+    description: item?.description ?? "",
+    quantity: item ? String(item.quantity).replace(".", ",") : "1",
+    unit_amount: centsToInput(item?.unit_amount_cents),
+  };
 }
 
 export function FinancialAccountForm({
@@ -311,33 +349,188 @@ export function VendorForm({ vendor, onCompleted }: { vendor?: FinancialVendor |
   );
 }
 
+export function FinancialCategoryForm({
+  category,
+  categories,
+  onCompleted,
+}: {
+  category?: FinancialCategory | null;
+  categories: FinancialCategory[];
+  onCompleted?: () => void;
+}) {
+  const [state, action, pending] = useActionState(saveFinancialCategoryAction, {});
+  useActionToast(state, onCompleted);
+
+  return (
+    <form action={action} className="grid gap-4">
+      <input type="hidden" name="id" value={category?.id ?? ""} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Field name="name" label="Nome da categoria" defaultValue={category?.name} required />
+        <label className="grid gap-2 text-sm font-medium">
+          Natureza
+          <Select name="direction" defaultValue={category?.direction ?? "income"}>
+            <option value="income">Receita</option>
+            <option value="expense">Despesa</option>
+          </Select>
+        </label>
+        <label className="grid gap-2 text-sm font-medium">
+          Categoria superior
+          <Select name="parent_id" defaultValue={category?.parent_id ?? "none"}>
+            <option value="none">Sem categoria superior</option>
+            {categories
+              .filter((item) => item.id !== category?.id)
+              .map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+          </Select>
+        </label>
+      </div>
+      <BooleanField name="active" label="Categoria ativa" defaultChecked={category?.active ?? true} />
+      <div className="flex justify-end">
+        <Button disabled={pending}>
+          <Tags />
+          {pending ? "Salvando..." : "Salvar categoria"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export function CostCenterForm({
+  costCenter,
+  onCompleted,
+}: {
+  costCenter?: FinancialCostCenter | null;
+  onCompleted?: () => void;
+}) {
+  const [state, action, pending] = useActionState(saveCostCenterAction, {});
+  useActionToast(state, onCompleted);
+
+  return (
+    <form action={action} className="grid gap-4">
+      <input type="hidden" name="id" value={costCenter?.id ?? ""} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Field name="name" label="Centro de custo" defaultValue={costCenter?.name} required />
+        <Field name="code" label="Código interno" defaultValue={costCenter?.code} />
+      </div>
+      <TextArea name="notes" label="Observações" defaultValue={costCenter?.notes} />
+      <BooleanField name="active" label="Centro de custo ativo" defaultChecked={costCenter?.active ?? true} />
+      <div className="flex justify-end">
+        <Button disabled={pending}>
+          <Building2 />
+          {pending ? "Salvando..." : "Salvar centro de custo"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export function HealthPlanForm({
+  healthPlan,
+  onCompleted,
+}: {
+  healthPlan?: FinancialHealthPlan | null;
+  onCompleted?: () => void;
+}) {
+  const [state, action, pending] = useActionState(saveHealthPlanAction, {});
+  useActionToast(state, onCompleted);
+
+  return (
+    <form action={action} className="grid gap-4">
+      <input type="hidden" name="id" value={healthPlan?.id ?? ""} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Field name="name" label="Nome do convênio" defaultValue={healthPlan?.name} required />
+        <Field name="document" label="CNPJ" defaultValue={healthPlan?.document} />
+        <Field name="email" label="E-mail" defaultValue={healthPlan?.email} />
+        <Field name="phone" label="Telefone" defaultValue={healthPlan?.phone} />
+      </div>
+      <TextArea name="notes" label="Observações" defaultValue={healthPlan?.notes} />
+      <BooleanField name="active" label="Convênio ativo" defaultChecked={healthPlan?.active ?? true} />
+      <div className="flex justify-end">
+        <Button disabled={pending}>
+          <Building2 />
+          {pending ? "Salvando..." : "Salvar convênio"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 export function FinancialEntryForm({
+  entry,
   entryType,
   categories,
+  costCenters,
+  healthPlans,
   vendors,
   onCompleted,
 }: {
+  entry?: (FinancialEntry & { items?: FinancialEntryItem[] }) | null;
   entryType: FinancialEntryType;
   categories: FinancialCategory[];
+  costCenters: FinancialCostCenter[];
+  healthPlans: FinancialHealthPlan[];
   vendors: FinancialVendor[];
   onCompleted?: () => void;
 }) {
   const [state, action, pending] = useActionState(saveFinancialEntryAction, {});
   useActionToast(state, onCompleted);
   const today = new Date().toISOString().slice(0, 10);
+  const effectiveType = entry?.entry_type ?? entryType;
+  const [items, setItems] = useState<PayableItemDraft[]>(() =>
+    entry?.items?.length ? entry.items.map((item, index) => createPayableItemDraft(item, index)) : [createPayableItemDraft()],
+  );
+  const normalizedItems = useMemo(
+    () =>
+      items
+        .map((item) => ({
+          description: item.description.trim(),
+          quantity: Number(item.quantity.replace(",", ".")),
+          unit_amount: item.unit_amount,
+        }))
+        .filter((item) => item.description || inputToCents(item.unit_amount) > 0),
+    [items],
+  );
+  const itemsSubtotalCents = normalizedItems.reduce(
+    (sum, item) => sum + Math.round((Number.isFinite(item.quantity) ? item.quantity : 0) * inputToCents(item.unit_amount)),
+    0,
+  );
+  const hasPayableItems = effectiveType === "payable" && normalizedItems.length > 0;
+
+  function updateItem(id: string, key: keyof Omit<PayableItemDraft, "id">, value: string) {
+    setItems((current) => current.map((item) => (item.id === id ? { ...item, [key]: value } : item)));
+  }
 
   return (
     <form action={action} className="grid gap-4">
-      <input type="hidden" name="entry_type" value={entryType} />
+      <input type="hidden" name="id" value={entry?.id ?? ""} />
+      <input type="hidden" name="entry_type" value={effectiveType} />
+      <input type="hidden" name="line_items_json" value={effectiveType === "payable" ? JSON.stringify(normalizedItems) : "[]"} />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Field name="description" label="Descrição" required />
-        <Field name="document_number" label="Documento/numero" />
+        <Field name="description" label="Descrição" defaultValue={entry?.description} required />
+        <Field name="document_number" label="Documento/número" defaultValue={entry?.document_number} />
+        {effectiveType === "payable" ? (
+          <label className="grid gap-2 text-sm font-medium">
+            Tipo de documento
+            <Select name="document_type" defaultValue={entry?.document_type ?? "other"}>
+              <option value="nfe">NF-e</option>
+              <option value="nfse">NFS-e</option>
+              <option value="receipt">Recibo</option>
+              <option value="contract">Contrato</option>
+              <option value="other">Outro</option>
+            </Select>
+          </label>
+        ) : (
+          <input type="hidden" name="document_type" value={entry?.document_type ?? "other"} />
+        )}
         <label className="grid gap-2 text-sm font-medium">
           Categoria
-          <Select name="category_id" defaultValue="none">
+          <Select name="category_id" defaultValue={entry?.category_id ?? "none"}>
             <option value="none">Sem categoria</option>
             {categories
-              .filter((category) => category.direction === (entryType === "receivable" ? "income" : "expense"))
+              .filter((category) => category.direction === (effectiveType === "receivable" ? "income" : "expense"))
               .map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -345,10 +538,34 @@ export function FinancialEntryForm({
               ))}
           </Select>
         </label>
-        {entryType === "payable" ? (
+        <label className="grid gap-2 text-sm font-medium">
+          Centro de custo
+          <Select name="cost_center_id" defaultValue={entry?.cost_center_id ?? "none"}>
+            <option value="none">Não informado</option>
+            {costCenters.map((costCenter) => (
+              <option key={costCenter.id} value={costCenter.id}>
+                {costCenter.code ? `${costCenter.code} - ${costCenter.name}` : costCenter.name}
+              </option>
+            ))}
+          </Select>
+        </label>
+        {effectiveType === "receivable" ? (
+          <label className="grid gap-2 text-sm font-medium">
+            Convênio
+            <Select name="health_plan_id" defaultValue={entry?.health_plan_id ?? "none"}>
+              <option value="none">Particular / não informado</option>
+              {healthPlans.map((healthPlan) => (
+                <option key={healthPlan.id} value={healthPlan.id}>
+                  {healthPlan.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+        ) : null}
+        {effectiveType === "payable" ? (
           <label className="grid gap-2 text-sm font-medium">
             Fornecedor
-            <Select name="vendor_id" defaultValue="none">
+            <Select name="vendor_id" defaultValue={entry?.vendor_id ?? "none"}>
               <option value="none">Não informado</option>
               {vendors.map((vendor) => (
                 <option key={vendor.id} value={vendor.id}>
@@ -358,18 +575,202 @@ export function FinancialEntryForm({
             </Select>
           </label>
         ) : null}
-        <Field name="issue_date" label="Emissão" type="date" defaultValue={today} />
-        <Field name="due_date" label="Vencimento" type="date" defaultValue={today} />
-        <Field name="competence_date" label="Competência" type="date" defaultValue={today} />
-        <MoneyInput name="amount" label="Valor" required />
-        <MoneyInput name="discount" label="Desconto" />
-        <MoneyInput name="addition" label="Acréscimos" />
+        <Field name="issue_date" label="Emissão" type="date" defaultValue={entry?.issue_date ?? today} />
+        <Field name="due_date" label="Vencimento" type="date" defaultValue={entry?.due_date ?? today} />
+        <Field name="competence_date" label="Competência" type="date" defaultValue={entry?.competence_date ?? today} />
+        {effectiveType === "payable" ? (
+          <input type="hidden" name="amount" value={centsToInput(hasPayableItems ? itemsSubtotalCents : entry?.amount_cents)} />
+        ) : (
+          <MoneyInput name="amount" label="Valor" required defaultValue={centsToInput(entry?.amount_cents)} />
+        )}
+        <MoneyInput name="discount" label="Desconto" defaultValue={centsToInput(entry?.discount_cents)} />
+        {effectiveType === "payable" ? <MoneyInput name="freight" label="Frete a pagar" defaultValue={centsToInput(entry?.freight_cents)} /> : <input type="hidden" name="freight" value="0,00" />}
+        <MoneyInput name="addition" label="Acréscimos" defaultValue={centsToInput(entry?.addition_cents)} />
       </div>
-      <TextArea name="notes" label="Observações" />
+      {effectiveType === "payable" ? (
+        <section className="grid gap-3 rounded-lg border bg-muted/20 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Itens do documento</p>
+              <p className="text-xs text-muted-foreground">Use os itens da nota fiscal, recibo ou contrato para compor relatórios mais completos.</p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setItems((current) => [...current, createPayableItemDraft(undefined, current.length)])}
+            >
+              Adicionar item
+            </Button>
+          </div>
+          <div className="grid gap-2">
+            {items.map((item) => {
+              const lineTotal = Math.round(Number(item.quantity.replace(",", ".")) * inputToCents(item.unit_amount));
+              return (
+                <div key={item.id} className="grid gap-2 rounded-md border bg-background p-3 lg:grid-cols-[1fr_120px_150px_150px_auto] lg:items-end">
+                  <label className="grid gap-2 text-sm font-medium">
+                    Item
+                    <input
+                      value={item.description}
+                      onChange={(event) => updateItem(item.id, "description", event.target.value)}
+                      placeholder="Descrição do item"
+                      className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                  </label>
+                  <label className="grid gap-2 text-sm font-medium">
+                    Quantidade
+                    <input
+                      value={item.quantity}
+                      onChange={(event) => updateItem(item.id, "quantity", event.target.value)}
+                      inputMode="decimal"
+                      className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                  </label>
+                  <label className="grid gap-2 text-sm font-medium">
+                    Unitário
+                    <input
+                      value={item.unit_amount}
+                      onChange={(event) => updateItem(item.id, "unit_amount", event.target.value)}
+                      inputMode="decimal"
+                      className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                  </label>
+                  <div className="rounded-md border bg-muted/20 p-2 text-sm">
+                    <span className="text-xs text-muted-foreground">Total do item</span>
+                    <p className="font-medium">{formatCurrencyBRL(Number.isFinite(lineTotal) ? lineTotal : 0)}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={items.length === 1}
+                    onClick={() => setItems((current) => current.filter((row) => row.id !== item.id))}
+                  >
+                    Remover
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex justify-end rounded-md border bg-background p-3 text-sm">
+            <span className="text-muted-foreground">Subtotal dos itens:&nbsp;</span>
+            <strong>{formatCurrencyBRL(itemsSubtotalCents)}</strong>
+          </div>
+        </section>
+      ) : null}
+      <TextArea name="notes" label="Observações" defaultValue={entry?.notes} />
       <div className="flex justify-end">
         <Button disabled={pending}>
           <Save />
           {pending ? "Salvando..." : "Salvar lançamento"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export function CancelFinancialEntryForm({
+  entry,
+  onCompleted,
+}: {
+  entry: FinancialEntry;
+  onCompleted?: () => void;
+}) {
+  const [state, action, pending] = useActionState(cancelFinancialEntryAction, {});
+  useActionToast(state, onCompleted);
+
+  return (
+    <form action={action} className="grid gap-4">
+      <input type="hidden" name="entry_id" value={entry.id} />
+      <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+        Cancelar não apaga o histórico. O lançamento ficará marcado como cancelado e o motivo será auditado.
+      </div>
+      <TextArea name="reason" label="Motivo do cancelamento" />
+      <div className="flex justify-end">
+        <Button variant="destructive" disabled={pending}>
+          <XCircle />
+          {pending ? "Cancelando..." : "Confirmar cancelamento"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export function FinancialRecurringEntryForm({
+  recurringEntry,
+  vendors,
+  categories,
+  costCenters,
+  onCompleted,
+}: {
+  recurringEntry?: FinancialRecurringEntry | null;
+  vendors: FinancialVendor[];
+  categories: FinancialCategory[];
+  costCenters: FinancialCostCenter[];
+  onCompleted?: () => void;
+}) {
+  const [state, action, pending] = useActionState(saveFinancialRecurringEntryAction, {});
+  useActionToast(state, onCompleted);
+  const today = new Date().toISOString().slice(0, 10);
+
+  return (
+    <form action={action} className="grid gap-4">
+      <input type="hidden" name="id" value={recurringEntry?.id ?? ""} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Field name="description" label="Descrição" defaultValue={recurringEntry?.description} required />
+        <MoneyInput name="amount" label="Valor previsto" defaultValue={centsToInput(recurringEntry?.amount_cents)} required />
+        <label className="grid gap-2 text-sm font-medium">
+          Fornecedor
+          <Select name="vendor_id" defaultValue={recurringEntry?.vendor_id ?? "none"}>
+            <option value="none">Não informado</option>
+            {vendors.map((vendor) => (
+              <option key={vendor.id} value={vendor.id}>
+                {vendor.name}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="grid gap-2 text-sm font-medium">
+          Categoria
+          <Select name="category_id" defaultValue={recurringEntry?.category_id ?? "none"}>
+            <option value="none">Sem categoria</option>
+            {categories
+              .filter((category) => category.direction === "expense")
+              .map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+          </Select>
+        </label>
+        <label className="grid gap-2 text-sm font-medium">
+          Centro de custo
+          <Select name="cost_center_id" defaultValue={recurringEntry?.cost_center_id ?? "none"}>
+            <option value="none">Não informado</option>
+            {costCenters.map((costCenter) => (
+              <option key={costCenter.id} value={costCenter.id}>
+                {costCenter.name}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="grid gap-2 text-sm font-medium">
+          Frequência
+          <Select name="frequency" defaultValue={recurringEntry?.frequency ?? "monthly"}>
+            <option value="weekly">Semanal</option>
+            <option value="monthly">Mensal</option>
+            <option value="quarterly">Trimestral</option>
+            <option value="yearly">Anual</option>
+          </Select>
+        </label>
+        <Field name="next_due_date" label="Próximo vencimento" type="date" defaultValue={recurringEntry?.next_due_date ?? today} required />
+      </div>
+      <TextArea name="notes" label="Observações" defaultValue={recurringEntry?.notes} />
+      <BooleanField name="active" label="Recorrência ativa" defaultChecked={recurringEntry?.active ?? true} />
+      <div className="flex justify-end">
+        <Button disabled={pending}>
+          <RotateCcw />
+          {pending ? "Salvando..." : "Salvar recorrência"}
         </Button>
       </div>
     </form>

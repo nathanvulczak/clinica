@@ -4,13 +4,19 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
+  cancelFinancialEntrySchema,
   cardMachineSchema,
+  costCenterSchema,
   encounterChargeSchema,
   financialAccountSchema,
+  financialCategorySchema,
   financialEntrySchema,
+  financialEntryItemInputSchema,
+  healthPlanSchema,
   paymentMethodSchema,
   preferencesSchema,
   reconciliationSchema,
+  recurringEntrySchema,
   reverseReconciliationSchema,
   receiptSchema,
   reversePaymentSchema,
@@ -42,10 +48,38 @@ function percentToBps(value: number) {
   return Math.round(value * 100);
 }
 
+function parseFinancialEntryItems(raw: string | undefined) {
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(raw || "[]");
+  } catch {
+    return { error: "Itens do documento inválidos." as const };
+  }
+
+  const parsed = financialEntryItemInputSchema.array().safeParse(parsedJson);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Itens do documento inválidos." };
+  }
+
+  return {
+    items: parsed.data.map((item, index) => {
+      const unitAmountCents = parseCurrencyToCents(item.unit_amount);
+      const totalAmountCents = Math.round(item.quantity * unitAmountCents);
+      return {
+        description: item.description,
+        quantity: item.quantity,
+        unit_amount_cents: unitAmountCents,
+        total_amount_cents: totalAmountCents,
+        sort_order: index,
+      };
+    }),
+  };
+}
+
 function financialError(error: { message?: string } | null, fallback: string) {
   const message = error?.message?.toLowerCase() ?? "";
   if (message.includes("does not exist") || message.includes("schema cache")) {
-    return "A estrutura do Financeiro ainda não está disponível. Execute a migration 023 no Supabase.";
+    return "A estrutura do Financeiro ainda não está disponível. Execute as migrations financeiras mais recentes no Supabase.";
   }
   if (message.includes("permission") || message.includes("policy")) {
     return "O banco bloqueou a operação por segurança. Revise as permissões e o RLS.";
@@ -107,6 +141,120 @@ async function entryHasClosedReconciliation(
   return Boolean(data?.length);
 }
 
+async function recordEntryEvent({
+  admin,
+  clinicId,
+  userId,
+  entryId,
+  eventType,
+  oldValues,
+  newValues,
+  notes,
+}: {
+  admin: ReturnType<typeof createSupabaseAdminClient>;
+  clinicId: string;
+  userId: string;
+  entryId: string;
+  eventType:
+    | "created"
+    | "updated"
+    | "settled"
+    | "payment_reversed"
+    | "cancelled"
+    | "receipt_issued"
+    | "reconciliation_closed"
+    | "reconciliation_reopened"
+    | "ledger_posted";
+  oldValues?: unknown;
+  newValues?: unknown;
+  notes?: string | null;
+}) {
+  const { error } = await admin.from("financial_entry_events").insert({
+    clinic_id: clinicId,
+    entry_id: entryId,
+    event_type: eventType,
+    old_values: oldValues ?? null,
+    new_values: newValues ?? null,
+    notes: notes ?? null,
+    created_by: userId,
+  });
+
+  if (error) {
+    console.warn("financial_entry_events unavailable", error.message);
+  }
+}
+
+async function postLedgerEntry({
+  admin,
+  clinicId,
+  userId,
+  accountId,
+  entryId,
+  paymentId,
+  reconciliationId,
+  direction,
+  amountCents,
+  feeCents,
+  netAmountCents,
+  occurredAt,
+  description,
+  sourceType,
+  sourceId,
+  metadata,
+}: {
+  admin: ReturnType<typeof createSupabaseAdminClient>;
+  clinicId: string;
+  userId: string;
+  accountId: string | null;
+  entryId: string | null;
+  paymentId: string | null;
+  reconciliationId?: string | null;
+  direction: "in" | "out";
+  amountCents: number;
+  feeCents: number;
+  netAmountCents: number;
+  occurredAt: string;
+  description: string;
+  sourceType: "payment" | "reversal" | "adjustment" | "reconciliation";
+  sourceId: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  const { error } = await admin.from("financial_ledger_entries").insert({
+    clinic_id: clinicId,
+    account_id: accountId,
+    entry_id: entryId,
+    payment_id: paymentId,
+    reconciliation_id: reconciliationId ?? null,
+    direction,
+    amount_cents: amountCents,
+    fee_cents: feeCents,
+    net_amount_cents: netAmountCents,
+    occurred_at: occurredAt,
+    description,
+    source_type: sourceType,
+    source_id: sourceId,
+    metadata: metadata ?? {},
+    created_by: userId,
+  });
+
+  if (error) {
+    console.warn("financial_ledger_entries unavailable", error.message);
+    return;
+  }
+
+  if (entryId) {
+    await recordEntryEvent({
+      admin,
+      clinicId,
+      userId,
+      entryId,
+      eventType: "ledger_posted",
+      newValues: { amount_cents: amountCents, net_amount_cents: netAmountCents, direction, source_type: sourceType },
+      notes: description,
+    });
+  }
+}
+
 export async function saveFinancialAccountAction(
   _state: FinancialActionState,
   formData: FormData,
@@ -139,7 +287,6 @@ export async function saveFinancialAccountAction(
     account_number: parsed.data.account_number,
     pix_key: parsed.data.pix_key,
     opening_balance_cents: openingBalance,
-    current_balance_cents: openingBalance,
     active: parsed.data.active,
     notes: parsed.data.notes,
     updated_by: context.user.id,
@@ -171,7 +318,7 @@ export async function saveFinancialAccountAction(
   } else {
     const { data, error } = await admin
       .from("financial_accounts")
-      .insert({ clinic_id: context.activeClinic.id, ...payload, created_by: context.user.id })
+      .insert({ clinic_id: context.activeClinic.id, ...payload, current_balance_cents: openingBalance, created_by: context.user.id })
       .select("id")
       .single();
     if (error || !data) return { error: financialError(error, "Não foi possível criar a conta.") };
@@ -210,6 +357,16 @@ export async function savePaymentMethodAction(
   if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar formas de pagamento." };
 
   const admin = createSupabaseAdminClient();
+  const { data: previous } = parsed.data.id
+    ? await admin
+        .from("financial_payment_methods")
+        .select("*")
+        .eq("id", parsed.data.id)
+        .eq("clinic_id", context.activeClinic.id)
+        .is("deleted_at", null)
+        .maybeSingle()
+    : { data: null };
+  if (parsed.data.id && !previous) return { error: "Forma de pagamento não encontrada." };
   const payload = { ...parsed.data, id: undefined, updated_by: context.user.id };
   const result = parsed.data.id
     ? await admin.from("financial_payment_methods").update(payload).eq("id", parsed.data.id).select("id").single()
@@ -230,6 +387,7 @@ export async function savePaymentMethodAction(
     module: "financial",
     recordTable: "financial_payment_methods",
     recordId: result.data.id,
+    oldValues: previous,
     newValues: payload,
   });
 
@@ -261,6 +419,16 @@ export async function saveCardMachineAction(
   if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar máquinas." };
 
   const admin = createSupabaseAdminClient();
+  const { data: previous } = parsed.data.id
+    ? await admin
+        .from("financial_card_machines")
+        .select("*")
+        .eq("id", parsed.data.id)
+        .eq("clinic_id", context.activeClinic.id)
+        .is("deleted_at", null)
+        .maybeSingle()
+    : { data: null };
+  if (parsed.data.id && !previous) return { error: "Máquina de cartão não encontrada." };
   const payload = {
     account_id: parsed.data.account_id,
     name: parsed.data.name,
@@ -293,6 +461,7 @@ export async function saveCardMachineAction(
     module: "financial",
     recordTable: "financial_card_machines",
     recordId: result.data.id,
+    oldValues: previous,
     newValues: payload,
   });
 
@@ -321,6 +490,16 @@ export async function saveVendorAction(
   if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar fornecedores." };
 
   const admin = createSupabaseAdminClient();
+  const { data: previous } = parsed.data.id
+    ? await admin
+        .from("financial_vendors")
+        .select("*")
+        .eq("id", parsed.data.id)
+        .eq("clinic_id", context.activeClinic.id)
+        .is("deleted_at", null)
+        .maybeSingle()
+    : { data: null };
+  if (parsed.data.id && !previous) return { error: "Fornecedor não encontrado." };
   const payload = { ...parsed.data, id: undefined, updated_by: context.user.id };
   const result = parsed.data.id
     ? await admin.from("financial_vendors").update(payload).eq("id", parsed.data.id).select("id").single()
@@ -341,11 +520,279 @@ export async function saveVendorAction(
     module: "financial",
     recordTable: "financial_vendors",
     recordId: result.data.id,
+    oldValues: previous,
     newValues: payload,
   });
 
   revalidateFinancial();
   return { success: parsed.data.id ? "Fornecedor atualizado." : "Fornecedor cadastrado." };
+}
+
+export async function saveFinancialCategoryAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = financialCategorySchema.safeParse({
+    id: formData.get("id") || undefined,
+    name: formData.get("name"),
+    direction: formData.get("direction"),
+    parent_id: formData.get("parent_id") || undefined,
+    active: formData.get("active") ?? "off",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar categorias financeiras." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = parsed.data.id
+    ? await admin
+        .from("financial_categories")
+        .select("*")
+        .eq("id", parsed.data.id)
+        .eq("clinic_id", context.activeClinic.id)
+        .is("deleted_at", null)
+        .maybeSingle()
+    : { data: null };
+  if (parsed.data.id && !previous) return { error: "Categoria não encontrada." };
+
+  const payload = {
+    name: parsed.data.name,
+    direction: parsed.data.direction,
+    parent_id: parsed.data.parent_id,
+    active: parsed.data.active,
+    updated_by: context.user.id,
+  };
+  const result = parsed.data.id
+    ? await admin.from("financial_categories").update(payload).eq("id", parsed.data.id).select("id").single()
+    : await admin
+        .from("financial_categories")
+        .insert({ clinic_id: context.activeClinic.id, ...payload, created_by: context.user.id })
+        .select("id")
+        .single();
+
+  if (result.error || !result.data) {
+    return { error: financialError(result.error, "Não foi possível salvar a categoria.") };
+  }
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: parsed.data.id ? "financial_category_updated" : "financial_category_created",
+    module: "financial",
+    recordTable: "financial_categories",
+    recordId: result.data.id,
+    oldValues: previous,
+    newValues: payload,
+  });
+
+  revalidateFinancial();
+  return { success: parsed.data.id ? "Categoria atualizada." : "Categoria criada." };
+}
+
+export async function saveCostCenterAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = costCenterSchema.safeParse({
+    id: formData.get("id") || undefined,
+    name: formData.get("name"),
+    code: formData.get("code"),
+    notes: formData.get("notes"),
+    active: formData.get("active") ?? "off",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar centros de custo." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = parsed.data.id
+    ? await admin
+        .from("financial_cost_centers")
+        .select("*")
+        .eq("id", parsed.data.id)
+        .eq("clinic_id", context.activeClinic.id)
+        .is("deleted_at", null)
+        .maybeSingle()
+    : { data: null };
+  if (parsed.data.id && !previous) return { error: "Centro de custo não encontrado." };
+
+  const payload = {
+    name: parsed.data.name,
+    code: parsed.data.code,
+    notes: parsed.data.notes,
+    active: parsed.data.active,
+    updated_by: context.user.id,
+  };
+  const result = parsed.data.id
+    ? await admin.from("financial_cost_centers").update(payload).eq("id", parsed.data.id).select("id").single()
+    : await admin
+        .from("financial_cost_centers")
+        .insert({ clinic_id: context.activeClinic.id, ...payload, created_by: context.user.id })
+        .select("id")
+        .single();
+
+  if (result.error || !result.data) {
+    return { error: financialError(result.error, "Não foi possível salvar o centro de custo.") };
+  }
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: parsed.data.id ? "financial_cost_center_updated" : "financial_cost_center_created",
+    module: "financial",
+    recordTable: "financial_cost_centers",
+    recordId: result.data.id,
+    oldValues: previous,
+    newValues: payload,
+  });
+
+  revalidateFinancial();
+  return { success: parsed.data.id ? "Centro de custo atualizado." : "Centro de custo criado." };
+}
+
+export async function saveHealthPlanAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = healthPlanSchema.safeParse({
+    id: formData.get("id") || undefined,
+    name: formData.get("name"),
+    document: formData.get("document"),
+    email: formData.get("email"),
+    phone: formData.get("phone"),
+    notes: formData.get("notes"),
+    active: formData.get("active") ?? "off",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar convênios." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = parsed.data.id
+    ? await admin
+        .from("financial_health_plans")
+        .select("*")
+        .eq("id", parsed.data.id)
+        .eq("clinic_id", context.activeClinic.id)
+        .is("deleted_at", null)
+        .maybeSingle()
+    : { data: null };
+  if (parsed.data.id && !previous) return { error: "Convênio não encontrado." };
+
+  const payload = {
+    name: parsed.data.name,
+    document: parsed.data.document,
+    email: parsed.data.email,
+    phone: parsed.data.phone,
+    notes: parsed.data.notes,
+    active: parsed.data.active,
+    updated_by: context.user.id,
+  };
+  const result = parsed.data.id
+    ? await admin.from("financial_health_plans").update(payload).eq("id", parsed.data.id).select("id").single()
+    : await admin
+        .from("financial_health_plans")
+        .insert({ clinic_id: context.activeClinic.id, ...payload, created_by: context.user.id })
+        .select("id")
+        .single();
+
+  if (result.error || !result.data) {
+    return { error: financialError(result.error, "Não foi possível salvar o convênio.") };
+  }
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: parsed.data.id ? "financial_health_plan_updated" : "financial_health_plan_created",
+    module: "financial",
+    recordTable: "financial_health_plans",
+    recordId: result.data.id,
+    oldValues: previous,
+    newValues: payload,
+  });
+
+  revalidateFinancial();
+  return { success: parsed.data.id ? "Convênio atualizado." : "Convênio criado." };
+}
+
+export async function saveFinancialRecurringEntryAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = recurringEntrySchema.safeParse({
+    id: formData.get("id") || undefined,
+    vendor_id: formData.get("vendor_id") || undefined,
+    category_id: formData.get("category_id") || undefined,
+    cost_center_id: formData.get("cost_center_id") || undefined,
+    description: formData.get("description"),
+    amount: formData.get("amount"),
+    frequency: formData.get("frequency"),
+    next_due_date: formData.get("next_due_date"),
+    notes: formData.get("notes"),
+    active: formData.get("active") ?? "off",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar recorrências financeiras." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = parsed.data.id
+    ? await admin
+        .from("financial_recurring_entries")
+        .select("*")
+        .eq("id", parsed.data.id)
+        .eq("clinic_id", context.activeClinic.id)
+        .is("deleted_at", null)
+        .maybeSingle()
+    : { data: null };
+  if (parsed.data.id && !previous) return { error: "Recorrência financeira não encontrada." };
+
+  const payload = {
+    vendor_id: parsed.data.vendor_id,
+    category_id: parsed.data.category_id,
+    cost_center_id: parsed.data.cost_center_id,
+    description: parsed.data.description,
+    amount_cents: parseCurrencyToCents(parsed.data.amount),
+    frequency: parsed.data.frequency,
+    next_due_date: parsed.data.next_due_date,
+    notes: parsed.data.notes,
+    active: parsed.data.active,
+    updated_by: context.user.id,
+  };
+
+  const result = parsed.data.id
+    ? await admin.from("financial_recurring_entries").update(payload).eq("id", parsed.data.id).select("id").single()
+    : await admin
+        .from("financial_recurring_entries")
+        .insert({ clinic_id: context.activeClinic.id, ...payload, created_by: context.user.id })
+        .select("id")
+        .single();
+
+  if (result.error || !result.data) {
+    return { error: financialError(result.error, "Não foi possível salvar a recorrência.") };
+  }
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: parsed.data.id ? "financial_recurring_entry_updated" : "financial_recurring_entry_created",
+    module: "financial",
+    recordTable: "financial_recurring_entries",
+    recordId: result.data.id,
+    oldValues: previous,
+    newValues: payload,
+  });
+
+  revalidateFinancial();
+  return { success: parsed.data.id ? "Recorrência atualizada." : "Recorrência cadastrada." };
 }
 
 export async function saveFinancialEntryAction(
@@ -359,6 +806,9 @@ export async function saveFinancialEntryAction(
     vendor_id: formData.get("vendor_id") || undefined,
     professional_member_id: formData.get("professional_member_id") || undefined,
     category_id: formData.get("category_id") || undefined,
+    cost_center_id: formData.get("cost_center_id") || undefined,
+    health_plan_id: formData.get("health_plan_id") || undefined,
+    document_type: formData.get("document_type") || undefined,
     description: formData.get("description"),
     document_number: formData.get("document_number"),
     issue_date: formData.get("issue_date"),
@@ -366,10 +816,20 @@ export async function saveFinancialEntryAction(
     competence_date: formData.get("competence_date"),
     amount: formData.get("amount"),
     discount: formData.get("discount"),
+    freight: formData.get("freight"),
     addition: formData.get("addition"),
+    line_items_json: formData.get("line_items_json"),
     notes: formData.get("notes"),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados invalidos." };
+  const parsedItems = parseFinancialEntryItems(parsed.data.line_items_json);
+  if ("error" in parsedItems) return { error: parsedItems.error };
+  const lineItems = parsed.data.entry_type === "payable" ? parsedItems.items : [];
+  const itemsSubtotal = lineItems.reduce((sum, item) => sum + item.total_amount_cents, 0);
+  const manualAmountCents = parseCurrencyToCents(parsed.data.amount);
+  if (parsed.data.entry_type === "payable" && !lineItems.length && manualAmountCents <= 0) {
+    return { error: "Informe ao menos um item ou um valor para o documento a pagar." };
+  }
 
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
@@ -384,6 +844,19 @@ export async function saveFinancialEntryAction(
         "Este lançamento possui pagamento em conciliação bancária fechada. Reabra a conciliação antes de editar.",
     };
   }
+  const { data: previous } = parsed.data.id
+    ? await admin
+        .from("financial_entries")
+        .select("*")
+        .eq("id", parsed.data.id)
+        .eq("clinic_id", context.activeClinic.id)
+        .is("deleted_at", null)
+        .maybeSingle<FinancialEntry>()
+    : { data: null };
+  if (parsed.data.id && !previous) return { error: "Lançamento financeiro não encontrado." };
+  if (previous && ["cancelled", "refunded"].includes(previous.status)) {
+    return { error: "Lançamentos cancelados ou estornados não podem ser editados." };
+  }
 
   const payload = {
     entry_type: parsed.data.entry_type,
@@ -392,13 +865,17 @@ export async function saveFinancialEntryAction(
     vendor_id: parsed.data.vendor_id,
     professional_member_id: parsed.data.professional_member_id,
     category_id: parsed.data.category_id,
+    cost_center_id: parsed.data.cost_center_id,
+    health_plan_id: parsed.data.health_plan_id,
+    document_type: parsed.data.document_type,
     description: parsed.data.description,
     document_number: parsed.data.document_number,
     issue_date: parsed.data.issue_date,
     due_date: parsed.data.due_date,
     competence_date: parsed.data.competence_date,
-    amount_cents: parseCurrencyToCents(parsed.data.amount),
+    amount_cents: lineItems.length ? itemsSubtotal : manualAmountCents,
     discount_cents: parseCurrencyToCents(parsed.data.discount),
+    freight_cents: parseCurrencyToCents(parsed.data.freight),
     addition_cents: parseCurrencyToCents(parsed.data.addition),
     notes: parsed.data.notes,
     updated_by: context.user.id,
@@ -415,6 +892,30 @@ export async function saveFinancialEntryAction(
     return { error: financialError(result.error, "Não foi possível salvar o lançamento.") };
   }
 
+  if (parsed.data.entry_type === "payable") {
+    await admin
+      .from("financial_entry_items")
+      .update({ deleted_at: new Date().toISOString(), updated_by: context.user.id })
+      .eq("entry_id", result.data.id)
+      .eq("clinic_id", context.activeClinic.id)
+      .is("deleted_at", null);
+
+    if (lineItems.length) {
+      const { error: itemsError } = await admin.from("financial_entry_items").insert(
+        lineItems.map((item) => ({
+          clinic_id: context.activeClinic.id,
+          entry_id: result.data.id,
+          ...item,
+          created_by: context.user.id,
+          updated_by: context.user.id,
+        })),
+      );
+      if (itemsError) {
+        return { error: financialError(itemsError, "O lançamento foi salvo, mas os itens do documento não foram registrados.") };
+      }
+    }
+  }
+
   await logAuditEvent({
     clinicId: context.activeClinic.id,
     userId: context.user.id,
@@ -422,11 +923,99 @@ export async function saveFinancialEntryAction(
     module: "financial",
     recordTable: "financial_entries",
     recordId: result.data.id,
+    oldValues: previous,
     newValues: payload,
+  });
+  await recordEntryEvent({
+    admin,
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    entryId: result.data.id,
+    eventType: parsed.data.id ? "updated" : "created",
+    oldValues: previous,
+    newValues: { ...payload, items: lineItems },
+    notes: parsed.data.id ? "Lançamento financeiro editado." : "Lançamento financeiro criado.",
   });
 
   revalidateFinancial();
   return { success: parsed.data.id ? "Lançamento atualizado." : "Lançamento criado." };
+}
+
+export async function cancelFinancialEntryAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = cancelFinancialEntrySchema.safeParse({
+    entry_id: formData.get("entry_id"),
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "Você não possui permissão para cancelar lançamentos financeiros." };
+
+  const admin = createSupabaseAdminClient();
+  if (await entryHasClosedReconciliation(admin, parsed.data.entry_id)) {
+    return { error: "Este lançamento possui movimento conciliado. Reabra a conciliação antes de cancelar." };
+  }
+
+  const { data: entry } = await admin
+    .from("financial_entries")
+    .select("*")
+    .eq("id", parsed.data.entry_id)
+    .eq("clinic_id", context.activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle<FinancialEntry>();
+  if (!entry) return { error: "Lançamento financeiro não encontrado." };
+  const { data: payments } = await admin
+    .from("financial_payments")
+    .select("id")
+    .eq("entry_id", entry.id)
+    .eq("clinic_id", context.activeClinic.id)
+    .eq("status", "confirmed")
+    .is("deleted_at", null)
+    .limit(1);
+  if (entry.paid_cents > 0 || payments?.length) {
+    return { error: "Lançamentos com baixa registrada devem ter os pagamentos estornados antes do cancelamento." };
+  }
+  if (entry.status === "cancelled") return { error: "Este lançamento já está cancelado." };
+
+  const payload = {
+    status: "cancelled",
+    cancelled_reason: parsed.data.reason,
+    cancelled_at: new Date().toISOString(),
+    cancelled_by: context.user.id,
+    updated_by: context.user.id,
+  };
+  const { error } = await admin.from("financial_entries").update(payload).eq("id", entry.id);
+  if (error) return { error: financialError(error, "Não foi possível cancelar o lançamento.") };
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "financial_entry_cancelled",
+    module: "financial",
+    recordTable: "financial_entries",
+    recordId: entry.id,
+    oldValues: entry,
+    newValues: payload,
+    level: "critical",
+    notes: "Cancelamento financeiro com motivo obrigatório.",
+  });
+  await recordEntryEvent({
+    admin,
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    entryId: entry.id,
+    eventType: "cancelled",
+    oldValues: entry,
+    newValues: payload,
+    notes: parsed.data.reason,
+  });
+
+  revalidateFinancial();
+  return { success: "Lançamento cancelado com auditoria." };
 }
 
 export async function createEncounterChargeAction(
@@ -619,7 +1208,7 @@ export async function settleFinancialEntryAction(
     return { error: "Este lançamento não pode ser baixado no status atual." };
   }
 
-  const total = entry.amount_cents - entry.discount_cents + entry.addition_cents;
+  const total = entry.amount_cents - entry.discount_cents + (entry.freight_cents ?? 0) + entry.addition_cents;
   const openAmount = Math.max(total - entry.paid_cents, 0);
   const amount = parseCurrencyToCents(parsed.data.amount);
   if (amount > openAmount) return { error: "O valor baixado não pode ultrapassar o saldo em aberto." };
@@ -678,6 +1267,16 @@ export async function settleFinancialEntryAction(
     level: "security",
     notes: "Baixa financeira registrada.",
   });
+  await recordEntryEvent({
+    admin,
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    entryId: entry.id,
+    eventType: "settled",
+    oldValues: entry,
+    newValues: { payment_id: payment.paymentId, amount_cents: amount, status: nextStatus },
+    notes: "Baixa financeira registrada.",
+  });
 
   revalidateFinancial();
   return { success: "Baixa registrada.", receiptId };
@@ -732,7 +1331,7 @@ export async function reverseFinancialPaymentAction(
     .eq("id", payment.id);
 
   const nextPaid = Math.max(entry.paid_cents - payment.amount_cents, 0);
-  const total = entry.amount_cents - entry.discount_cents + entry.addition_cents;
+  const total = entry.amount_cents - entry.discount_cents + (entry.freight_cents ?? 0) + entry.addition_cents;
   const nextStatus = nextPaid === 0 ? "pending" : nextPaid >= total ? "paid" : "partial";
   await admin
     .from("financial_entries")
@@ -776,6 +1375,33 @@ export async function reverseFinancialPaymentAction(
     level: "critical",
     notes: "Estorno financeiro registrado.",
   });
+  await postLedgerEntry({
+    admin,
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    accountId: payment.account_id,
+    entryId: entry.id,
+    paymentId: payment.id,
+    direction: payment.direction === "in" ? "out" : "in",
+    amountCents: payment.amount_cents,
+    feeCents: payment.fee_cents,
+    netAmountCents: payment.net_amount_cents,
+    occurredAt: new Date().toISOString(),
+    description: "Estorno financeiro.",
+    sourceType: "reversal",
+    sourceId: payment.id,
+    metadata: { reason: parsed.data.reason },
+  });
+  await recordEntryEvent({
+    admin,
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    entryId: entry.id,
+    eventType: "payment_reversed",
+    oldValues: payment,
+    newValues: { status: "reversed", reason: parsed.data.reason, entry_status: nextStatus },
+    notes: parsed.data.reason,
+  });
 
   revalidateFinancial();
   return { success: "Estorno registrado com auditoria." };
@@ -813,7 +1439,7 @@ export async function createFinancialReconciliationAction(
   const periodEnd = `${parsed.data.period_end}T23:59:59.999`;
   const { data: payments, error } = await admin
     .from("financial_payments")
-    .select("id, direction, net_amount_cents, amount_cents, fee_cents, paid_at")
+    .select("id, entry_id, direction, net_amount_cents, amount_cents, fee_cents, paid_at")
     .eq("clinic_id", context.activeClinic.id)
     .eq("account_id", parsed.data.account_id)
     .eq("status", "confirmed")
@@ -913,6 +1539,19 @@ export async function createFinancialReconciliationAction(
     level: "critical",
     notes: "Conciliação bancária fechada e movimentos travados.",
   });
+  await Promise.all(
+    payments.map((payment) =>
+      recordEntryEvent({
+        admin,
+        clinicId: context.activeClinic.id,
+        userId: context.user.id,
+        entryId: payment.entry_id,
+        eventType: "reconciliation_closed",
+        newValues: { reconciliation_id: reconciliation.id, payment_id: payment.id },
+        notes: "Movimento travado por conciliação bancária.",
+      }),
+    ),
+  );
 
   revalidateFinancial();
   return { success: "Conciliação bancária fechada. Movimentos do período foram travados." };
@@ -943,6 +1582,13 @@ export async function reverseFinancialReconciliationAction(
     .maybeSingle();
 
   if (!reconciliation) return { error: "Conciliação fechada não encontrada." };
+
+  const { data: linkedPayments } = await admin
+    .from("financial_payments")
+    .select("id, entry_id")
+    .eq("reconciliation_id", parsed.data.reconciliation_id)
+    .eq("clinic_id", context.activeClinic.id)
+    .is("deleted_at", null);
 
   const { error: reverseError } = await admin
     .from("financial_reconciliations")
@@ -983,6 +1629,20 @@ export async function reverseFinancialReconciliationAction(
     level: "critical",
     notes: "Conciliação bancária reaberta. Movimentos liberados para correção.",
   });
+  await Promise.all(
+    (linkedPayments ?? []).map((payment) =>
+      recordEntryEvent({
+        admin,
+        clinicId: context.activeClinic.id,
+        userId: context.user.id,
+        entryId: payment.entry_id,
+        eventType: "reconciliation_reopened",
+        oldValues: { reconciliation_id: parsed.data.reconciliation_id },
+        newValues: { reconciliation_id: null, payment_id: payment.id },
+        notes: parsed.data.reason,
+      }),
+    ),
+  );
 
   revalidateFinancial();
   return { success: "Conciliação reaberta. Movimentos liberados para ajuste." };
@@ -1195,6 +1855,28 @@ async function createPayment({
     }
   }
 
+  await postLedgerEntry({
+    admin,
+    clinicId,
+    userId,
+    accountId,
+    entryId,
+    paymentId: data.id,
+    direction: entryType === "receivable" ? "in" : "out",
+    amountCents,
+    feeCents,
+    netAmountCents: netAmount,
+    occurredAt: paidAt,
+    description: entryType === "receivable" ? "Recebimento confirmado." : "Pagamento confirmado.",
+    sourceType: "payment",
+    sourceId: data.id,
+    metadata: {
+      payment_method_id: paymentMethodId,
+      card_machine_id: cardMachineId,
+      expected_settlement_date: expectedSettlementDate,
+    },
+  });
+
   return { paymentId: data.id };
 }
 
@@ -1227,7 +1909,7 @@ async function createReceipt({
         .eq("id", patientId)
         .maybeSingle<{ full_name: string; social_name: string | null; cpf: string | null }>()
     : { data: null };
-  const total = entry ? entry.amount_cents - entry.discount_cents + entry.addition_cents : 0;
+  const total = entry ? entry.amount_cents - entry.discount_cents + (entry.freight_cents ?? 0) + entry.addition_cents : 0;
   const open = entry ? Math.max(total - entry.paid_cents, 0) : 0;
   const patientName = patient?.social_name || patient?.full_name || "Paciente";
   const title = receiptType === "payment" ? "Recibo de pagamento" : "Ciencia de pagamento em aberto";
@@ -1250,6 +1932,18 @@ async function createReceipt({
     })
     .select("id")
     .single<{ id: string }>();
+
+  if (data?.id) {
+    await recordEntryEvent({
+      admin,
+      clinicId,
+      userId,
+      entryId,
+      eventType: "receipt_issued",
+      newValues: { receipt_id: data.id, receipt_type: receiptType, title },
+      notes: "Documento financeiro emitido.",
+    });
+  }
 
   return data?.id;
 }

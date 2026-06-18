@@ -100,6 +100,32 @@ export const vendorSchema = z.object({
   active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
 });
 
+export const financialCategorySchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().min(2, "Informe o nome da categoria."),
+  direction: z.enum(["income", "expense"]),
+  parent_id: optionalUuid,
+  active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
+});
+
+export const costCenterSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().min(2, "Informe o nome do centro de custo."),
+  code: optionalText,
+  notes: optionalText,
+  active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
+});
+
+export const healthPlanSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().min(2, "Informe o nome do convenio."),
+  document: optionalDocument,
+  email: optionalEmail,
+  phone: optionalPhone,
+  notes: optionalText,
+  active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
+});
+
 export const financialEntrySchema = z.object({
   id: z.string().uuid().optional(),
   entry_type: z.enum(["receivable", "payable"]),
@@ -107,6 +133,9 @@ export const financialEntrySchema = z.object({
   vendor_id: optionalUuid,
   professional_member_id: optionalUuid,
   category_id: optionalUuid,
+  cost_center_id: optionalUuid,
+  health_plan_id: optionalUuid,
+  document_type: z.enum(["nfe", "nfse", "receipt", "contract", "other"]).optional().default("other"),
   description: z.string().trim().min(3, "Informe a descricao."),
   document_number: optionalText,
   issue_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Informe a data de emissao."),
@@ -114,8 +143,34 @@ export const financialEntrySchema = z.object({
   competence_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Informe a competencia."),
   amount: currencyString,
   discount: optionalCurrencyString,
+  freight: optionalCurrencyString,
   addition: optionalCurrencyString,
+  line_items_json: z.string().optional().default("[]"),
   notes: optionalText,
+});
+
+export const financialEntryItemInputSchema = z.object({
+  description: z.string().trim().min(2, "Informe a descricao do item.").max(180),
+  quantity: z.coerce.number().positive("Informe a quantidade do item.").max(999999),
+  unit_amount: currencyString,
+});
+
+export const cancelFinancialEntrySchema = z.object({
+  entry_id: z.string().uuid(),
+  reason: z.string().trim().min(8, "Informe o motivo do cancelamento.").max(700),
+});
+
+export const recurringEntrySchema = z.object({
+  id: z.string().uuid().optional(),
+  vendor_id: optionalUuid,
+  category_id: optionalUuid,
+  cost_center_id: optionalUuid,
+  description: z.string().trim().min(3, "Informe a descricao da recorrencia."),
+  amount: currencyString,
+  frequency: z.enum(["weekly", "monthly", "quarterly", "yearly"]),
+  next_due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Informe o proximo vencimento."),
+  notes: optionalText,
+  active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
 });
 
 export const encounterChargeSchema = z.object({

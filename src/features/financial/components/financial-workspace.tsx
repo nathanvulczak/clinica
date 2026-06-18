@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   Banknote,
   BarChart3,
+  Building2,
   CheckCircle2,
   CreditCard,
   Eye,
@@ -16,6 +17,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Sparkles,
+  Tags,
   Truck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -23,11 +25,16 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import {
+  CancelFinancialEntryForm,
   CardMachineForm,
+  CostCenterForm,
   EncounterChargeForm,
   FinancialAccountForm,
+  FinancialCategoryForm,
   FinancialEntryForm,
   FinancialPreferencesForm,
+  FinancialRecurringEntryForm,
+  HealthPlanForm,
   PaymentMethodForm,
   ReconciliationForm,
   ReceiptForm,
@@ -50,8 +57,39 @@ const statusLabels: Record<string, string> = {
   refunded: "Estornado",
 };
 
+const entryEventLabels: Record<string, string> = {
+  created: "Lançamento criado",
+  updated: "Lançamento atualizado",
+  settled: "Baixa registrada",
+  payment_reversed: "Pagamento estornado",
+  cancelled: "Lançamento cancelado",
+  receipt_issued: "Documento emitido",
+  reconciliation_closed: "Conciliação fechada",
+  reconciliation_reopened: "Conciliação reaberta",
+  ledger_posted: "Livro-caixa atualizado",
+};
+
+const documentTypeLabels: Record<string, string> = {
+  nfe: "NF-e",
+  nfse: "NFS-e",
+  receipt: "Recibo",
+  contract: "Contrato",
+  other: "Outro",
+};
+
+function documentTypeLabel(value: string | null | undefined) {
+  return documentTypeLabels[value ?? "other"] ?? "Outro";
+}
+
+function frequencyLabel(value: string) {
+  if (value === "weekly") return "Semanal";
+  if (value === "quarterly") return "Trimestral";
+  if (value === "yearly") return "Anual";
+  return "Mensal";
+}
+
 function totalEntryCents(entry: FinancialEntryWithRelations) {
-  return entry.amount_cents - entry.discount_cents + entry.addition_cents;
+  return entry.amount_cents - entry.discount_cents + (entry.freight_cents ?? 0) + entry.addition_cents;
 }
 
 function openEntryCents(entry: FinancialEntryWithRelations) {
@@ -62,6 +100,15 @@ function formatDate(value: string | null | undefined) {
   if (!value) return "Não informado";
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
+    timeZone: "America/Sao_Paulo",
+  }).format(new Date(value));
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "Não informado";
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
     timeZone: "America/Sao_Paulo",
   }).format(new Date(value));
 }
@@ -117,7 +164,7 @@ export function FinancialWorkspace({
 }) {
   if (section === "overview") return <OverviewPanel data={data} />;
   if (section === "receivables") return <EntriesPanel data={data} entryType="receivable" activeView={activeView} />;
-  if (section === "payables") return <EntriesPanel data={data} entryType="payable" activeView={activeView} />;
+  if (section === "payables") return <PayablesWorkspace data={data} activeView={activeView} />;
   if (section === "accounts") return <RegistriesPanel data={data} />;
   if (section === "reconciliation") return <ReconciliationPanel data={data} />;
   if (section === "commissions") return <CommissionsPanel data={data} />;
@@ -182,6 +229,462 @@ function OverviewPanel({ data }: { data: FinancialWorkspaceData }) {
   );
 }
 
+function PayablesWorkspace({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
+  if (activeView === "vendors") return <PayableVendorsPanel data={data} />;
+  if (activeView === "recurring") return <PayableRecurringPanel data={data} />;
+  if (activeView === "reports") return <PayableReportsPanel data={data} />;
+  if (activeView === "reversals") return <PayableReversalsPanel data={data} />;
+  if (activeView === "settle") return <PayableSettlePanel data={data} />;
+  return <PayableOpenPanel data={data} activeView={activeView} />;
+}
+
+function PayableOpenPanel({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
+  const [creating, setCreating] = useState(false);
+  const entries = data.entries.filter((entry) => entry.entry_type === "payable");
+
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader
+        title="Contas a pagar"
+        description="Visão completa das despesas, documentos fiscais, vencimentos, centros de custo, fornecedores e status de baixa."
+        action={
+          <Button disabled={!data.access.canCreate} onClick={() => setCreating(true)}>
+            <Plus />
+            Novo documento a pagar
+          </Button>
+        }
+      />
+      <EntriesTable entries={entries} data={data} entryType="payable" activeView={activeView} />
+      <Modal open={creating} onOpenChange={setCreating} title="Novo documento a pagar" description="Registre documento, itens, fornecedor e vencimento." className="max-w-5xl">
+        <FinancialEntryForm
+          entryType="payable"
+          categories={data.categories}
+          costCenters={data.costCenters}
+          healthPlans={data.healthPlans}
+          vendors={data.vendors}
+          onCompleted={() => setCreating(false)}
+        />
+      </Modal>
+    </div>
+  );
+}
+
+function PayableSettlePanel({ data }: { data: FinancialWorkspaceData }) {
+  const entries = data.entries.filter((entry) => entry.entry_type === "payable");
+  const openEntries = entries.filter((entry) => openEntryCents(entry) > 0 && entry.status !== "cancelled");
+  const dueToday = openEntries.filter((entry) => entry.due_date <= new Date().toISOString().slice(0, 10));
+
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader title="Baixar pagamento" description="Tela operacional focada em documentos em aberto. Use o botão Baixar na linha para registrar pagamento com conta, forma e data." />
+      <div className="grid gap-3 lg:grid-cols-3">
+        <MetricCard label="Em aberto" value={formatCurrencyBRL(openEntries.reduce((sum, entry) => sum + openEntryCents(entry), 0))} description="Saldo pendente de pagamento" tone="warning" />
+        <MetricCard label="Vencidos/hoje" value={String(dueToday.length)} description="Prioridade de caixa" tone={dueToday.length ? "warning" : "default"} />
+        <MetricCard label="Documentos" value={String(openEntries.length)} description="Contas aptas para baixa" />
+      </div>
+      <EntriesTable entries={entries} data={data} entryType="payable" activeView="settle" />
+    </div>
+  );
+}
+
+function PayableReversalsPanel({ data }: { data: FinancialWorkspaceData }) {
+  const entries = data.entries.filter((entry) => entry.entry_type === "payable");
+  const reversedPayments = entries.flatMap((entry) =>
+    entry.payments
+      .filter((payment) => payment.status === "reversed")
+      .map((payment) => ({ entry, payment })),
+  );
+
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader title="Estornos de pagamentos" description="Histórico de pagamentos estornados e documentos com baixa revertida. Novos estornos são feitos pela linha do lançamento." />
+      <section className="rounded-lg border bg-card">
+        <div className="border-b p-4">
+          <p className="font-medium">Histórico de estornos</p>
+          <p className="text-sm text-muted-foreground">Cada estorno preserva motivo, data e vínculo com o lançamento original.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-sm">
+            <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">Data</th>
+                <th className="px-4 py-3 font-medium">Fornecedor/documento</th>
+                <th className="px-4 py-3 text-right font-medium">Valor</th>
+                <th className="px-4 py-3 font-medium">Motivo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reversedPayments.length ? (
+                reversedPayments.map(({ entry, payment }) => (
+                  <tr key={payment.id} className="border-t">
+                    <td className="px-4 py-3">{formatDateTime(payment.reversed_at ?? payment.paid_at)}</td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium">{entry.vendor?.name ?? "Fornecedor não informado"}</p>
+                      <p className="text-xs text-muted-foreground">{entry.description}</p>
+                    </td>
+                    <td className="px-4 py-3 text-right">{formatCurrencyBRL(payment.amount_cents)}</td>
+                    <td className="px-4 py-3">{payment.reversal_reason ?? "Motivo não informado"}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
+                    Nenhum estorno de pagamento registrado.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <EntriesTable entries={entries} data={data} entryType="payable" activeView="reversals" />
+    </div>
+  );
+}
+
+function PayableVendorsPanel({ data }: { data: FinancialWorkspaceData }) {
+  const [selected, setSelected] = useState<FinancialWorkspaceData["vendors"][number] | null>(null);
+  const [creating, setCreating] = useState(false);
+  const entriesByVendor = useMemo(() => {
+    const map = new Map<string, { open: number; paid: number; count: number }>();
+    for (const entry of data.entries.filter((item) => item.entry_type === "payable" && item.vendor_id)) {
+      const current = map.get(entry.vendor_id!) ?? { open: 0, paid: 0, count: 0 };
+      current.open += openEntryCents(entry);
+      current.paid += entry.paid_cents;
+      current.count += 1;
+      map.set(entry.vendor_id!, current);
+    }
+    return map;
+  }, [data.entries]);
+
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader
+        title="Fornecedores"
+        description="Gestão de fornecedores conectada ao contas a pagar, com saldos em aberto e histórico de documentos."
+        action={
+          <Button disabled={!data.access.canManage} onClick={() => setCreating(true)}>
+            <Plus />
+            Novo fornecedor
+          </Button>
+        }
+      />
+      <section className="rounded-lg border bg-card">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] text-sm">
+            <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">Fornecedor</th>
+                <th className="px-4 py-3 font-medium">Documento</th>
+                <th className="px-4 py-3 font-medium">Tipo</th>
+                <th className="px-4 py-3 text-right font-medium">Aberto</th>
+                <th className="px-4 py-3 text-right font-medium">Pago</th>
+                <th className="px-4 py-3 text-right font-medium">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.vendors.length ? (
+                data.vendors.map((vendor) => {
+                  const summary = entriesByVendor.get(vendor.id) ?? { open: 0, paid: 0, count: 0 };
+                  return (
+                    <tr key={vendor.id} className="border-t">
+                      <td className="px-4 py-3">
+                        <p className="font-medium">{vendor.name}</p>
+                        <p className="text-xs text-muted-foreground">{vendor.active ? "Ativo" : "Inativo"} | {summary.count} documento(s)</p>
+                      </td>
+                      <td className="px-4 py-3">{vendor.document ?? "-"}</td>
+                      <td className="px-4 py-3">{vendor.vendor_type}</td>
+                      <td className="px-4 py-3 text-right">{formatCurrencyBRL(summary.open)}</td>
+                      <td className="px-4 py-3 text-right">{formatCurrencyBRL(summary.paid)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <Button size="sm" variant="outline" disabled={!data.access.canManage} onClick={() => setSelected(vendor)}>
+                          Editar
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">Nenhum fornecedor cadastrado.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <Modal open={creating} onOpenChange={setCreating} title="Novo fornecedor" className="max-w-4xl">
+        <VendorForm onCompleted={() => setCreating(false)} />
+      </Modal>
+      <Modal open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)} title="Editar fornecedor" className="max-w-4xl">
+        {selected ? <VendorForm vendor={selected} onCompleted={() => setSelected(null)} /> : null}
+      </Modal>
+    </div>
+  );
+}
+
+function PayableRecurringPanel({ data }: { data: FinancialWorkspaceData }) {
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<FinancialWorkspaceData["recurringEntries"][number] | null>(null);
+  const active = data.recurringEntries.filter((item) => item.active);
+  const monthlyEstimate = active
+    .filter((item) => item.frequency === "monthly")
+    .reduce((sum, item) => sum + item.amount_cents, 0);
+
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader
+        title="Pagamentos recorrentes"
+        description="Cadastre despesas previsíveis como aluguel, sistemas, contratos, impostos e manutenção. A geração automática será habilitada em etapa controlada."
+        action={
+          <Button disabled={!data.access.canManage} onClick={() => setCreating(true)}>
+            <Plus />
+            Nova recorrência
+          </Button>
+        }
+      />
+      <div className="grid gap-3 lg:grid-cols-3">
+        <MetricCard label="Recorrências ativas" value={String(active.length)} description="Despesas previsíveis monitoradas" />
+        <MetricCard label="Estimativa mensal" value={formatCurrencyBRL(monthlyEstimate)} description="Somente regras mensais ativas" />
+        <MetricCard label="Próximo vencimento" value={data.recurringEntries[0] ? formatDate(data.recurringEntries[0].next_due_date) : "-"} description="Regra mais próxima" />
+      </div>
+      <section className="rounded-lg border bg-card">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[920px] text-sm">
+            <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">Descrição</th>
+                <th className="px-4 py-3 font-medium">Fornecedor</th>
+                <th className="px-4 py-3 font-medium">Categoria</th>
+                <th className="px-4 py-3 font-medium">Frequência</th>
+                <th className="px-4 py-3 font-medium">Próximo vencimento</th>
+                <th className="px-4 py-3 text-right font-medium">Valor</th>
+                <th className="px-4 py-3 text-right font-medium">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.recurringEntries.length ? (
+                data.recurringEntries.map((item) => (
+                  <tr key={item.id} className="border-t">
+                    <td className="px-4 py-3">
+                      <p className="font-medium">{item.description}</p>
+                      <p className="text-xs text-muted-foreground">{item.active ? "Ativa" : "Inativa"}</p>
+                    </td>
+                    <td className="px-4 py-3">{item.vendor?.name ?? "-"}</td>
+                    <td className="px-4 py-3">{item.category?.name ?? "Sem categoria"}</td>
+                    <td className="px-4 py-3">{frequencyLabel(item.frequency)}</td>
+                    <td className="px-4 py-3">{formatDate(item.next_due_date)}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrencyBRL(item.amount_cents)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <Button size="sm" variant="outline" disabled={!data.access.canManage} onClick={() => setEditing(item)}>
+                        Editar
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
+                    Nenhuma recorrência cadastrada.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <Modal open={creating} onOpenChange={setCreating} title="Nova recorrência" className="max-w-4xl">
+        <FinancialRecurringEntryForm vendors={data.vendors} categories={data.categories} costCenters={data.costCenters} onCompleted={() => setCreating(false)} />
+      </Modal>
+      <Modal open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)} title="Editar recorrência" className="max-w-4xl">
+        {editing ? (
+          <FinancialRecurringEntryForm
+            recurringEntry={editing}
+            vendors={data.vendors}
+            categories={data.categories}
+            costCenters={data.costCenters}
+            onCompleted={() => setEditing(null)}
+          />
+        ) : null}
+      </Modal>
+    </div>
+  );
+}
+
+function PayableReportsPanel({ data }: { data: FinancialWorkspaceData }) {
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [vendorId, setVendorId] = useState("all");
+  const [categoryId, setCategoryId] = useState("all");
+  const [costCenterId, setCostCenterId] = useState("all");
+  const entries = useMemo(
+    () =>
+      data.entries
+        .filter((entry) => entry.entry_type === "payable")
+        .filter((entry) => {
+          if (dateFrom && entry.due_date < dateFrom) return false;
+          if (dateTo && entry.due_date > dateTo) return false;
+          if (vendorId !== "all" && entry.vendor_id !== vendorId) return false;
+          if (categoryId !== "all" && entry.category_id !== categoryId) return false;
+          if (costCenterId !== "all" && entry.cost_center_id !== costCenterId) return false;
+          return true;
+        }),
+    [categoryId, costCenterId, data.entries, dateFrom, dateTo, vendorId],
+  );
+  const total = entries.reduce((sum, entry) => sum + totalEntryCents(entry), 0);
+  const open = entries.reduce((sum, entry) => sum + openEntryCents(entry), 0);
+  const paid = entries.reduce((sum, entry) => sum + entry.paid_cents, 0);
+  const freight = entries.reduce((sum, entry) => sum + (entry.freight_cents ?? 0), 0);
+  const itemCount = entries.reduce((sum, entry) => sum + entry.items.length, 0);
+  const byCategory = groupPayableReport(entries, (entry) => entry.category?.name ?? "Sem categoria");
+  const byVendor = groupPayableReport(entries, (entry) => entry.vendor?.name ?? "Fornecedor não informado");
+
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader title="Relatórios de pagamentos" description="Análise de despesas por período, fornecedor, categoria, centro de custo, documento e itens lançados." />
+      <section className="grid gap-3 rounded-lg border bg-card p-4 xl:grid-cols-5">
+        <FilterDate label="Data inicial" value={dateFrom} onChange={setDateFrom} />
+        <FilterDate label="Data final" value={dateTo} onChange={setDateTo} />
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Fornecedor
+          <Select value={vendorId} onChange={(event) => setVendorId(event.target.value)}>
+            <option value="all">Todos</option>
+            {data.vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+          </Select>
+        </label>
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Categoria
+          <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+            <option value="all">Todas</option>
+            {data.categories.filter((category) => category.direction === "expense").map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+          </Select>
+        </label>
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Centro de custo
+          <Select value={costCenterId} onChange={(event) => setCostCenterId(event.target.value)}>
+            <option value="all">Todos</option>
+            {data.costCenters.map((costCenter) => <option key={costCenter.id} value={costCenter.id}>{costCenter.name}</option>)}
+          </Select>
+        </label>
+      </section>
+      <div className="grid gap-3 xl:grid-cols-5">
+        <MetricCard label="Total" value={formatCurrencyBRL(total)} description="Subtotal - desconto + frete + acréscimos" />
+        <MetricCard label="Em aberto" value={formatCurrencyBRL(open)} description="A pagar no filtro" tone={open ? "warning" : "default"} />
+        <MetricCard label="Pago" value={formatCurrencyBRL(paid)} description="Baixas confirmadas" tone="success" />
+        <MetricCard label="Frete" value={formatCurrencyBRL(freight)} description="Frete lançado nos documentos" />
+        <MetricCard label="Itens" value={String(itemCount)} description="Itens fiscais/documentais" />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ReportBreakdown title="Por categoria" rows={byCategory} />
+        <ReportBreakdown title="Por fornecedor" rows={byVendor} />
+      </div>
+      <section className="rounded-lg border bg-card">
+        <div className="border-b p-4">
+          <p className="font-medium">Documentos filtrados</p>
+          <p className="text-sm text-muted-foreground">Base para conferência antes de exportações futuras.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-sm">
+            <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">Documento</th>
+                <th className="px-4 py-3 font-medium">Fornecedor</th>
+                <th className="px-4 py-3 font-medium">Categoria</th>
+                <th className="px-4 py-3 font-medium">Vencimento</th>
+                <th className="px-4 py-3 text-right font-medium">Itens</th>
+                <th className="px-4 py-3 text-right font-medium">Frete</th>
+                <th className="px-4 py-3 text-right font-medium">Total</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.length ? (
+                entries.slice(0, 120).map((entry) => (
+                  <tr key={entry.id} className="border-t">
+                    <td className="px-4 py-3">
+                      <p className="font-medium">{documentTypeLabel(entry.document_type)} {entry.document_number ? `• ${entry.document_number}` : ""}</p>
+                      <p className="text-xs text-muted-foreground">{entry.description}</p>
+                    </td>
+                    <td className="px-4 py-3">{entry.vendor?.name ?? "-"}</td>
+                    <td className="px-4 py-3">{entry.category?.name ?? "Sem categoria"}</td>
+                    <td className="px-4 py-3">{formatDate(entry.due_date)}</td>
+                    <td className="px-4 py-3 text-right">{entry.items.length}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrencyBRL(entry.freight_cents ?? 0)}</td>
+                    <td className="px-4 py-3 text-right font-medium">{formatCurrencyBRL(totalEntryCents(entry))}</td>
+                    <td className="px-4 py-3">{statusLabels[entry.status] ?? entry.status}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">Nenhum documento encontrado nos filtros.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function FinancialPanelHeader({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
+  return (
+    <header className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
+      <div>
+        <h2 className="font-semibold">{title}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      </div>
+      {action}
+    </header>
+  );
+}
+
+function FilterDate({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+      {label}
+      <input
+        type="date"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9 rounded-md border bg-background px-3 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+    </label>
+  );
+}
+
+function groupPayableReport(entries: FinancialEntryWithRelations[], getKey: (entry: FinancialEntryWithRelations) => string) {
+  const map = new Map<string, { label: string; total: number; open: number; count: number }>();
+  for (const entry of entries) {
+    const label = getKey(entry);
+    const current = map.get(label) ?? { label, total: 0, open: 0, count: 0 };
+    current.total += totalEntryCents(entry);
+    current.open += openEntryCents(entry);
+    current.count += 1;
+    map.set(label, current);
+  }
+  return [...map.values()].sort((a, b) => b.total - a.total).slice(0, 10);
+}
+
+function ReportBreakdown({ title, rows }: { title: string; rows: Array<{ label: string; total: number; open: number; count: number }> }) {
+  return (
+    <section className="rounded-lg border bg-card p-4">
+      <p className="font-medium">{title}</p>
+      <div className="mt-3 grid gap-2">
+        {rows.length ? rows.map((row) => (
+          <div key={row.label} className="grid gap-2 rounded-md border bg-background p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+            <div>
+              <p className="text-sm font-medium">{row.label}</p>
+              <p className="text-xs text-muted-foreground">{row.count} documento(s) | aberto {formatCurrencyBRL(row.open)}</p>
+            </div>
+            <p className="font-medium">{formatCurrencyBRL(row.total)}</p>
+          </div>
+        )) : <p className="text-sm text-muted-foreground">Sem dados para os filtros atuais.</p>}
+      </div>
+    </section>
+  );
+}
+
 function EntriesPanel({
   data,
   entryType,
@@ -226,6 +729,8 @@ function EntriesPanel({
         <FinancialEntryForm
           entryType={entryType}
           categories={data.categories}
+          costCenters={data.costCenters}
+          healthPlans={data.healthPlans}
           vendors={data.vendors}
           onCompleted={() => setCreating(false)}
         />
@@ -427,38 +932,55 @@ function EntryCard({
 }
 
 function RegistriesPanel({ data }: { data: FinancialWorkspaceData }) {
-  const [modal, setModal] = useState<"account" | "method" | "machine" | "vendor" | null>(null);
+  const [modal, setModal] = useState<{ type: "account" | "method" | "machine" | "vendor" | "category" | "cost-center" | "health-plan"; item?: unknown } | null>(null);
 
   return (
     <div className="grid gap-5">
       <header className="border-b pb-4">
         <h2 className="font-semibold">Cadastros financeiros</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Contas, caixa, máquinas de cartão, formas de pagamento e fornecedores.
+          Contas, caixas, formas de pagamento, máquinas, categorias, centros de custo, fornecedores e convênios.
         </p>
       </header>
-      <div className="grid gap-4 xl:grid-cols-4">
-        <RegistryCard icon={Landmark} title="Contas e caixas" count={data.accounts.length} onClick={() => setModal("account")} disabled={!data.access.canManage} />
-        <RegistryCard icon={Banknote} title="Formas de pagamento" count={data.paymentMethods.length} onClick={() => setModal("method")} disabled={!data.access.canManage} />
-        <RegistryCard icon={CreditCard} title="Máquinas de cartão" count={data.cardMachines.length} onClick={() => setModal("machine")} disabled={!data.access.canManage} />
-        <RegistryCard icon={Truck} title="Fornecedores" count={data.vendors.length} onClick={() => setModal("vendor")} disabled={!data.access.canManage} />
+      <div className="grid gap-4 xl:grid-cols-7">
+        <RegistryCard icon={Landmark} title="Contas" count={data.accounts.length} onClick={() => setModal({ type: "account" })} disabled={!data.access.canManage} />
+        <RegistryCard icon={Banknote} title="Formas" count={data.paymentMethods.length} onClick={() => setModal({ type: "method" })} disabled={!data.access.canManage} />
+        <RegistryCard icon={CreditCard} title="Máquinas" count={data.cardMachines.length} onClick={() => setModal({ type: "machine" })} disabled={!data.access.canManage} />
+        <RegistryCard icon={Tags} title="Categorias" count={data.categories.length} onClick={() => setModal({ type: "category" })} disabled={!data.access.canManage} />
+        <RegistryCard icon={Building2} title="Centros" count={data.costCenters.length} onClick={() => setModal({ type: "cost-center" })} disabled={!data.access.canManage} />
+        <RegistryCard icon={Truck} title="Fornecedores" count={data.vendors.length} onClick={() => setModal({ type: "vendor" })} disabled={!data.access.canManage} />
+        <RegistryCard icon={Building2} title="Convênios" count={data.healthPlans.length} onClick={() => setModal({ type: "health-plan" })} disabled={!data.access.canManage} />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ListBox title="Contas cadastradas" items={data.accounts.map((item) => `${item.name} - ${formatCurrencyBRL(item.current_balance_cents)}`)} />
-        <ListBox title="Máquinas e taxas" items={data.cardMachines.map((item) => `${item.name} - débito ${item.debit_fee_bps / 100}% / crédito ${item.credit_fee_bps / 100}%`)} />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <RegistryList title="Contas e caixas" rows={data.accounts.map((item) => ({ id: item.id, title: item.name, detail: `${formatCurrencyBRL(item.current_balance_cents)} | ${item.active ? "Ativa" : "Inativa"}`, onEdit: () => setModal({ type: "account", item }) }))} />
+        <RegistryList title="Formas de pagamento" rows={data.paymentMethods.map((item) => ({ id: item.id, title: item.name, detail: `${item.method_type} | ${item.settlement_days} dia(s)`, onEdit: () => setModal({ type: "method", item }) }))} />
+        <RegistryList title="Máquinas de cartão" rows={data.cardMachines.map((item) => ({ id: item.id, title: item.name, detail: `Débito ${item.debit_fee_bps / 100}% | Crédito ${item.credit_fee_bps / 100}%`, onEdit: () => setModal({ type: "machine", item }) }))} />
+        <RegistryList title="Categorias" rows={data.categories.map((item) => ({ id: item.id, title: item.name, detail: `${item.direction === "income" ? "Receita" : "Despesa"} | ${item.active ? "Ativa" : "Inativa"}`, onEdit: () => setModal({ type: "category", item }) }))} />
+        <RegistryList title="Centros de custo" rows={data.costCenters.map((item) => ({ id: item.id, title: item.name, detail: `${item.code ?? "Sem código"} | ${item.active ? "Ativo" : "Inativo"}`, onEdit: () => setModal({ type: "cost-center", item }) }))} />
+        <RegistryList title="Fornecedores" rows={data.vendors.map((item) => ({ id: item.id, title: item.name, detail: `${item.vendor_type} | ${item.active ? "Ativo" : "Inativo"}`, onEdit: () => setModal({ type: "vendor", item }) }))} />
+        <RegistryList title="Convênios" rows={data.healthPlans.map((item) => ({ id: item.id, title: item.name, detail: `${item.document ?? "Sem CNPJ"} | ${item.active ? "Ativo" : "Inativo"}`, onEdit: () => setModal({ type: "health-plan", item }) }))} />
       </div>
 
-      <Modal open={modal === "account"} onOpenChange={(open) => !open && setModal(null)} title="Nova conta financeira" className="max-w-4xl">
-        <FinancialAccountForm onCompleted={() => setModal(null)} />
+      <Modal open={modal?.type === "account"} onOpenChange={(open) => !open && setModal(null)} title={modal?.item ? "Editar conta financeira" : "Nova conta financeira"} className="max-w-4xl">
+        <FinancialAccountForm account={modal?.type === "account" ? (modal.item as FinancialWorkspaceData["accounts"][number] | undefined) : undefined} onCompleted={() => setModal(null)} />
       </Modal>
-      <Modal open={modal === "method"} onOpenChange={(open) => !open && setModal(null)} title="Nova forma de pagamento" className="max-w-3xl">
-        <PaymentMethodForm onCompleted={() => setModal(null)} />
+      <Modal open={modal?.type === "method"} onOpenChange={(open) => !open && setModal(null)} title={modal?.item ? "Editar forma de pagamento" : "Nova forma de pagamento"} className="max-w-3xl">
+        <PaymentMethodForm method={modal?.type === "method" ? (modal.item as FinancialWorkspaceData["paymentMethods"][number] | undefined) : undefined} onCompleted={() => setModal(null)} />
       </Modal>
-      <Modal open={modal === "machine"} onOpenChange={(open) => !open && setModal(null)} title="Nova máquina de cartão" className="max-w-4xl">
-        <CardMachineForm accounts={data.accounts} onCompleted={() => setModal(null)} />
+      <Modal open={modal?.type === "machine"} onOpenChange={(open) => !open && setModal(null)} title={modal?.item ? "Editar máquina de cartão" : "Nova máquina de cartão"} className="max-w-4xl">
+        <CardMachineForm machine={modal?.type === "machine" ? (modal.item as FinancialWorkspaceData["cardMachines"][number] | undefined) : undefined} accounts={data.accounts} onCompleted={() => setModal(null)} />
       </Modal>
-      <Modal open={modal === "vendor"} onOpenChange={(open) => !open && setModal(null)} title="Novo fornecedor" className="max-w-4xl">
-        <VendorForm onCompleted={() => setModal(null)} />
+      <Modal open={modal?.type === "vendor"} onOpenChange={(open) => !open && setModal(null)} title={modal?.item ? "Editar fornecedor" : "Novo fornecedor"} className="max-w-4xl">
+        <VendorForm vendor={modal?.type === "vendor" ? (modal.item as FinancialWorkspaceData["vendors"][number] | undefined) : undefined} onCompleted={() => setModal(null)} />
+      </Modal>
+      <Modal open={modal?.type === "category"} onOpenChange={(open) => !open && setModal(null)} title={modal?.item ? "Editar categoria" : "Nova categoria"} className="max-w-3xl">
+        <FinancialCategoryForm category={modal?.type === "category" ? (modal.item as FinancialWorkspaceData["categories"][number] | undefined) : undefined} categories={data.categories} onCompleted={() => setModal(null)} />
+      </Modal>
+      <Modal open={modal?.type === "cost-center"} onOpenChange={(open) => !open && setModal(null)} title={modal?.item ? "Editar centro de custo" : "Novo centro de custo"} className="max-w-3xl">
+        <CostCenterForm costCenter={modal?.type === "cost-center" ? (modal.item as FinancialWorkspaceData["costCenters"][number] | undefined) : undefined} onCompleted={() => setModal(null)} />
+      </Modal>
+      <Modal open={modal?.type === "health-plan"} onOpenChange={(open) => !open && setModal(null)} title={modal?.item ? "Editar convênio" : "Novo convênio"} className="max-w-3xl">
+        <HealthPlanForm healthPlan={modal?.type === "health-plan" ? (modal.item as FinancialWorkspaceData["healthPlans"][number] | undefined) : undefined} onCompleted={() => setModal(null)} />
       </Modal>
     </div>
   );
@@ -491,19 +1013,34 @@ function RegistryCard({
   );
 }
 
-function ListBox({ title, items }: { title: string; items: string[] }) {
+function RegistryList({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: Array<{ id: string; title: string; detail: string; onEdit: () => void }>;
+}) {
   return (
     <section className="rounded-lg border bg-card p-4">
-      <p className="font-medium">{title}</p>
-      <div className="mt-3 grid gap-2">
-        {items.length ? (
-          items.slice(0, 8).map((item) => (
-            <div key={item} className="rounded-md border bg-background p-2 text-sm text-muted-foreground">
-              {item}
+      <div className="flex items-center justify-between gap-3 border-b pb-3">
+        <p className="font-medium">{title}</p>
+        <span className="text-xs text-muted-foreground">{rows.length} registro(s)</span>
+      </div>
+      <div className="mt-3 grid max-h-80 gap-2 overflow-y-auto pr-1">
+        {rows.length ? (
+          rows.map((row) => (
+            <div key={row.id} className="grid gap-2 rounded-md border bg-background p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{row.title}</p>
+                <p className="mt-1 truncate text-xs text-muted-foreground">{row.detail}</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={row.onEdit}>
+                Editar
+              </Button>
             </div>
           ))
         ) : (
-          <p className="text-sm text-muted-foreground">Nenhum registro cadastrado.</p>
+          <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">Nenhum registro cadastrado.</p>
         )}
       </div>
     </section>
@@ -545,6 +1082,7 @@ function ReconciliationPanel({ data }: { data: FinancialWorkspaceData }) {
   const [reversing, setReversing] = useState<(typeof data.reconciliations)[number] | null>(null);
   const [detailing, setDetailing] = useState<(typeof data.reconciliations)[number] | null>(null);
   const [statementAccountId, setStatementAccountId] = useState<string | null>(null);
+  const [checkedMovementIds, setCheckedMovementIds] = useState<string[]>([]);
   const accountMap = useMemo(() => new Map(data.accounts.map((account) => [account.id, account])), [data.accounts]);
   const reconciliationMap = useMemo(
     () => new Map(data.reconciliations.map((item) => [item.id, item])),
@@ -580,11 +1118,18 @@ function ReconciliationPanel({ data }: { data: FinancialWorkspaceData }) {
   );
 
   const pendingRows = rows.filter(({ payment }) => !payment.reconciliation_id);
+  const checkedPendingCount = pendingRows.filter(({ payment }) => checkedMovementIds.includes(payment.id)).length;
+  const allPendingChecked = pendingRows.length === 0 || checkedPendingCount === pendingRows.length;
   const totalIn = rows.filter(({ payment }) => payment.direction === "in").reduce((sum, row) => sum + row.payment.net_amount_cents, 0);
   const totalOut = rows.filter(({ payment }) => payment.direction === "out").reduce((sum, row) => sum + row.payment.net_amount_cents, 0);
   const accountSummary = activeAccountIds.length === data.accounts.length ? "Todas as contas" : activeAccountIds.length + " conta(s)";
   const statementAccount = statementAccountId ? accountMap.get(statementAccountId) ?? null : null;
   const statementRows = statementAccountId ? rows.filter(({ payment }) => payment.account_id === statementAccountId) : [];
+
+  useEffect(() => {
+    const visibleIds = new Set(rows.map(({ payment }) => payment.id));
+    setCheckedMovementIds((current) => current.filter((id) => visibleIds.has(id)));
+  }, [rows]);
 
   return (
     <div className="grid gap-5">
@@ -597,7 +1142,7 @@ function ReconciliationPanel({ data }: { data: FinancialWorkspaceData }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => setReportOpen(true)}><FileText />Movimentos</Button>
-          <Button disabled={!data.access.canManage || data.accounts.length === 0} onClick={() => setCreating(true)}><BarChart3 />Conciliar período</Button>
+          <Button disabled={!data.access.canManage || data.accounts.length === 0 || !allPendingChecked} onClick={() => setCreating(true)}><BarChart3 />Conciliar período</Button>
         </div>
       </header>
 
@@ -649,10 +1194,22 @@ function ReconciliationPanel({ data }: { data: FinancialWorkspaceData }) {
             Existem movimentos confirmados no período que ainda não foram conciliados. Antes de fechar, confira o extrato da conta
             e compare com o saldo bancário em mãos.
           </p>
+          <p className="mt-2 font-medium">
+            {checkedPendingCount} de {pendingRows.length} movimento(s) pendente(s) conferido(s).
+          </p>
         </section>
       ) : null}
 
-      <MovementTable rows={rows} />
+      <MovementTable
+        rows={rows}
+        checkable
+        checkedIds={checkedMovementIds}
+        onToggle={(paymentId) =>
+          setCheckedMovementIds((current) =>
+            current.includes(paymentId) ? current.filter((id) => id !== paymentId) : [...current, paymentId],
+          )
+        }
+      />
 
       <section className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between gap-3 border-b pb-3"><div><p className="font-medium">Histórico de conciliações</p><p className="text-sm text-muted-foreground">Fechamentos por período, conta, responsável e status.</p></div></div>
@@ -732,15 +1289,37 @@ function EntriesTable({
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<EntryStatusFilter>(() => defaultStatusFilter(activeView));
   const [sort, setSort] = useState<EntrySort>("due_asc");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [categoryId, setCategoryId] = useState("all");
+  const [costCenterId, setCostCenterId] = useState("all");
+  const [healthPlanId, setHealthPlanId] = useState("all");
+  const [vendorId, setVendorId] = useState("all");
+  const [accountId, setAccountId] = useState("all");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     setStatusFilter(defaultStatusFilter(activeView));
   }, [activeView]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [accountId, categoryId, costCenterId, dateFrom, dateTo, healthPlanId, query, sort, statusFilter, vendorId]);
+
   const filtered = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     const result = entries
       .filter((entry) => matchesEntryStatus(entry, statusFilter))
+      .filter((entry) => {
+        if (dateFrom && entry.due_date < dateFrom) return false;
+        if (dateTo && entry.due_date > dateTo) return false;
+        if (categoryId !== "all" && entry.category_id !== categoryId) return false;
+        if (costCenterId !== "all" && entry.cost_center_id !== costCenterId) return false;
+        if (healthPlanId !== "all" && entry.health_plan_id !== healthPlanId) return false;
+        if (vendorId !== "all" && entry.vendor_id !== vendorId) return false;
+        if (accountId !== "all" && !entry.payments.some((payment) => payment.account_id === accountId)) return false;
+        return true;
+      })
       .filter((entry) => {
         if (!normalizedQuery) return true;
         const haystack = [
@@ -758,12 +1337,15 @@ function EntriesTable({
         return haystack.includes(normalizedQuery);
       });
     return sortEntries(result, sort);
-  }, [entries, query, sort, statusFilter]);
+  }, [accountId, categoryId, costCenterId, dateFrom, dateTo, entries, healthPlanId, query, sort, statusFilter, vendorId]);
 
   const openTotal = filtered.reduce((sum, entry) => sum + openEntryCents(entry), 0);
   const paidTotal = filtered.reduce((sum, entry) => sum + entry.paid_cents, 0);
   const overdueCount = filtered.filter(isOverdue).length;
   const title = entryType === "receivable" ? "Carteira de recebimentos" : "Carteira de pagamentos";
+  const pageSize = 20;
+  const totalPages = Math.max(Math.ceil(filtered.length / pageSize), 1);
+  const visibleEntries = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <section className="grid gap-4 rounded-lg border bg-card p-4">
@@ -787,7 +1369,7 @@ function EntriesTable({
         <MetricCard label="Conciliados" value={String(filtered.filter(entryHasReconciliation).length)} description="Com movimento bancário travado" />
       </div>
 
-      <div className="grid gap-3 rounded-md border bg-muted/20 p-3 xl:grid-cols-[1fr_180px_220px]">
+      <div className="grid gap-3 rounded-md border bg-muted/20 p-3 xl:grid-cols-4">
         <label className="grid gap-1 text-xs font-medium text-muted-foreground">
           Buscar
           <input
@@ -810,6 +1392,84 @@ function EntriesTable({
           </Select>
         </label>
         <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Vencimento inicial
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+            className="h-9 rounded-md border bg-background px-3 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Vencimento final
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(event) => setDateTo(event.target.value)}
+            className="h-9 rounded-md border bg-background px-3 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Categoria
+          <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+            <option value="all">Todas</option>
+            {data.categories
+              .filter((category) => category.direction === (entryType === "receivable" ? "income" : "expense"))
+              .map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+          </Select>
+        </label>
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Centro de custo
+          <Select value={costCenterId} onChange={(event) => setCostCenterId(event.target.value)}>
+            <option value="all">Todos</option>
+            {data.costCenters.map((costCenter) => (
+              <option key={costCenter.id} value={costCenter.id}>
+                {costCenter.name}
+              </option>
+            ))}
+          </Select>
+        </label>
+        {entryType === "receivable" ? (
+          <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+            Convênio
+            <Select value={healthPlanId} onChange={(event) => setHealthPlanId(event.target.value)}>
+              <option value="all">Todos</option>
+              {data.healthPlans.map((healthPlan) => (
+                <option key={healthPlan.id} value={healthPlan.id}>
+                  {healthPlan.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+        ) : (
+          <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+            Fornecedor
+            <Select value={vendorId} onChange={(event) => setVendorId(event.target.value)}>
+              <option value="all">Todos</option>
+              {data.vendors.map((vendor) => (
+                <option key={vendor.id} value={vendor.id}>
+                  {vendor.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+        )}
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Conta baixada
+          <Select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            <option value="all">Todas</option>
+            {data.accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
           Ordenar
           <Select value={sort} onChange={(event) => setSort(event.target.value as EntrySort)}>
             <option value="due_asc">Vencimento mais próximo</option>
@@ -819,6 +1479,27 @@ function EntriesTable({
             <option value="updated_desc">Atualização recente</option>
           </Select>
         </label>
+        <div className="flex items-end">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={() => {
+              setQuery("");
+              setDateFrom("");
+              setDateTo("");
+              setCategoryId("all");
+              setCostCenterId("all");
+              setHealthPlanId("all");
+              setVendorId("all");
+              setAccountId("all");
+              setSort("due_asc");
+              setStatusFilter(defaultStatusFilter(activeView));
+            }}
+          >
+            Limpar filtros
+          </Button>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-md border">
@@ -837,8 +1518,8 @@ function EntriesTable({
             </tr>
           </thead>
           <tbody>
-            {filtered.length ? (
-              filtered.slice(0, 120).map((entry) => <EntryTableRow key={entry.id} entry={entry} data={data} entryType={entryType} />)
+            {visibleEntries.length ? (
+              visibleEntries.map((entry) => <EntryTableRow key={entry.id} entry={entry} data={data} entryType={entryType} />)
             ) : (
               <tr>
                 <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
@@ -848,6 +1529,23 @@ function EntriesTable({
             )}
           </tbody>
         </table>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+        <span>
+          Exibindo {visibleEntries.length ? (page - 1) * pageSize + 1 : 0}-
+          {Math.min(page * pageSize, filtered.length)} de {filtered.length}
+        </span>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((current) => Math.max(current - 1, 1))}>
+            Anterior
+          </Button>
+          <span className="text-xs">
+            Página {page} de {totalPages}
+          </span>
+          <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(current + 1, totalPages))}>
+            Próxima
+          </Button>
+        </div>
       </div>
     </section>
   );
@@ -863,6 +1561,9 @@ function EntryTableRow({
   entryType: "receivable" | "payable";
 }) {
   const [settling, setSettling] = useState(false);
+  const [detailing, setDetailing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [receiptType, setReceiptType] = useState<"payment" | "payment_acknowledgement" | null>(null);
   const [reversing, setReversing] = useState<FinancialPayment | null>(null);
   const openCents = openEntryCents(entry);
@@ -878,7 +1579,10 @@ function EntryTableRow({
       </td>
       <td className="px-4 py-3">
         <p className="font-medium">{entry.description}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{entry.document_number || entry.origin}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {entry.entry_type === "payable" ? documentTypeLabel(entry.document_type) : entry.origin}
+          {entry.document_number ? ` | ${entry.document_number}` : ""}
+        </p>
       </td>
       <td className="px-4 py-3">
         <span className={isOverdue(entry) ? "font-medium text-amber-700" : undefined}>{formatDate(entry.due_date)}</span>
@@ -896,13 +1600,19 @@ function EntryTableRow({
       </td>
       <td className="px-4 py-3">
         <Badge className={locked ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground"}>
-          {locked ? "Conciliado" : "Pendente"}
+          {locked ? "Conciliado e bloqueado" : "Pendente"}
         </Badge>
       </td>
       <td className="px-4 py-3">
         <div className="flex justify-end gap-2">
           <Button size="sm" variant="outline" disabled={openCents <= 0 || !data.access.canEdit || locked} onClick={() => setSettling(true)}>
             Baixar
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setDetailing(true)}>
+            Detalhar
+          </Button>
+          <Button size="sm" variant="outline" disabled={!data.access.canEdit || locked || entry.status === "cancelled"} onClick={() => setEditing(true)}>
+            Editar
           </Button>
           {entryType === "receivable" ? (
             <Button size="sm" variant="outline" onClick={() => setReceiptType(openCents > 0 ? "payment_acknowledgement" : "payment")}>
@@ -912,8 +1622,28 @@ function EntryTableRow({
           <Button size="sm" variant="ghost" disabled={!latestPayment || latestPayment.status === "reversed" || !data.access.canManage || locked} onClick={() => latestPayment && setReversing(latestPayment)}>
             Estornar
           </Button>
+          <Button size="sm" variant="ghost" disabled={!data.access.canManage || locked || entry.status === "cancelled" || entry.paid_cents > 0} onClick={() => setCancelling(true)}>
+            Cancelar
+          </Button>
         </div>
 
+        <Modal open={detailing} onOpenChange={setDetailing} title="Detalhes do lançamento" description={entry.description} className="max-w-5xl">
+          <FinancialEntryDetail entry={entry} />
+        </Modal>
+        <Modal open={editing} onOpenChange={setEditing} title="Editar lançamento" description={locked ? "Movimento conciliado não pode ser alterado." : entry.description} className="max-w-4xl">
+          <FinancialEntryForm
+            entry={entry}
+            entryType={entry.entry_type}
+            categories={data.categories}
+            costCenters={data.costCenters}
+            healthPlans={data.healthPlans}
+            vendors={data.vendors}
+            onCompleted={() => setEditing(false)}
+          />
+        </Modal>
+        <Modal open={cancelling} onOpenChange={setCancelling} title="Cancelar lançamento" description={entry.description} className="max-w-lg">
+          <CancelFinancialEntryForm entry={entry} onCompleted={() => setCancelling(false)} />
+        </Modal>
         <Modal open={settling} onOpenChange={setSettling} title="Baixar lançamento" description={entry.description} className="max-w-4xl">
           <SettleEntryForm
             entryId={entry.id}
@@ -962,7 +1692,206 @@ function EntryTableRow({
   );
 }
 
-function MovementTable({ rows, compact }: { rows: MovementRow[]; compact?: boolean }) {
+function compactObject(value: Record<string, unknown> | null | undefined) {
+  if (!value) return "Sem detalhes adicionais.";
+  const entries = Object.entries(value)
+    .filter(([, item]) => item !== undefined && item !== null && item !== "")
+    .slice(0, 8);
+  if (!entries.length) return "Sem detalhes adicionais.";
+  return entries
+    .map(([key, item]) => `${key.replaceAll("_", " ")}: ${String(item)}`)
+    .join(" | ");
+}
+
+function FinancialEntryDetail({ entry }: { entry: FinancialEntryWithRelations }) {
+  const party = entry.patient?.social_name || entry.patient?.full_name || entry.vendor?.name || "Sem vínculo";
+  const locked = entryHasReconciliation(entry);
+
+  return (
+    <div className="grid gap-5">
+      <div className="grid gap-3 lg:grid-cols-4">
+        <MetricCard label="Total" value={formatCurrencyBRL(totalEntryCents(entry))} description="Valor líquido do lançamento" />
+        <MetricCard label="Pago" value={formatCurrencyBRL(entry.paid_cents)} description="Baixas confirmadas" tone="success" />
+        <MetricCard label="Aberto" value={formatCurrencyBRL(openEntryCents(entry))} description="Saldo ainda pendente" tone={openEntryCents(entry) > 0 ? "warning" : "default"} />
+        <MetricCard label="Status" value={statusLabels[entry.status] ?? entry.status} description={locked ? "Travado por conciliação" : "Editável conforme permissão"} />
+      </div>
+
+      {locked ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
+          Este lançamento possui movimento conciliado. Para alterar valores, vencimento, baixa ou estorno, é necessário reabrir a conciliação correspondente com permissão.
+        </div>
+      ) : null}
+
+      <section className="grid gap-3 rounded-lg border bg-card p-4">
+        <p className="font-medium">Dados principais</p>
+        <div className="grid gap-3 text-sm lg:grid-cols-3">
+          <InfoBox label="Pessoa/empresa" value={party} />
+          <InfoBox label="Categoria" value={entry.category?.name ?? "Sem categoria"} />
+          <InfoBox label="Centro de custo" value={entry.costCenter?.name ?? "Não informado"} />
+          <InfoBox label="Documento" value={`${documentTypeLabel(entry.document_type)}${entry.document_number ? ` - ${entry.document_number}` : ""}`} />
+          <InfoBox label="Emissão" value={formatDate(entry.issue_date)} />
+          <InfoBox label="Vencimento" value={formatDate(entry.due_date)} />
+        </div>
+        {entry.notes ? <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">{entry.notes}</p> : null}
+      </section>
+
+      {entry.entry_type === "payable" ? (
+        <section className="grid gap-3 rounded-lg border bg-card p-4">
+          <p className="font-medium">Itens e composição do documento</p>
+          <div className="grid gap-3 lg:grid-cols-4">
+            <InfoBox label="Subtotal" value={formatCurrencyBRL(entry.amount_cents)} />
+            <InfoBox label="Desconto" value={formatCurrencyBRL(entry.discount_cents)} />
+            <InfoBox label="Frete" value={formatCurrencyBRL(entry.freight_cents ?? 0)} />
+            <InfoBox label="Acréscimos" value={formatCurrencyBRL(entry.addition_cents)} />
+          </div>
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Item</th>
+                  <th className="px-3 py-2 text-right font-medium">Quantidade</th>
+                  <th className="px-3 py-2 text-right font-medium">Unitário</th>
+                  <th className="px-3 py-2 text-right font-medium">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entry.items.length ? (
+                  entry.items.map((item) => (
+                    <tr key={item.id} className="border-t">
+                      <td className="px-3 py-2">{item.description}</td>
+                      <td className="px-3 py-2 text-right">{String(item.quantity).replace(".", ",")}</td>
+                      <td className="px-3 py-2 text-right">{formatCurrencyBRL(item.unit_amount_cents)}</td>
+                      <td className="px-3 py-2 text-right font-medium">{formatCurrencyBRL(item.total_amount_cents)}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td className="px-3 py-8 text-center text-muted-foreground" colSpan={4}>
+                      Nenhum item detalhado para este documento.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="grid gap-3 rounded-lg border bg-card p-4">
+        <p className="font-medium">Baixas e documentos</p>
+        <div className="grid gap-2">
+          {entry.payments.length ? (
+            entry.payments.map((payment) => (
+              <div key={payment.id} className="grid gap-2 rounded-md border bg-background p-3 text-sm lg:grid-cols-[1fr_auto] lg:items-center">
+                <div>
+                  <p className="font-medium">{payment.status === "reversed" ? "Estornado" : "Confirmado"} em {formatDateTime(payment.paid_at)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Bruto {formatCurrencyBRL(payment.amount_cents)} | taxa {formatCurrencyBRL(payment.fee_cents)} | líquido {formatCurrencyBRL(payment.net_amount_cents)}
+                  </p>
+                </div>
+                <Badge className={payment.reconciliation_id ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground"}>
+                  {payment.reconciliation_id ? "Conciliado" : "Não conciliado"}
+                </Badge>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">Nenhuma baixa registrada.</p>
+          )}
+          {entry.receipts.length ? (
+            <div className="grid gap-2 border-t pt-3">
+              {entry.receipts.map((receipt) => (
+                <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 p-2 text-sm">
+                  <span>{receipt.title} | {formatDateTime(receipt.issued_at)}</span>
+                  <Button size="sm" variant="outline" onClick={() => window.open(`/financeiro/recibos/${receipt.id}`, "_blank")}>
+                    Abrir
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="grid gap-3 rounded-lg border bg-card p-4">
+        <p className="font-medium">Histórico do lançamento</p>
+        <div className="grid gap-2">
+          {entry.events.length ? (
+            entry.events.map((event) => (
+              <div key={event.id} className="rounded-md border bg-background p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium">{entryEventLabels[event.event_type] ?? event.event_type}</p>
+                  <span className="text-xs text-muted-foreground">{formatDateTime(event.created_at)}</span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">{event.notes ?? compactObject(event.new_values)}</p>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">Histórico específico ainda não registrado para este lançamento.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="grid gap-3 rounded-lg border bg-card p-4">
+        <p className="font-medium">Livro-caixa</p>
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 font-medium">Data</th>
+                <th className="px-3 py-2 font-medium">Origem</th>
+                <th className="px-3 py-2 font-medium">Tipo</th>
+                <th className="px-3 py-2 text-right font-medium">Valor</th>
+                <th className="px-3 py-2 text-right font-medium">Líquido</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entry.ledgerEntries.length ? (
+                entry.ledgerEntries.map((ledger) => (
+                  <tr key={ledger.id} className="border-t">
+                    <td className="px-3 py-2">{formatDateTime(ledger.occurred_at)}</td>
+                    <td className="px-3 py-2">{ledger.description}</td>
+                    <td className="px-3 py-2">{ledger.direction === "in" ? "Entrada" : "Saída"}</td>
+                    <td className="px-3 py-2 text-right">{formatCurrencyBRL(ledger.amount_cents)}</td>
+                    <td className="px-3 py-2 text-right font-medium">{formatCurrencyBRL(ledger.net_amount_cents)}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-3 py-8 text-center text-muted-foreground" colSpan={5}>
+                    Nenhum lançamento no livro-caixa para este registro.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function InfoBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border bg-muted/20 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 font-medium">{value}</p>
+    </div>
+  );
+}
+
+function MovementTable({
+  rows,
+  compact,
+  checkable,
+  checkedIds = [],
+  onToggle,
+}: {
+  rows: MovementRow[];
+  compact?: boolean;
+  checkable?: boolean;
+  checkedIds?: string[];
+  onToggle?: (paymentId: string) => void;
+}) {
   return (
     <section className="rounded-lg border bg-card">
       {!compact ? (
@@ -980,6 +1909,7 @@ function MovementTable({ rows, compact }: { rows: MovementRow[]; compact?: boole
         <table className="w-full min-w-[980px] text-sm">
           <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
             <tr>
+              {checkable ? <th className="px-4 py-3 font-medium">Conferido</th> : null}
               <th className="px-4 py-3 font-medium">Data</th>
               <th className="px-4 py-3 font-medium">Conta</th>
               <th className="px-4 py-3 font-medium">Tipo</th>
@@ -995,6 +1925,23 @@ function MovementTable({ rows, compact }: { rows: MovementRow[]; compact?: boole
             {rows.length ? (
               rows.slice(0, 120).map(({ entry, payment, account, reconciliation }) => (
                 <tr key={payment.id} className="border-t">
+                  {checkable ? (
+                    <td className="px-4 py-3">
+                      {payment.reconciliation_id ? (
+                        <Badge className="bg-emerald-500/10 text-emerald-700">Travado</Badge>
+                      ) : (
+                        <label className="inline-flex items-center gap-2 text-xs">
+                          <input
+                            type="checkbox"
+                            className="size-4"
+                            checked={checkedIds.includes(payment.id)}
+                            onChange={() => onToggle?.(payment.id)}
+                          />
+                          Conferi
+                        </label>
+                      )}
+                    </td>
+                  ) : null}
                   <td className="px-4 py-3">{formatDate(payment.paid_at)}</td>
                   <td className="px-4 py-3">{account?.name ?? "Sem conta"}</td>
                   <td className="px-4 py-3">
@@ -1021,7 +1968,7 @@ function MovementTable({ rows, compact }: { rows: MovementRow[]; compact?: boole
               ))
             ) : (
               <tr>
-                <td className="px-4 py-8 text-center text-muted-foreground" colSpan={9}>
+                <td className="px-4 py-8 text-center text-muted-foreground" colSpan={checkable ? 10 : 9}>
                   Nenhum movimento encontrado para os filtros selecionados.
                 </td>
               </tr>

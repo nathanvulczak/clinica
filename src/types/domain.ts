@@ -389,6 +389,17 @@ export type FinancialEntryType = "receivable" | "payable";
 export type FinancialEntryStatus = "pending" | "partial" | "paid" | "overdue" | "cancelled" | "refunded";
 export type FinancialPaymentStatus = "confirmed" | "reversed";
 export type FinancialReconciliationStatus = "closed" | "reversed";
+export type FinancialDocumentType = "nfe" | "nfse" | "receipt" | "contract" | "other";
+export type FinancialEntryEventType =
+  | "created"
+  | "updated"
+  | "settled"
+  | "payment_reversed"
+  | "cancelled"
+  | "receipt_issued"
+  | "reconciliation_closed"
+  | "reconciliation_reopened"
+  | "ledger_posted";
 
 export type FinancialPreferences = {
   clinic_id: string;
@@ -450,6 +461,26 @@ export type FinancialCategory = {
   active: boolean;
 };
 
+export type FinancialCostCenter = {
+  id: string;
+  clinic_id: string;
+  name: string;
+  code: string | null;
+  active: boolean;
+  notes: string | null;
+};
+
+export type FinancialHealthPlan = {
+  id: string;
+  clinic_id: string;
+  name: string;
+  document: string | null;
+  email: string | null;
+  phone: string | null;
+  active: boolean;
+  notes: string | null;
+};
+
 export type FinancialVendor = {
   id: string;
   clinic_id: string;
@@ -475,6 +506,9 @@ export type FinancialEntry = {
   medical_record_id: string | null;
   professional_member_id: string | null;
   category_id: string | null;
+  cost_center_id: string | null;
+  health_plan_id: string | null;
+  document_type: FinancialDocumentType;
   description: string;
   document_number: string | null;
   issue_date: string;
@@ -482,11 +516,42 @@ export type FinancialEntry = {
   competence_date: string;
   amount_cents: number;
   discount_cents: number;
+  freight_cents: number;
   addition_cents: number;
   paid_cents: number;
   notes: string | null;
   cancelled_reason: string | null;
   cancelled_at: string | null;
+  cancelled_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialEntryItem = {
+  id: string;
+  clinic_id: string;
+  entry_id: string;
+  description: string;
+  quantity: number;
+  unit_amount_cents: number;
+  total_amount_cents: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialRecurringEntry = {
+  id: string;
+  clinic_id: string;
+  vendor_id: string | null;
+  category_id: string | null;
+  cost_center_id: string | null;
+  description: string;
+  amount_cents: number;
+  frequency: "weekly" | "monthly" | "quarterly" | "yearly";
+  next_due_date: string;
+  active: boolean;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -548,4 +613,36 @@ export type FinancialReceipt = {
   issued_at: string;
   printed_at: string | null;
   exported_at: string | null;
+};
+
+export type FinancialEntryEvent = {
+  id: string;
+  clinic_id: string;
+  entry_id: string;
+  event_type: FinancialEntryEventType;
+  old_values: Record<string, unknown> | null;
+  new_values: Record<string, unknown> | null;
+  notes: string | null;
+  created_at: string;
+  created_by: string | null;
+};
+
+export type FinancialLedgerEntry = {
+  id: string;
+  clinic_id: string;
+  account_id: string | null;
+  entry_id: string | null;
+  payment_id: string | null;
+  reconciliation_id: string | null;
+  direction: "in" | "out";
+  amount_cents: number;
+  fee_cents: number;
+  net_amount_cents: number;
+  occurred_at: string;
+  description: string;
+  source_type: "payment" | "reversal" | "adjustment" | "reconciliation";
+  source_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  created_by: string | null;
 };
