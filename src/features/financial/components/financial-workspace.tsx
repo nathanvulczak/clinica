@@ -36,7 +36,7 @@ import {
   SettleEntryForm,
   VendorForm,
 } from "@/features/financial/components/financial-forms";
-import type { FinancialSection, FinancialSubsection } from "@/features/financial/components/financial-section-nav";
+import type { FinancialSection, FinancialSubsection } from "@/features/financial/navigation";
 import { formatCurrencyBRL } from "@/lib/utils";
 import type { FinancialPayment, FinancialPreferences } from "@/types/domain";
 import type { FinancialEntryWithRelations, FinancialWorkspace as FinancialWorkspaceData, PendingEncounterCharge } from "@/repositories/financial";

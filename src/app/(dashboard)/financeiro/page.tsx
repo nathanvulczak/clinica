@@ -3,10 +3,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
   FinancialSectionNav,
+} from "@/features/financial/components/financial-section-nav";
+import {
   getDefaultFinancialSubsection,
   isValidFinancialSubsection,
   type FinancialSection,
-} from "@/features/financial/components/financial-section-nav";
+} from "@/features/financial/navigation";
 import { FinancialWorkspace } from "@/features/financial/components/financial-workspace";
 import { getFinancialWorkspace } from "@/repositories/financial";
 import { auditDeniedModuleAccess } from "@/services/authorization/clinic-access";
