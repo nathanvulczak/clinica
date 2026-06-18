@@ -36,7 +36,7 @@ import {
   SettleEntryForm,
   VendorForm,
 } from "@/features/financial/components/financial-forms";
-import type { FinancialSection } from "@/features/financial/components/financial-section-nav";
+import type { FinancialSection, FinancialSubsection } from "@/features/financial/components/financial-section-nav";
 import { formatCurrencyBRL } from "@/lib/utils";
 import type { FinancialPayment, FinancialPreferences } from "@/types/domain";
 import type { FinancialEntryWithRelations, FinancialWorkspace as FinancialWorkspaceData, PendingEncounterCharge } from "@/repositories/financial";
@@ -109,13 +109,15 @@ function EmptyState({ title, description }: { title: string; description: string
 export function FinancialWorkspace({
   data,
   section,
+  activeView,
 }: {
   data: FinancialWorkspaceData;
   section: FinancialSection;
+  activeView: FinancialSubsection;
 }) {
   if (section === "overview") return <OverviewPanel data={data} />;
-  if (section === "receivables") return <EntriesPanel data={data} entryType="receivable" />;
-  if (section === "payables") return <EntriesPanel data={data} entryType="payable" />;
+  if (section === "receivables") return <EntriesPanel data={data} entryType="receivable" activeView={activeView} />;
+  if (section === "payables") return <EntriesPanel data={data} entryType="payable" activeView={activeView} />;
   if (section === "accounts") return <RegistriesPanel data={data} />;
   if (section === "reconciliation") return <ReconciliationPanel data={data} />;
   if (section === "commissions") return <CommissionsPanel data={data} />;
@@ -183,21 +185,26 @@ function OverviewPanel({ data }: { data: FinancialWorkspaceData }) {
 function EntriesPanel({
   data,
   entryType,
+  activeView,
 }: {
   data: FinancialWorkspaceData;
   entryType: "receivable" | "payable";
+  activeView: FinancialSubsection;
 }) {
   const [creating, setCreating] = useState(false);
   const entries = data.entries.filter((entry) => entry.entry_type === entryType);
+  const contextTitle = entryType === "receivable" ? "Contas a receber" : "Contas a pagar";
+  const contextDescription =
+    entryType === "receivable"
+      ? "Controle de cobranças, recebimentos, recibos, estornos e inadimplência da clínica."
+      : "Controle de despesas, fornecedores, pagamentos, estornos e previsibilidade de caixa.";
 
   return (
     <div className="grid gap-5">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
         <div>
-          <h2 className="font-semibold">{entryType === "receivable" ? "Contas a receber" : "Contas a pagar"}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Lançamentos, baixas, estornos e documentos financeiros auditáveis.
-          </p>
+          <h2 className="font-semibold">{contextTitle}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{contextDescription}</p>
         </div>
         <Button disabled={!data.access.canCreate} onClick={() => setCreating(true)}>
           <Plus />
@@ -207,16 +214,7 @@ function EntriesPanel({
 
       {entryType === "receivable" ? <PendingEncounterChargesPanel data={data} /> : null}
 
-      <div className="grid gap-3">
-        {entries.length ? (
-          entries.map((entry) => <EntryCard key={entry.id} entry={entry} data={data} />)
-        ) : (
-          <EmptyState
-            title={entryType === "receivable" ? "Nada a receber" : "Nada a pagar"}
-            description="Crie lançamentos manuais ou gere cobranças a partir dos atendimentos encerrados."
-          />
-        )}
-      </div>
+      <EntriesTable entries={entries} data={data} entryType={entryType} activeView={activeView} />
 
       <Modal
         open={creating}
@@ -675,6 +673,292 @@ function ReconciliationPanel({ data }: { data: FinancialWorkspaceData }) {
       <Modal open={Boolean(detailing)} onOpenChange={(open) => { if (!open) setDetailing(null); }} title="Detalhes da conciliação" description="Resumo somente para consulta. Nenhum dado pode ser alterado aqui." className="max-w-5xl">{detailing ? <ReconciliationDetail reconciliation={detailing} rows={rows.filter(({ payment }) => payment.reconciliation_id === detailing.id)} /> : null}</Modal>
       <Modal open={Boolean(reversing)} onOpenChange={(open) => { if (!open) setReversing(null); }} title="Reabrir conciliação" description="Use somente para correção auditada de movimentos já conferidos." className="max-w-lg">{reversing ? <ReverseReconciliationForm reconciliation={reversing} onCompleted={() => setReversing(null)} /> : null}</Modal>
     </div>
+  );
+}
+
+type EntryStatusFilter = "all" | "open" | "paid" | "overdue" | "partial" | "with_reversals" | "reconciled";
+type EntrySort = "due_asc" | "due_desc" | "amount_desc" | "amount_asc" | "updated_desc";
+
+function defaultStatusFilter(activeView: FinancialSubsection): EntryStatusFilter {
+  if (activeView === "settle" || activeView === "open" || activeView === "delinquency") return "open";
+  if (activeView === "reversals") return "with_reversals";
+  return "all";
+}
+
+function isOverdue(entry: FinancialEntryWithRelations) {
+  return entry.status !== "paid" && entry.due_date < new Date().toISOString().slice(0, 10);
+}
+
+function entryHasReversal(entry: FinancialEntryWithRelations) {
+  return entry.payments.some((payment) => payment.status === "reversed");
+}
+
+function entryHasReconciliation(entry: FinancialEntryWithRelations) {
+  return entry.payments.some((payment) => Boolean(payment.reconciliation_id));
+}
+
+function matchesEntryStatus(entry: FinancialEntryWithRelations, filter: EntryStatusFilter) {
+  if (filter === "all") return true;
+  if (filter === "open") return openEntryCents(entry) > 0 && entry.status !== "cancelled";
+  if (filter === "paid") return entry.status === "paid";
+  if (filter === "partial") return entry.status === "partial";
+  if (filter === "overdue") return isOverdue(entry);
+  if (filter === "with_reversals") return entryHasReversal(entry);
+  if (filter === "reconciled") return entryHasReconciliation(entry);
+  return true;
+}
+
+function sortEntries(entries: FinancialEntryWithRelations[], sort: EntrySort) {
+  return [...entries].sort((a, b) => {
+    if (sort === "due_desc") return b.due_date.localeCompare(a.due_date);
+    if (sort === "amount_desc") return totalEntryCents(b) - totalEntryCents(a);
+    if (sort === "amount_asc") return totalEntryCents(a) - totalEntryCents(b);
+    if (sort === "updated_desc") return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    return a.due_date.localeCompare(b.due_date);
+  });
+}
+
+function EntriesTable({
+  entries,
+  data,
+  entryType,
+  activeView,
+}: {
+  entries: FinancialEntryWithRelations[];
+  data: FinancialWorkspaceData;
+  entryType: "receivable" | "payable";
+  activeView: FinancialSubsection;
+}) {
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<EntryStatusFilter>(() => defaultStatusFilter(activeView));
+  const [sort, setSort] = useState<EntrySort>("due_asc");
+
+  useEffect(() => {
+    setStatusFilter(defaultStatusFilter(activeView));
+  }, [activeView]);
+
+  const filtered = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const result = entries
+      .filter((entry) => matchesEntryStatus(entry, statusFilter))
+      .filter((entry) => {
+        if (!normalizedQuery) return true;
+        const haystack = [
+          entry.description,
+          entry.document_number,
+          entry.patient?.full_name,
+          entry.patient?.social_name,
+          entry.vendor?.name,
+          entry.category?.name,
+          entry.professional?.profile?.full_name,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(normalizedQuery);
+      });
+    return sortEntries(result, sort);
+  }, [entries, query, sort, statusFilter]);
+
+  const openTotal = filtered.reduce((sum, entry) => sum + openEntryCents(entry), 0);
+  const paidTotal = filtered.reduce((sum, entry) => sum + entry.paid_cents, 0);
+  const overdueCount = filtered.filter(isOverdue).length;
+  const title = entryType === "receivable" ? "Carteira de recebimentos" : "Carteira de pagamentos";
+
+  return (
+    <section className="grid gap-4 rounded-lg border bg-card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="font-medium">{title}</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Visualização tabelada com filtros operacionais, saldos e ações auditáveis.
+          </p>
+        </div>
+        <div className="grid gap-1 text-right text-xs text-muted-foreground">
+          <span>{filtered.length} lançamento(s)</span>
+          <span>{overdueCount} vencido(s)</span>
+        </div>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-4">
+        <MetricCard label="Aberto no filtro" value={formatCurrencyBRL(openTotal)} description="Saldo ainda não baixado" tone={openTotal > 0 ? "warning" : "default"} />
+        <MetricCard label="Pago no filtro" value={formatCurrencyBRL(paidTotal)} description="Baixas confirmadas" tone="success" />
+        <MetricCard label="Vencidos" value={String(overdueCount)} description="Lançamentos com vencimento ultrapassado" tone={overdueCount ? "warning" : "default"} />
+        <MetricCard label="Conciliados" value={String(filtered.filter(entryHasReconciliation).length)} description="Com movimento bancário travado" />
+      </div>
+
+      <div className="grid gap-3 rounded-md border bg-muted/20 p-3 xl:grid-cols-[1fr_180px_220px]">
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Buscar
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={entryType === "receivable" ? "Paciente, documento, serviço..." : "Fornecedor, documento, descrição..."}
+            className="h-9 rounded-md border bg-background px-3 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Status
+          <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as EntryStatusFilter)}>
+            <option value="all">Todos</option>
+            <option value="open">Em aberto</option>
+            <option value="partial">Parcial</option>
+            <option value="paid">Pago</option>
+            <option value="overdue">Vencido</option>
+            <option value="with_reversals">Com estorno</option>
+            <option value="reconciled">Conciliado</option>
+          </Select>
+        </label>
+        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+          Ordenar
+          <Select value={sort} onChange={(event) => setSort(event.target.value as EntrySort)}>
+            <option value="due_asc">Vencimento mais próximo</option>
+            <option value="due_desc">Vencimento mais distante</option>
+            <option value="amount_desc">Maior valor</option>
+            <option value="amount_asc">Menor valor</option>
+            <option value="updated_desc">Atualização recente</option>
+          </Select>
+        </label>
+      </div>
+
+      <div className="overflow-x-auto rounded-md border">
+        <table className="w-full min-w-[1120px] text-sm">
+          <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3 font-medium">{entryType === "receivable" ? "Paciente/Origem" : "Fornecedor/Origem"}</th>
+              <th className="px-4 py-3 font-medium">Descrição</th>
+              <th className="px-4 py-3 font-medium">Vencimento</th>
+              <th className="px-4 py-3 text-right font-medium">Total</th>
+              <th className="px-4 py-3 text-right font-medium">Pago</th>
+              <th className="px-4 py-3 text-right font-medium">Aberto</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Conciliação</th>
+              <th className="px-4 py-3 text-right font-medium">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length ? (
+              filtered.slice(0, 120).map((entry) => <EntryTableRow key={entry.id} entry={entry} data={data} entryType={entryType} />)
+            ) : (
+              <tr>
+                <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
+                  Nenhum lançamento encontrado para os filtros selecionados.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function EntryTableRow({
+  entry,
+  data,
+  entryType,
+}: {
+  entry: FinancialEntryWithRelations;
+  data: FinancialWorkspaceData;
+  entryType: "receivable" | "payable";
+}) {
+  const [settling, setSettling] = useState(false);
+  const [receiptType, setReceiptType] = useState<"payment" | "payment_acknowledgement" | null>(null);
+  const [reversing, setReversing] = useState<FinancialPayment | null>(null);
+  const openCents = openEntryCents(entry);
+  const party = entry.patient?.social_name || entry.patient?.full_name || entry.vendor?.name || "Sem vínculo";
+  const locked = entryHasReconciliation(entry);
+  const latestPayment = entry.payments.find((payment) => payment.status === "confirmed") ?? null;
+
+  return (
+    <tr className="border-t align-top">
+      <td className="px-4 py-3">
+        <p className="font-medium">{party}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{entry.category?.name ?? "Sem categoria"}</p>
+      </td>
+      <td className="px-4 py-3">
+        <p className="font-medium">{entry.description}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{entry.document_number || entry.origin}</p>
+      </td>
+      <td className="px-4 py-3">
+        <span className={isOverdue(entry) ? "font-medium text-amber-700" : undefined}>{formatDate(entry.due_date)}</span>
+      </td>
+      <td className="px-4 py-3 text-right">{formatCurrencyBRL(totalEntryCents(entry))}</td>
+      <td className="px-4 py-3 text-right">{formatCurrencyBRL(entry.paid_cents)}</td>
+      <td className="px-4 py-3 text-right font-medium">{formatCurrencyBRL(openCents)}</td>
+      <td className="px-4 py-3">
+        <div className="grid gap-1">
+          <Badge className={isOverdue(entry) ? "bg-amber-500/10 text-amber-700" : undefined}>
+            {isOverdue(entry) ? "Vencido" : statusLabels[entry.status] ?? entry.status}
+          </Badge>
+          {entryHasReversal(entry) ? <span className="text-xs text-destructive">Possui estorno</span> : null}
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <Badge className={locked ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground"}>
+          {locked ? "Conciliado" : "Pendente"}
+        </Badge>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex justify-end gap-2">
+          <Button size="sm" variant="outline" disabled={openCents <= 0 || !data.access.canEdit || locked} onClick={() => setSettling(true)}>
+            Baixar
+          </Button>
+          {entryType === "receivable" ? (
+            <Button size="sm" variant="outline" onClick={() => setReceiptType(openCents > 0 ? "payment_acknowledgement" : "payment")}>
+              Documento
+            </Button>
+          ) : null}
+          <Button size="sm" variant="ghost" disabled={!latestPayment || latestPayment.status === "reversed" || !data.access.canManage || locked} onClick={() => latestPayment && setReversing(latestPayment)}>
+            Estornar
+          </Button>
+        </div>
+
+        <Modal open={settling} onOpenChange={setSettling} title="Baixar lançamento" description={entry.description} className="max-w-4xl">
+          <SettleEntryForm
+            entryId={entry.id}
+            entryOpenCents={openCents}
+            accounts={data.accounts}
+            paymentMethods={data.paymentMethods}
+            cardMachines={data.cardMachines}
+            onCompleted={(state) => {
+              setSettling(false);
+              if (state.receiptId) window.open(`/financeiro/recibos/${state.receiptId}`, "_blank");
+            }}
+          />
+        </Modal>
+        <Modal
+          open={Boolean(receiptType)}
+          onOpenChange={(open) => {
+            if (!open) setReceiptType(null);
+          }}
+          title={receiptType === "payment" ? "Emitir recibo" : "Emitir ciência de pagamento"}
+          className="max-w-lg"
+        >
+          {receiptType ? (
+            <ReceiptForm
+              entryId={entry.id}
+              type={receiptType}
+              onCompleted={(state) => {
+                setReceiptType(null);
+                if (state.receiptId) window.open(`/financeiro/recibos/${state.receiptId}`, "_blank");
+              }}
+            />
+          ) : null}
+        </Modal>
+        <Modal
+          open={Boolean(reversing)}
+          onOpenChange={(open) => {
+            if (!open) setReversing(null);
+          }}
+          title="Estornar baixa"
+          description="Informe o motivo para manter rastreabilidade financeira."
+          className="max-w-lg"
+        >
+          {reversing ? <ReversePaymentForm payment={reversing} onCompleted={() => setReversing(null)} /> : null}
+        </Modal>
+      </td>
+    </tr>
   );
 }
 

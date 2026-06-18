@@ -1,9 +1,10 @@
 import { LockKeyhole } from "lucide-react";
-import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
   FinancialSectionNav,
+  getDefaultFinancialSubsection,
+  isValidFinancialSubsection,
   type FinancialSection,
 } from "@/features/financial/components/financial-section-nav";
 import { FinancialWorkspace } from "@/features/financial/components/financial-workspace";
@@ -31,6 +32,9 @@ export default async function FinanceiroPage({
 }) {
   const params = await searchParams;
   const section = normalizeSection(params.section);
+  const activeView = isValidFinancialSubsection(section, params.view)
+    ? params.view
+    : getDefaultFinancialSubsection(section);
   const { activeClinic } = await getActiveClinicContext();
   const data = await getFinancialWorkspace(activeClinic?.id);
 
@@ -43,12 +47,7 @@ export default async function FinanceiroPage({
   }
 
   return (
-    <>
-      <PageHeader
-        title="Financeiro"
-        description="Recebimentos, pagamentos, caixa, conciliação, comissões e documentos financeiros da clínica."
-      />
-
+    <div className="grid gap-5">
       {!activeClinic ? (
         <Card>
           <CardHeader>
@@ -70,11 +69,11 @@ export default async function FinanceiroPage({
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-5">
-          <FinancialSectionNav activeSection={section} />
-          <FinancialWorkspace data={data} section={section} />
-        </div>
+        <>
+          <FinancialSectionNav activeSection={section} activeView={activeView} clinicName={activeClinic.trade_name} />
+          <FinancialWorkspace data={data} section={section} activeView={activeView} />
+        </>
       )}
-    </>
+    </div>
   );
 }

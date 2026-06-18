@@ -71,6 +71,7 @@ export function AppShell({
   allowedNavigation: NavigationKey[];
 }) {
   const pathname = usePathname();
+  const isFinancialRoute = pathname.startsWith("/financeiro");
   const [collapsed, setCollapsed] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
   const [welcomePhase, setWelcomePhase] = useState<"entering" | "visible" | "leaving">("entering");
@@ -229,7 +230,10 @@ export function AppShell({
       </aside>
 
       <div className="min-w-0">
-        <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between border-b bg-background/95 px-4 backdrop-blur lg:px-8">
+        <header className={cn(
+          "sticky top-0 z-20 flex min-h-16 items-center justify-between border-b bg-background/95 px-4 backdrop-blur lg:px-8",
+          isFinancialRoute && "hidden",
+        )}>
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex size-9 items-center justify-center rounded-md bg-primary text-primary-foreground lg:hidden">
               <Menu className="size-5" />
@@ -251,7 +255,7 @@ export function AppShell({
           </form>
         </header>
 
-        <nav className="flex gap-2 overflow-x-auto border-b bg-card px-4 py-2 lg:hidden">
+        <nav className={cn("flex gap-2 overflow-x-auto border-b bg-card px-4 py-2 lg:hidden", isFinancialRoute && "hidden")}>
           {visibleNavigation
             .filter((item) => !item.disabled)
             .map((item) => (
@@ -264,7 +268,7 @@ export function AppShell({
             ))}
         </nav>
 
-        <main className="px-4 py-6 lg:px-8">{children}</main>
+        <main className={cn(isFinancialRoute ? "px-4 py-4 lg:px-6" : "px-4 py-6 lg:px-8")}>{children}</main>
       </div>
 
       {showWelcome ? (
