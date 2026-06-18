@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
-import { CreditCard, Landmark, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Truck } from "lucide-react";
+import { Check, CreditCard, Landmark, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
@@ -581,7 +581,7 @@ export function ReconciliationForm({
             >
               <span className="truncate">{account.name}</span>
               <span className={`flex size-4 items-center justify-center rounded border text-[10px] ${selectedAccountId === account.id ? "border-primary bg-primary text-primary-foreground" : "bg-card"}`}>
-                {selectedAccountId === account.id ? "?" : ""}
+                {selectedAccountId === account.id ? <Check className="size-3" /> : ""}
               </span>
             </button>
           ))}

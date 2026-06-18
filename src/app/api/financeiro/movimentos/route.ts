@@ -15,7 +15,7 @@ function escapeHtml(value: string | number | null | undefined) {
 }
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return "Nao informado";
+  if (!value) return "Não informado";
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
     timeZone: "America/Sao_Paulo",
@@ -38,10 +38,10 @@ export async function GET(request: Request) {
   if (!user) return NextResponse.redirect(new URL("/login", request.url));
 
   const { activeClinic } = await getActiveClinicContext();
-  if (!activeClinic) return new NextResponse("Clinica ativa nao encontrada.", { status: 404 });
+  if (!activeClinic) return new NextResponse("Clínica ativa não encontrada.", { status: 404 });
 
   const access = await getFinancialAccess(activeClinic.id);
-  if (!access.canView) return new NextResponse("Acesso financeiro nao autorizado.", { status: 403 });
+  if (!access.canView) return new NextResponse("Acesso financeiro não autorizado.", { status: 403 });
 
   const url = new URL(request.url);
   const dateFrom = url.searchParams.get("date_from");
@@ -59,7 +59,7 @@ export async function GET(request: Request) {
       entry.payments.map((payment) => ({
         entry,
         payment,
-        party: entry.patient?.social_name || entry.patient?.full_name || entry.vendor?.name || "Sem vinculacao",
+        party: entry.patient?.social_name || entry.patient?.full_name || entry.vendor?.name || "Sem vinculação",
       })),
     )
     .filter(({ payment }) => payment.status === "confirmed")
@@ -89,7 +89,7 @@ export async function GET(request: Request) {
     module: "financial",
     recordTable: "financial_payments",
     level: "security",
-    notes: "Relatorio de movimentos financeiros visualizado para impressao/PDF.",
+    notes: "Relatório de movimentos financeiros visualizado para impressão/PDF.",
     newValues: Object.fromEntries(url.searchParams.entries()),
   });
 
@@ -100,7 +100,7 @@ export async function GET(request: Request) {
         <tr>
           <td>${escapeHtml(formatDate(payment.paid_at))}</td>
           <td>${escapeHtml(account?.name ?? "Sem conta")}</td>
-          <td>${escapeHtml(payment.direction === "in" ? "Entrada" : "Saida")}</td>
+          <td>${escapeHtml(payment.direction === "in" ? "Entrada" : "Saída")}</td>
           <td>${escapeHtml(entry.description)}<br><span>${escapeHtml(party)}</span></td>
           <td class="right">${escapeHtml(formatCurrencyBRL(payment.amount_cents))}</td>
           <td class="right">${escapeHtml(formatCurrencyBRL(payment.fee_cents))}</td>
@@ -116,7 +116,7 @@ export async function GET(request: Request) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Relatorio de movimentos financeiros</title>
+    <title>Relatório de movimentos financeiros</title>
     <style>
       @page { size: A4 landscape; margin: 12mm; }
       * { box-sizing: border-box; }
@@ -138,21 +138,21 @@ export async function GET(request: Request) {
     </style>
   </head>
   <body>
-    <div class="toolbar"><div><strong>Relatorio financeiro para PDF</strong><div class="muted">Revise os filtros antes de imprimir ou salvar como PDF.</div></div><button onclick="window.print()">Imprimir / salvar PDF</button></div>
+    <div class="toolbar"><div><strong>Relatório financeiro para PDF</strong><div class="muted">Revise os filtros antes de imprimir ou salvar como PDF.</div></div><button onclick="window.print()">Imprimir / salvar PDF</button></div>
     <main>
       <h1>Movimentos financeiros</h1>
-      <div class="muted">Clinica: ${escapeHtml(activeClinic.trade_name || activeClinic.legal_name)} | Periodo: ${escapeHtml(dateFrom ?? "inicio")} ate ${escapeHtml(dateTo ?? "hoje")}</div>
+      <div class="muted">Clínica: ${escapeHtml(activeClinic.trade_name || activeClinic.legal_name)} | Período: ${escapeHtml(dateFrom ?? "início")} até ${escapeHtml(dateTo ?? "hoje")}</div>
       <section class="summary">
         <div class="box">Entradas<strong>${escapeHtml(formatCurrencyBRL(totalIn))}</strong></div>
-        <div class="box">Saidas<strong>${escapeHtml(formatCurrencyBRL(totalOut))}</strong></div>
-        <div class="box">Saldo liquido<strong>${escapeHtml(formatCurrencyBRL(totalIn - totalOut))}</strong></div>
+        <div class="box">Saídas<strong>${escapeHtml(formatCurrencyBRL(totalOut))}</strong></div>
+        <div class="box">Saldo líquido<strong>${escapeHtml(formatCurrencyBRL(totalIn - totalOut))}</strong></div>
         <div class="box">Movimentos<strong>${rows.length}</strong></div>
       </section>
       <table>
-        <thead><tr><th>Data</th><th>Conta</th><th>Tipo</th><th>Lancamento</th><th class="right">Bruto</th><th class="right">Taxa</th><th class="right">Liquido</th><th>Conciliacao</th></tr></thead>
+        <thead><tr><th>Data</th><th>Conta</th><th>Tipo</th><th>Lançamento</th><th class="right">Bruto</th><th class="right">Taxa</th><th class="right">Líquido</th><th>Conciliação</th></tr></thead>
         <tbody>${tableRows || '<tr><td colspan="8">Nenhum movimento encontrado.</td></tr>'}</tbody>
       </table>
-      <footer>Relatorio gerado pelo CliniCore. A visualizacao foi registrada em auditoria.</footer>
+      <footer>Relatório gerado pelo CliniCore. A visualização foi registrada em auditoria.</footer>
     </main>
   </body>
 </html>`;
