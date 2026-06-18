@@ -9,6 +9,7 @@ import {
   cancelFinancialEntryAction,
   createEncounterChargeAction,
   createFinancialReconciliationAction,
+  generatePayableFromRecurringAction,
   issueFinancialReceiptAction,
   reverseFinancialReconciliationAction,
   reverseFinancialPaymentAction,
@@ -25,6 +26,7 @@ import {
   settleFinancialEntryAction,
   type FinancialActionState,
 } from "@/features/financial/actions";
+import { formatCpfOrCnpj, formatCurrencyInput, formatPhone, normalizeEmail } from "@/lib/formatters";
 import { formatCurrencyBRL } from "@/lib/utils";
 import type {
   FinancialAccount,
@@ -78,15 +80,134 @@ function MoneyInput({
   defaultValue?: string;
   required?: boolean;
 }) {
+  const [value, setValue] = useState(defaultValue);
+
   return (
     <label className="grid gap-2 text-sm font-medium">
       {label}
       <input
         name={name}
-        defaultValue={defaultValue}
+        value={value}
         required={required}
         inputMode="decimal"
         placeholder="0,00"
+        onChange={(event) => setValue(formatCurrencyInput(event.target.value))}
+        onBlur={() => {
+          if (!value) setValue("0,00");
+        }}
+        className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+    </label>
+  );
+}
+
+function CurrencyInput({
+  value,
+  onChange,
+  label,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+}) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      {label}
+      <input
+        value={value}
+        onChange={(event) => onChange(formatCurrencyInput(event.target.value))}
+        onBlur={() => {
+          if (!value) onChange("0,00");
+        }}
+        inputMode="decimal"
+        placeholder="0,00"
+        className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+    </label>
+  );
+}
+
+function DocumentInput({ name, label, defaultValue }: { name: string; label: string; defaultValue?: string | null }) {
+  const [value, setValue] = useState(defaultValue ? formatCpfOrCnpj(defaultValue) : "");
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      {label}
+      <input
+        name={name}
+        value={value}
+        onChange={(event) => setValue(formatCpfOrCnpj(event.target.value))}
+        inputMode="numeric"
+        placeholder="CPF ou CNPJ"
+        className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+    </label>
+  );
+}
+
+function PhoneInput({ name, label, defaultValue }: { name: string; label: string; defaultValue?: string | null }) {
+  const [value, setValue] = useState(defaultValue ? formatPhone(defaultValue) : "");
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      {label}
+      <input
+        name={name}
+        value={value}
+        onChange={(event) => setValue(formatPhone(event.target.value))}
+        inputMode="tel"
+        placeholder="(00) 00000-0000"
+        className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+    </label>
+  );
+}
+
+function EmailInput({ name, label, defaultValue }: { name: string; label: string; defaultValue?: string | null }) {
+  const [value, setValue] = useState(defaultValue ?? "");
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      {label}
+      <input
+        name={name}
+        type="email"
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={() => setValue((current) => normalizeEmail(current))}
+        placeholder="email@clinica.com"
+        className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+    </label>
+  );
+}
+
+function PercentInput({ name, label, defaultValue = 0 }: { name: string; label: string; defaultValue?: number }) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      {label}
+      <div className="flex h-10 overflow-hidden rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring">
+        <input
+          name={name}
+          type="number"
+          min={0}
+          max={100}
+          step="0.01"
+          defaultValue={defaultValue}
+          className="min-w-0 flex-1 bg-transparent px-3 text-sm font-normal outline-none"
+        />
+        <span className="flex items-center border-l bg-muted/30 px-3 text-sm text-muted-foreground">%</span>
+      </div>
+    </label>
+  );
+}
+
+function QuantityInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      Quantidade
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value.replace(/[^\d,.]/g, ""))}
+        inputMode="decimal"
+        placeholder="1"
         className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
     </label>
@@ -291,14 +412,9 @@ export function CardMachineForm({
             ))}
           </Select>
         </label>
-        <Field name="debit_fee" label="Taxa débito (%)" type="number" defaultValue={(machine?.debit_fee_bps ?? 0) / 100} />
-        <Field name="credit_fee" label="Taxa crédito (%)" type="number" defaultValue={(machine?.credit_fee_bps ?? 0) / 100} />
-        <Field
-          name="credit_installment_fee"
-          label="Taxa crédito parcelado (%)"
-          type="number"
-          defaultValue={(machine?.credit_installment_fee_bps ?? 0) / 100}
-        />
+        <PercentInput name="debit_fee" label="Taxa débito" defaultValue={(machine?.debit_fee_bps ?? 0) / 100} />
+        <PercentInput name="credit_fee" label="Taxa crédito" defaultValue={(machine?.credit_fee_bps ?? 0) / 100} />
+        <PercentInput name="credit_installment_fee" label="Taxa crédito parcelado" defaultValue={(machine?.credit_installment_fee_bps ?? 0) / 100} />
         <Field name="debit_settlement_days" label="Prazo débito" type="number" defaultValue={machine?.debit_settlement_days ?? 1} />
         <Field name="credit_settlement_days" label="Prazo crédito" type="number" defaultValue={machine?.credit_settlement_days ?? 30} />
       </div>
@@ -323,9 +439,9 @@ export function VendorForm({ vendor, onCompleted }: { vendor?: FinancialVendor |
       <input type="hidden" name="id" value={vendor?.id ?? ""} />
       <div className="grid gap-4 lg:grid-cols-2">
         <Field name="name" label="Nome" defaultValue={vendor?.name} required />
-        <Field name="document" label="CPF/CNPJ" defaultValue={vendor?.document} />
-        <Field name="email" label="E-mail" defaultValue={vendor?.email} />
-        <Field name="phone" label="Telefone" defaultValue={vendor?.phone} />
+        <DocumentInput name="document" label="CPF/CNPJ" defaultValue={vendor?.document} />
+        <EmailInput name="email" label="E-mail" defaultValue={vendor?.email} />
+        <PhoneInput name="phone" label="Telefone" defaultValue={vendor?.phone} />
         <label className="grid gap-2 text-sm font-medium">
           Tipo
           <Select name="vendor_type" defaultValue={vendor?.vendor_type ?? "supplier"}>
@@ -442,9 +558,9 @@ export function HealthPlanForm({
       <input type="hidden" name="id" value={healthPlan?.id ?? ""} />
       <div className="grid gap-4 lg:grid-cols-2">
         <Field name="name" label="Nome do convênio" defaultValue={healthPlan?.name} required />
-        <Field name="document" label="CNPJ" defaultValue={healthPlan?.document} />
-        <Field name="email" label="E-mail" defaultValue={healthPlan?.email} />
-        <Field name="phone" label="Telefone" defaultValue={healthPlan?.phone} />
+        <DocumentInput name="document" label="CNPJ" defaultValue={healthPlan?.document} />
+        <EmailInput name="email" label="E-mail" defaultValue={healthPlan?.email} />
+        <PhoneInput name="phone" label="Telefone" defaultValue={healthPlan?.phone} />
       </div>
       <TextArea name="notes" label="Observações" defaultValue={healthPlan?.notes} />
       <BooleanField name="active" label="Convênio ativo" defaultChecked={healthPlan?.active ?? true} />
@@ -617,24 +733,8 @@ export function FinancialEntryForm({
                       className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                   </label>
-                  <label className="grid gap-2 text-sm font-medium">
-                    Quantidade
-                    <input
-                      value={item.quantity}
-                      onChange={(event) => updateItem(item.id, "quantity", event.target.value)}
-                      inputMode="decimal"
-                      className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                  </label>
-                  <label className="grid gap-2 text-sm font-medium">
-                    Unitário
-                    <input
-                      value={item.unit_amount}
-                      onChange={(event) => updateItem(item.id, "unit_amount", event.target.value)}
-                      inputMode="decimal"
-                      className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                  </label>
+                  <QuantityInput value={item.quantity} onChange={(value) => updateItem(item.id, "quantity", value)} />
+                  <CurrencyInput value={item.unit_amount} onChange={(value) => updateItem(item.id, "unit_amount", value)} label="Unitário" />
                   <div className="rounded-md border bg-muted/20 p-2 text-sm">
                     <span className="text-xs text-muted-foreground">Total do item</span>
                     <p className="font-medium">{formatCurrencyBRL(Number.isFinite(lineTotal) ? lineTotal : 0)}</p>
@@ -771,6 +871,39 @@ export function FinancialRecurringEntryForm({
         <Button disabled={pending}>
           <RotateCcw />
           {pending ? "Salvando..." : "Salvar recorrência"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export function GenerateRecurringPayableForm({
+  recurringEntry,
+  onCompleted,
+}: {
+  recurringEntry: FinancialRecurringEntry;
+  onCompleted?: () => void;
+}) {
+  const [state, action, pending] = useActionState(generatePayableFromRecurringAction, {});
+  useActionToast(state, onCompleted);
+  const today = new Date().toISOString().slice(0, 10);
+
+  return (
+    <form action={action} className="grid gap-4">
+      <input type="hidden" name="recurring_id" value={recurringEntry.id} />
+      <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+        Revise os dados antes de gerar a conta. A recorrência permanece ativa e o próximo vencimento será atualizado automaticamente.
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Field name="issue_date" label="Data de emissão" type="date" defaultValue={today} required />
+        <Field name="due_date" label="Vencimento" type="date" defaultValue={recurringEntry.next_due_date} required />
+        <Field name="document_number" label="Documento/número" />
+      </div>
+      <TextArea name="notes" label="Observações" defaultValue={recurringEntry.notes} />
+      <div className="flex justify-end">
+        <Button disabled={pending}>
+          <Save />
+          {pending ? "Gerando..." : "Gerar conta a pagar"}
         </Button>
       </div>
     </form>

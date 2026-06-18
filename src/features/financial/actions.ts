@@ -12,6 +12,7 @@ import {
   financialCategorySchema,
   financialEntrySchema,
   financialEntryItemInputSchema,
+  generateRecurringPayableSchema,
   healthPlanSchema,
   paymentMethodSchema,
   preferencesSchema,
@@ -793,6 +794,108 @@ export async function saveFinancialRecurringEntryAction(
 
   revalidateFinancial();
   return { success: parsed.data.id ? "Recorrência atualizada." : "Recorrência cadastrada." };
+}
+
+export async function generatePayableFromRecurringAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = generateRecurringPayableSchema.safeParse({
+    recurring_id: formData.get("recurring_id"),
+    issue_date: formData.get("issue_date"),
+    due_date: formData.get("due_date"),
+    document_number: formData.get("document_number"),
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canCreate) return { error: "Você não possui permissão para gerar contas a pagar." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: recurring } = await admin
+    .from("financial_recurring_entries")
+    .select("*")
+    .eq("id", parsed.data.recurring_id)
+    .eq("clinic_id", context.activeClinic.id)
+    .eq("active", true)
+    .is("deleted_at", null)
+    .maybeSingle<{
+      id: string;
+      vendor_id: string | null;
+      category_id: string | null;
+      cost_center_id: string | null;
+      description: string;
+      amount_cents: number;
+      frequency: "weekly" | "monthly" | "quarterly" | "yearly";
+      next_due_date: string;
+      notes: string | null;
+    }>();
+
+  if (!recurring) return { error: "Recorrência ativa não encontrada." };
+
+  const payload = {
+    entry_type: "payable",
+    origin: "manual",
+    status: "pending",
+    vendor_id: recurring.vendor_id,
+    category_id: recurring.category_id,
+    cost_center_id: recurring.cost_center_id,
+    document_type: "contract",
+    document_number: parsed.data.document_number,
+    description: recurring.description,
+    issue_date: parsed.data.issue_date,
+    due_date: parsed.data.due_date,
+    competence_date: parsed.data.due_date,
+    amount_cents: recurring.amount_cents,
+    discount_cents: 0,
+    freight_cents: 0,
+    addition_cents: 0,
+    notes: parsed.data.notes ?? recurring.notes,
+    updated_by: context.user.id,
+  };
+
+  const { data: entry, error } = await admin
+    .from("financial_entries")
+    .insert({ clinic_id: context.activeClinic.id, ...payload, created_by: context.user.id })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (error || !entry) {
+    return { error: financialError(error, "Não foi possível gerar a conta a pagar.") };
+  }
+
+  const nextDueDate = advanceRecurringDueDate(parsed.data.due_date, recurring.frequency);
+  await admin
+    .from("financial_recurring_entries")
+    .update({ next_due_date: nextDueDate, updated_by: context.user.id })
+    .eq("id", recurring.id);
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "financial_recurring_payable_generated",
+    module: "financial",
+    recordTable: "financial_entries",
+    recordId: entry.id,
+    oldValues: recurring,
+    newValues: { ...payload, recurring_id: recurring.id, next_due_date: nextDueDate },
+    level: "security",
+    notes: "Conta a pagar gerada a partir de recorrência financeira.",
+  });
+  await recordEntryEvent({
+    admin,
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    entryId: entry.id,
+    eventType: "created",
+    newValues: { ...payload, recurring_id: recurring.id },
+    notes: "Gerada por recorrência financeira.",
+  });
+
+  revalidateFinancial();
+  return { success: "Conta a pagar gerada a partir da recorrência." };
 }
 
 export async function saveFinancialEntryAction(
@@ -1951,5 +2054,14 @@ async function createReceipt({
 function addDays(value: string, days: number) {
   const date = new Date(value);
   date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function advanceRecurringDueDate(value: string, frequency: "weekly" | "monthly" | "quarterly" | "yearly") {
+  const date = new Date(`${value}T00:00:00`);
+  if (frequency === "weekly") date.setDate(date.getDate() + 7);
+  if (frequency === "monthly") date.setMonth(date.getMonth() + 1);
+  if (frequency === "quarterly") date.setMonth(date.getMonth() + 3);
+  if (frequency === "yearly") date.setFullYear(date.getFullYear() + 1);
   return date.toISOString().slice(0, 10);
 }

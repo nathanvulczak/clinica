@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
+import { useToast } from "@/components/ui/toast";
 import {
   CancelFinancialEntryForm,
   CardMachineForm,
@@ -34,6 +35,7 @@ import {
   FinancialEntryForm,
   FinancialPreferencesForm,
   FinancialRecurringEntryForm,
+  GenerateRecurringPayableForm,
   HealthPlanForm,
   PaymentMethodForm,
   ReconciliationForm,
@@ -163,12 +165,12 @@ export function FinancialWorkspace({
   activeView: FinancialSubsection;
 }) {
   if (section === "overview") return <OverviewPanel data={data} />;
-  if (section === "receivables") return <EntriesPanel data={data} entryType="receivable" activeView={activeView} />;
+  if (section === "receivables") return <ReceivablesWorkspace data={data} activeView={activeView} />;
   if (section === "payables") return <PayablesWorkspace data={data} activeView={activeView} />;
-  if (section === "accounts") return <RegistriesPanel data={data} />;
-  if (section === "reconciliation") return <ReconciliationPanel data={data} />;
-  if (section === "commissions") return <CommissionsPanel data={data} />;
-  return <PreferencesPanel preferences={data.preferences} canManage={data.access.canManage} />;
+  if (section === "accounts") return <RegistriesPanel data={data} activeView={activeView} />;
+  if (section === "reconciliation") return <ReconciliationPanel data={data} activeView={activeView} />;
+  if (section === "commissions") return <CommissionsPanel data={data} activeView={activeView} />;
+  return <PreferencesPanel preferences={data.preferences} canManage={data.access.canManage} activeView={activeView} />;
 }
 
 function OverviewPanel({ data }: { data: FinancialWorkspaceData }) {
@@ -225,6 +227,157 @@ function OverviewPanel({ data }: { data: FinancialWorkspaceData }) {
           <EmptyState title="Nenhum lançamento financeiro" description="As cobranças de atendimento e lançamentos manuais aparecerão aqui." />
         )}
       </section>
+    </div>
+  );
+}
+
+function ReceivablesWorkspace({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
+  if (activeView === "charge") return <ReceivableChargePanel data={data} />;
+  if (activeView === "settle") return <ReceivableSettlePanel data={data} />;
+  if (activeView === "reversals") return <ReceivableReversalsPanel data={data} />;
+  if (activeView === "receipts") return <ReceivableReceiptsPanel data={data} />;
+  if (activeView === "delinquency") return <ReceivableDelinquencyPanel data={data} />;
+  if (activeView === "reports") return <ReceivableReportsPanel data={data} />;
+  return <ReceivableOpenPanel data={data} activeView={activeView} />;
+}
+
+function ReceivableOpenPanel({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
+  const [creating, setCreating] = useState(false);
+  const entries = data.entries.filter((entry) => entry.entry_type === "receivable");
+
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader
+        title="Contas a receber"
+        description="Carteira de recebimentos por paciente, convênio, vencimento, baixa, recibo e status."
+        action={
+          <Button disabled={!data.access.canCreate} onClick={() => setCreating(true)}>
+            <Plus />
+            Novo recebimento
+          </Button>
+        }
+      />
+      <EntriesTable entries={entries} data={data} entryType="receivable" activeView={activeView} />
+      <Modal open={creating} onOpenChange={setCreating} title="Novo recebimento" className="max-w-4xl">
+        <FinancialEntryForm
+          entryType="receivable"
+          categories={data.categories}
+          costCenters={data.costCenters}
+          healthPlans={data.healthPlans}
+          vendors={data.vendors}
+          onCompleted={() => setCreating(false)}
+        />
+      </Modal>
+    </div>
+  );
+}
+
+function ReceivableChargePanel({ data }: { data: FinancialWorkspaceData }) {
+  const appointmentEntries = data.entries.filter((entry) => entry.entry_type === "receivable" && entry.origin === "appointment");
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader title="Cobranças de atendimentos" description="Atendimentos finalizados aparecem aqui para cobrança pela recepção, sem liberar o módulo financeiro inteiro." />
+      <PendingEncounterChargesPanel data={data} />
+      <EntriesTable entries={appointmentEntries} data={data} entryType="receivable" activeView="charge" />
+    </div>
+  );
+}
+
+function ReceivableSettlePanel({ data }: { data: FinancialWorkspaceData }) {
+  const entries = data.entries.filter((entry) => entry.entry_type === "receivable");
+  const openEntries = entries.filter((entry) => openEntryCents(entry) > 0 && entry.status !== "cancelled");
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader title="Baixar recebimento" description="Tela focada em recebimentos em aberto, com baixa, recibo e controle de forma de pagamento." />
+      <div className="grid gap-3 lg:grid-cols-3">
+        <MetricCard label="Em aberto" value={formatCurrencyBRL(openEntries.reduce((sum, entry) => sum + openEntryCents(entry), 0))} description="Saldo a receber" tone="warning" />
+        <MetricCard label="Documentos" value={String(openEntries.length)} description="Recebimentos aptos para baixa" />
+        <MetricCard label="Recebido" value={formatCurrencyBRL(entries.reduce((sum, entry) => sum + entry.paid_cents, 0))} description="Baixas confirmadas" tone="success" />
+      </div>
+      <EntriesTable entries={entries} data={data} entryType="receivable" activeView="settle" />
+    </div>
+  );
+}
+
+function ReceivableReversalsPanel({ data }: { data: FinancialWorkspaceData }) {
+  const entries = data.entries.filter((entry) => entry.entry_type === "receivable");
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader title="Estornos de recebimentos" description="Recebimentos com baixa revertida, mantendo motivo, data, usuário e histórico financeiro." />
+      <EntriesTable entries={entries} data={data} entryType="receivable" activeView="reversals" />
+    </div>
+  );
+}
+
+function ReceivableReceiptsPanel({ data }: { data: FinancialWorkspaceData }) {
+  const receipts = data.entries
+    .filter((entry) => entry.entry_type === "receivable")
+    .flatMap((entry) => entry.receipts.map((receipt) => ({ entry, receipt })));
+
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader title="Recibos" description="Histórico de recibos e ciências de pagamento emitidos para pacientes." />
+      <section className="rounded-lg border bg-card">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-sm">
+            <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">Emissão</th>
+                <th className="px-4 py-3 font-medium">Paciente</th>
+                <th className="px-4 py-3 font-medium">Documento</th>
+                <th className="px-4 py-3 font-medium">Tipo</th>
+                <th className="px-4 py-3 text-right font-medium">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {receipts.length ? receipts.map(({ entry, receipt }) => (
+                <tr key={receipt.id} className="border-t">
+                  <td className="px-4 py-3">{formatDateTime(receipt.issued_at)}</td>
+                  <td className="px-4 py-3">{entry.patient?.social_name || entry.patient?.full_name || "-"}</td>
+                  <td className="px-4 py-3">{receipt.title}</td>
+                  <td className="px-4 py-3">{receipt.receipt_type === "payment" ? "Recibo" : "Ciência"}</td>
+                  <td className="px-4 py-3 text-right">
+                    <Button size="sm" variant="outline" onClick={() => window.open(`/financeiro/recibos/${receipt.id}`, "_blank")}>Abrir</Button>
+                  </td>
+                </tr>
+              )) : (
+                <tr><td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">Nenhum recibo emitido.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ReceivableDelinquencyPanel({ data }: { data: FinancialWorkspaceData }) {
+  const entries = data.entries.filter((entry) => entry.entry_type === "receivable" && isOverdue(entry));
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader title="Inadimplência" description="Recebimentos vencidos e ainda em aberto para acompanhamento e cobrança." />
+      <EntriesTable entries={entries} data={data} entryType="receivable" activeView="delinquency" />
+    </div>
+  );
+}
+
+function ReceivableReportsPanel({ data }: { data: FinancialWorkspaceData }) {
+  const entries = data.entries.filter((entry) => entry.entry_type === "receivable");
+  const byHealthPlan = groupPayableReport(entries, (entry) => entry.healthPlan?.name ?? "Particular / não informado");
+  const byCategory = groupPayableReport(entries, (entry) => entry.category?.name ?? "Sem categoria");
+  return (
+    <div className="grid gap-5">
+      <FinancialPanelHeader title="Relatórios de recebimentos" description="Indicadores rápidos por convênio, categoria e situação dos recebimentos." />
+      <div className="grid gap-3 lg:grid-cols-4">
+        <MetricCard label="Total" value={formatCurrencyBRL(entries.reduce((sum, entry) => sum + totalEntryCents(entry), 0))} description="Valor emitido" />
+        <MetricCard label="Recebido" value={formatCurrencyBRL(entries.reduce((sum, entry) => sum + entry.paid_cents, 0))} description="Baixas confirmadas" tone="success" />
+        <MetricCard label="Em aberto" value={formatCurrencyBRL(entries.reduce((sum, entry) => sum + openEntryCents(entry), 0))} description="Saldo pendente" tone="warning" />
+        <MetricCard label="Vencidos" value={String(entries.filter(isOverdue).length)} description="Documentos atrasados" />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ReportBreakdown title="Por convênio" rows={byHealthPlan} />
+        <ReportBreakdown title="Por categoria" rows={byCategory} />
+      </div>
     </div>
   );
 }
@@ -426,6 +579,7 @@ function PayableVendorsPanel({ data }: { data: FinancialWorkspaceData }) {
 function PayableRecurringPanel({ data }: { data: FinancialWorkspaceData }) {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<FinancialWorkspaceData["recurringEntries"][number] | null>(null);
+  const [generating, setGenerating] = useState<FinancialWorkspaceData["recurringEntries"][number] | null>(null);
   const active = data.recurringEntries.filter((item) => item.active);
   const monthlyEstimate = active
     .filter((item) => item.frequency === "monthly")
@@ -475,10 +629,15 @@ function PayableRecurringPanel({ data }: { data: FinancialWorkspaceData }) {
                     <td className="px-4 py-3">{frequencyLabel(item.frequency)}</td>
                     <td className="px-4 py-3">{formatDate(item.next_due_date)}</td>
                     <td className="px-4 py-3 text-right">{formatCurrencyBRL(item.amount_cents)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Button size="sm" variant="outline" disabled={!data.access.canManage} onClick={() => setEditing(item)}>
-                        Editar
-                      </Button>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="outline" disabled={!data.access.canCreate || !item.active} onClick={() => setGenerating(item)}>
+                          Gerar conta
+                        </Button>
+                        <Button size="sm" variant="outline" disabled={!data.access.canManage} onClick={() => setEditing(item)}>
+                          Editar
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -507,16 +666,34 @@ function PayableRecurringPanel({ data }: { data: FinancialWorkspaceData }) {
           />
         ) : null}
       </Modal>
+      <Modal open={Boolean(generating)} onOpenChange={(open) => !open && setGenerating(null)} title="Gerar conta a pagar" description={generating?.description} className="max-w-3xl">
+        {generating ? <GenerateRecurringPayableForm recurringEntry={generating} onCompleted={() => setGenerating(null)} /> : null}
+      </Modal>
     </div>
   );
 }
 
 function PayableReportsPanel({ data }: { data: FinancialWorkspaceData }) {
+  const { toast } = useToast();
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [vendorId, setVendorId] = useState("all");
   const [categoryId, setCategoryId] = useState("all");
   const [costCenterId, setCostCenterId] = useState("all");
+  useEffect(() => {
+    const raw = localStorage.getItem("payable-report-filters");
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw) as Partial<{ dateFrom: string; dateTo: string; vendorId: string; categoryId: string; costCenterId: string }>;
+      setDateFrom(saved.dateFrom ?? "");
+      setDateTo(saved.dateTo ?? "");
+      setVendorId(saved.vendorId ?? "all");
+      setCategoryId(saved.categoryId ?? "all");
+      setCostCenterId(saved.costCenterId ?? "all");
+    } catch {
+      localStorage.removeItem("payable-report-filters");
+    }
+  }, []);
   const entries = useMemo(
     () =>
       data.entries
@@ -539,33 +716,84 @@ function PayableReportsPanel({ data }: { data: FinancialWorkspaceData }) {
   const byCategory = groupPayableReport(entries, (entry) => entry.category?.name ?? "Sem categoria");
   const byVendor = groupPayableReport(entries, (entry) => entry.vendor?.name ?? "Fornecedor não informado");
 
+  function saveFilters() {
+    localStorage.setItem("payable-report-filters", JSON.stringify({ dateFrom, dateTo, vendorId, categoryId, costCenterId }));
+    toast({ title: "Financeiro", description: "Filtro de relatório salvo." });
+  }
+
+  function exportCsv() {
+    const rows = entries.map((entry) => [
+      documentTypeLabel(entry.document_type),
+      entry.document_number ?? "",
+      entry.description,
+      entry.vendor?.name ?? "",
+      entry.category?.name ?? "",
+      entry.costCenter?.name ?? "",
+      entry.due_date,
+      entry.items.length,
+      (entry.freight_cents ?? 0) / 100,
+      totalEntryCents(entry) / 100,
+      statusLabels[entry.status] ?? entry.status,
+    ]);
+    const header = ["Tipo", "Documento", "Descrição", "Fornecedor", "Categoria", "Centro de custo", "Vencimento", "Itens", "Frete", "Total", "Status"];
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(";"))
+      .join("\n");
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `pagamentos-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "Financeiro", description: "Relatório CSV gerado." });
+  }
+
+  function printReport() {
+    const html = buildPayableReportHtml(entries);
+    const popup = window.open("", "_blank");
+    if (!popup) return;
+    popup.document.write(html);
+    popup.document.close();
+    popup.focus();
+    popup.print();
+    toast({ title: "Financeiro", description: "Relatório aberto para impressão/PDF." });
+  }
+
   return (
     <div className="grid gap-5">
       <FinancialPanelHeader title="Relatórios de pagamentos" description="Análise de despesas por período, fornecedor, categoria, centro de custo, documento e itens lançados." />
-      <section className="grid gap-3 rounded-lg border bg-card p-4 xl:grid-cols-5">
-        <FilterDate label="Data inicial" value={dateFrom} onChange={setDateFrom} />
-        <FilterDate label="Data final" value={dateTo} onChange={setDateTo} />
-        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-          Fornecedor
-          <Select value={vendorId} onChange={(event) => setVendorId(event.target.value)}>
-            <option value="all">Todos</option>
-            {data.vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
-          </Select>
-        </label>
-        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-          Categoria
-          <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-            <option value="all">Todas</option>
-            {data.categories.filter((category) => category.direction === "expense").map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-          </Select>
-        </label>
-        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-          Centro de custo
-          <Select value={costCenterId} onChange={(event) => setCostCenterId(event.target.value)}>
-            <option value="all">Todos</option>
-            {data.costCenters.map((costCenter) => <option key={costCenter.id} value={costCenter.id}>{costCenter.name}</option>)}
-          </Select>
-        </label>
+      <section className="grid gap-3 rounded-lg border bg-card p-4">
+        <div className="grid gap-3 xl:grid-cols-5">
+          <FilterDate label="Data inicial" value={dateFrom} onChange={setDateFrom} />
+          <FilterDate label="Data final" value={dateTo} onChange={setDateTo} />
+          <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+            Fornecedor
+            <Select value={vendorId} onChange={(event) => setVendorId(event.target.value)}>
+              <option value="all">Todos</option>
+              {data.vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+            </Select>
+          </label>
+          <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+            Categoria
+            <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+              <option value="all">Todas</option>
+              {data.categories.filter((category) => category.direction === "expense").map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+            </Select>
+          </label>
+          <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+            Centro de custo
+            <Select value={costCenterId} onChange={(event) => setCostCenterId(event.target.value)}>
+              <option value="all">Todos</option>
+              {data.costCenters.map((costCenter) => <option key={costCenter.id} value={costCenter.id}>{costCenter.name}</option>)}
+            </Select>
+          </label>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="outline" onClick={saveFilters}>Salvar filtro</Button>
+          <Button variant="outline" onClick={exportCsv}>Exportar CSV</Button>
+          <Button onClick={printReport}>Imprimir/PDF</Button>
+        </div>
       </section>
       <div className="grid gap-3 xl:grid-cols-5">
         <MetricCard label="Total" value={formatCurrencyBRL(total)} description="Subtotal - desconto + frete + acréscimos" />
@@ -685,58 +913,72 @@ function ReportBreakdown({ title, rows }: { title: string; rows: Array<{ label: 
   );
 }
 
-function EntriesPanel({
-  data,
-  entryType,
-  activeView,
-}: {
-  data: FinancialWorkspaceData;
-  entryType: "receivable" | "payable";
-  activeView: FinancialSubsection;
-}) {
-  const [creating, setCreating] = useState(false);
-  const entries = data.entries.filter((entry) => entry.entry_type === entryType);
-  const contextTitle = entryType === "receivable" ? "Contas a receber" : "Contas a pagar";
-  const contextDescription =
-    entryType === "receivable"
-      ? "Controle de cobranças, recebimentos, recibos, estornos e inadimplência da clínica."
-      : "Controle de despesas, fornecedores, pagamentos, estornos e previsibilidade de caixa.";
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
-  return (
-    <div className="grid gap-5">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
-        <div>
-          <h2 className="font-semibold">{contextTitle}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{contextDescription}</p>
-        </div>
-        <Button disabled={!data.access.canCreate} onClick={() => setCreating(true)}>
-          <Plus />
-          Novo lançamento
-        </Button>
-      </header>
+function buildPayableReportHtml(entries: FinancialEntryWithRelations[]) {
+  const rows = entries
+    .map(
+      (entry) => `
+        <tr>
+          <td>${escapeHtml(documentTypeLabel(entry.document_type))}</td>
+          <td>${escapeHtml(entry.document_number ?? "-")}</td>
+          <td>${escapeHtml(entry.description)}</td>
+          <td>${escapeHtml(entry.vendor?.name ?? "-")}</td>
+          <td>${escapeHtml(entry.category?.name ?? "Sem categoria")}</td>
+          <td>${escapeHtml(formatDate(entry.due_date))}</td>
+          <td class="right">${entry.items.length}</td>
+          <td class="right">${escapeHtml(formatCurrencyBRL(entry.freight_cents ?? 0))}</td>
+          <td class="right">${escapeHtml(formatCurrencyBRL(totalEntryCents(entry)))}</td>
+          <td>${escapeHtml(statusLabels[entry.status] ?? entry.status)}</td>
+        </tr>
+      `,
+    )
+    .join("");
 
-      {entryType === "receivable" ? <PendingEncounterChargesPanel data={data} /> : null}
-
-      <EntriesTable entries={entries} data={data} entryType={entryType} activeView={activeView} />
-
-      <Modal
-        open={creating}
-        onOpenChange={setCreating}
-        title={entryType === "receivable" ? "Novo recebimento" : "Nova conta a pagar"}
-        description="Registre uma movimentação financeira manual."
-        className="max-w-4xl"
-      >
-        <FinancialEntryForm
-          entryType={entryType}
-          categories={data.categories}
-          costCenters={data.costCenters}
-          healthPlans={data.healthPlans}
-          vendors={data.vendors}
-          onCompleted={() => setCreating(false)}
-        />
-      </Modal>
-    </div>
-  );
+  return `<!doctype html>
+    <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <title>Relatório de pagamentos</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #111827; margin: 28px; }
+          h1 { font-size: 20px; margin: 0 0 4px; }
+          p { color: #6b7280; margin: 0 0 18px; font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; }
+          th { text-align: left; background: #f3f4f6; color: #4b5563; padding: 8px; text-transform: uppercase; }
+          td { border-top: 1px solid #e5e7eb; padding: 8px; vertical-align: top; }
+          .right { text-align: right; }
+        </style>
+      </head>
+      <body>
+        <h1>Relatório de pagamentos</h1>
+        <p>Gerado em ${escapeHtml(formatDateTime(new Date().toISOString()))}</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Tipo</th>
+              <th>Documento</th>
+              <th>Descrição</th>
+              <th>Fornecedor</th>
+              <th>Categoria</th>
+              <th>Vencimento</th>
+              <th class="right">Itens</th>
+              <th class="right">Frete</th>
+              <th class="right">Total</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="10">Nenhum registro encontrado.</td></tr>'}</tbody>
+        </table>
+      </body>
+    </html>`;
 }
 
 export function PendingEncounterChargesPanel({ data }: { data: FinancialWorkspaceData }) {
@@ -931,7 +1173,7 @@ function EntryCard({
   );
 }
 
-function RegistriesPanel({ data }: { data: FinancialWorkspaceData }) {
+function RegistriesPanel({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
   const [modal, setModal] = useState<{ type: "account" | "method" | "machine" | "vendor" | "category" | "cost-center" | "health-plan"; item?: unknown } | null>(null);
 
   return (
@@ -951,15 +1193,7 @@ function RegistriesPanel({ data }: { data: FinancialWorkspaceData }) {
         <RegistryCard icon={Truck} title="Fornecedores" count={data.vendors.length} onClick={() => setModal({ type: "vendor" })} disabled={!data.access.canManage} />
         <RegistryCard icon={Building2} title="Convênios" count={data.healthPlans.length} onClick={() => setModal({ type: "health-plan" })} disabled={!data.access.canManage} />
       </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <RegistryList title="Contas e caixas" rows={data.accounts.map((item) => ({ id: item.id, title: item.name, detail: `${formatCurrencyBRL(item.current_balance_cents)} | ${item.active ? "Ativa" : "Inativa"}`, onEdit: () => setModal({ type: "account", item }) }))} />
-        <RegistryList title="Formas de pagamento" rows={data.paymentMethods.map((item) => ({ id: item.id, title: item.name, detail: `${item.method_type} | ${item.settlement_days} dia(s)`, onEdit: () => setModal({ type: "method", item }) }))} />
-        <RegistryList title="Máquinas de cartão" rows={data.cardMachines.map((item) => ({ id: item.id, title: item.name, detail: `Débito ${item.debit_fee_bps / 100}% | Crédito ${item.credit_fee_bps / 100}%`, onEdit: () => setModal({ type: "machine", item }) }))} />
-        <RegistryList title="Categorias" rows={data.categories.map((item) => ({ id: item.id, title: item.name, detail: `${item.direction === "income" ? "Receita" : "Despesa"} | ${item.active ? "Ativa" : "Inativa"}`, onEdit: () => setModal({ type: "category", item }) }))} />
-        <RegistryList title="Centros de custo" rows={data.costCenters.map((item) => ({ id: item.id, title: item.name, detail: `${item.code ?? "Sem código"} | ${item.active ? "Ativo" : "Inativo"}`, onEdit: () => setModal({ type: "cost-center", item }) }))} />
-        <RegistryList title="Fornecedores" rows={data.vendors.map((item) => ({ id: item.id, title: item.name, detail: `${item.vendor_type} | ${item.active ? "Ativo" : "Inativo"}`, onEdit: () => setModal({ type: "vendor", item }) }))} />
-        <RegistryList title="Convênios" rows={data.healthPlans.map((item) => ({ id: item.id, title: item.name, detail: `${item.document ?? "Sem CNPJ"} | ${item.active ? "Ativo" : "Inativo"}`, onEdit: () => setModal({ type: "health-plan", item }) }))} />
-      </div>
+      <RegistryLists data={data} activeView={activeView} onEdit={(type, item) => setModal({ type, item })} />
 
       <Modal open={modal?.type === "account"} onOpenChange={(open) => !open && setModal(null)} title={modal?.item ? "Editar conta financeira" : "Nova conta financeira"} className="max-w-4xl">
         <FinancialAccountForm account={modal?.type === "account" ? (modal.item as FinancialWorkspaceData["accounts"][number] | undefined) : undefined} onCompleted={() => setModal(null)} />
@@ -1011,6 +1245,53 @@ function RegistryCard({
       <span className="text-2xl font-semibold">{count}</span>
     </button>
   );
+}
+
+type RegistryModalType = "account" | "method" | "machine" | "vendor" | "category" | "cost-center" | "health-plan";
+
+function RegistryLists({
+  data,
+  activeView,
+  onEdit,
+}: {
+  data: FinancialWorkspaceData;
+  activeView: FinancialSubsection;
+  onEdit: (type: RegistryModalType, item: unknown) => void;
+}) {
+  const lists = [
+    {
+      key: "accounts",
+      element: <RegistryList title="Contas e caixas" rows={data.accounts.map((item) => ({ id: item.id, title: item.name, detail: `${formatCurrencyBRL(item.current_balance_cents)} | ${item.active ? "Ativa" : "Inativa"}`, onEdit: () => onEdit("account", item) }))} />,
+    },
+    {
+      key: "payment-methods",
+      element: <RegistryList title="Formas de pagamento" rows={data.paymentMethods.map((item) => ({ id: item.id, title: item.name, detail: `${item.method_type} | ${item.settlement_days} dia(s)`, onEdit: () => onEdit("method", item) }))} />,
+    },
+    {
+      key: "card-machines",
+      element: <RegistryList title="Máquinas de cartão" rows={data.cardMachines.map((item) => ({ id: item.id, title: item.name, detail: `Débito ${item.debit_fee_bps / 100}% | Crédito ${item.credit_fee_bps / 100}%`, onEdit: () => onEdit("machine", item) }))} />,
+    },
+    {
+      key: "categories",
+      element: <RegistryList title="Categorias" rows={data.categories.map((item) => ({ id: item.id, title: item.name, detail: `${item.direction === "income" ? "Receita" : "Despesa"} | ${item.active ? "Ativa" : "Inativa"}`, onEdit: () => onEdit("category", item) }))} />,
+    },
+    {
+      key: "cost-centers",
+      element: <RegistryList title="Centros de custo" rows={data.costCenters.map((item) => ({ id: item.id, title: item.name, detail: `${item.code ?? "Sem código"} | ${item.active ? "Ativo" : "Inativo"}`, onEdit: () => onEdit("cost-center", item) }))} />,
+    },
+    {
+      key: "vendors",
+      element: <RegistryList title="Fornecedores" rows={data.vendors.map((item) => ({ id: item.id, title: item.name, detail: `${item.vendor_type} | ${item.active ? "Ativo" : "Inativo"}`, onEdit: () => onEdit("vendor", item) }))} />,
+    },
+    {
+      key: "health-plans",
+      element: <RegistryList title="Convênios" rows={data.healthPlans.map((item) => ({ id: item.id, title: item.name, detail: `${item.document ?? "Sem CNPJ"} | ${item.active ? "Ativo" : "Inativo"}`, onEdit: () => onEdit("health-plan", item) }))} />,
+    },
+  ];
+  const visible = lists.filter((item) => item.key === activeView);
+  const currentLists = visible.length ? visible : lists.slice(0, 1);
+
+  return <div className="grid gap-4 xl:grid-cols-2">{currentLists.map((item) => <div key={item.key}>{item.element}</div>)}</div>;
 }
 
 function RegistryList({
@@ -1073,7 +1354,7 @@ function rangeLabel(range: ReconciliationRange) {
   return "Mês";
 }
 
-function ReconciliationPanel({ data }: { data: FinancialWorkspaceData }) {
+function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
   const [range, setRange] = useState<ReconciliationRange>("week");
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -1125,6 +1406,18 @@ function ReconciliationPanel({ data }: { data: FinancialWorkspaceData }) {
   const accountSummary = activeAccountIds.length === data.accounts.length ? "Todas as contas" : activeAccountIds.length + " conta(s)";
   const statementAccount = statementAccountId ? accountMap.get(statementAccountId) ?? null : null;
   const statementRows = statementAccountId ? rows.filter(({ payment }) => payment.account_id === statementAccountId) : [];
+  const viewCopy =
+    activeView === "statements"
+      ? { title: "Extratos por conta", description: "Consulte movimentos por conta, período, entrada, saída e status de conciliação." }
+      : activeView === "close-period"
+        ? { title: "Conciliar período", description: "Confira movimentos, marque cada item e feche a conciliação contra o saldo bancário." }
+        : activeView === "pending"
+          ? { title: "Movimentos pendentes", description: "Itens confirmados que ainda precisam ser conferidos antes do fechamento bancário." }
+          : activeView === "history"
+            ? { title: "Histórico de conciliações", description: "Fechamentos por conta, período, responsável, status e reaberturas auditadas." }
+            : activeView === "divergences"
+              ? { title: "Divergências de conciliação", description: "Compare saldo esperado, saldo informado e diferenças antes de encerrar o período." }
+              : { title: "Relatórios de conciliação", description: "Visão consolidada dos movimentos conciliados, pendentes e reabertos." };
 
   useEffect(() => {
     const visibleIds = new Set(rows.map(({ payment }) => payment.id));
@@ -1135,9 +1428,9 @@ function ReconciliationPanel({ data }: { data: FinancialWorkspaceData }) {
     <div className="grid gap-5">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
         <div>
-          <h2 className="font-semibold">Contas e conciliação</h2>
+          <h2 className="font-semibold">{viewCopy.title}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Conferência por conta, período e saldo bancário. Movimentos conciliados ficam protegidos contra alteração.
+            {viewCopy.description}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -2064,31 +2357,135 @@ function ReconciliationDetail({ reconciliation, rows }: { reconciliation: Financ
   return <div className="grid gap-4 text-sm"><div className="grid gap-3 lg:grid-cols-3"><MetricCard label="Conta" value={reconciliation.account?.name ?? "Conta"} description="Conta conciliada" /><MetricCard label="Movimentos" value={String(rows.length)} description="Pagamentos vinculados" /><MetricCard label="Status" value={reconciliation.status === "closed" ? "Fechada" : "Reaberta"} description="Situação atual" /></div><div className="grid gap-3 lg:grid-cols-2"><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Período</p><p className="font-medium">{formatDate(reconciliation.period_start)} até {formatDate(reconciliation.period_end)}</p></div><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Fechada por</p><p className="font-medium">{reconciliation.closed_by_profile?.full_name ?? "Usuário não identificado"}</p></div><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Saldo inicial</p><p className="font-medium">{formatCurrencyBRL(reconciliation.opening_balance_cents)}</p></div><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Saldo bancário final</p><p className="font-medium">{formatCurrencyBRL(reconciliation.bank_balance_cents)}</p></div><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Entradas</p><p className="font-medium">{formatCurrencyBRL(reconciliation.total_in_cents)}</p></div><div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Saídas</p><p className="font-medium">{formatCurrencyBRL(reconciliation.total_out_cents)}</p></div></div>{reconciliation.reversal_reason ? <div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Motivo da reabertura</p><p>{reconciliation.reversal_reason}</p></div> : null}{reconciliation.notes ? <div className="rounded-md border bg-muted/20 p-3"><p className="text-xs text-muted-foreground">Observações</p><p>{reconciliation.notes}</p></div> : null}<MovementTable rows={rows} compact /></div>;
 }
 
-function CommissionsPanel({ data }: { data: FinancialWorkspaceData }) {
-  const professionalEntries = data.entries.filter((entry) => entry.professional_member_id && entry.entry_type === "receivable");
-  const totalReceived = professionalEntries.reduce((sum, entry) => sum + entry.paid_cents, 0);
+function CommissionsPanel({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
+  const rows = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        id: string;
+        professional: string;
+        billedCents: number;
+        receivedCents: number;
+        openCents: number;
+        appointments: number;
+      }
+    >();
+
+    data.entries
+      .filter((entry) => entry.entry_type === "receivable" && entry.professional_member_id)
+      .forEach((entry) => {
+        const id = entry.professional_member_id ?? "unknown";
+        const current = map.get(id) ?? {
+          id,
+          professional: entry.professional?.profile?.full_name ?? "Profissional não identificado",
+          billedCents: 0,
+          receivedCents: 0,
+          openCents: 0,
+          appointments: 0,
+        };
+
+        current.billedCents += totalEntryCents(entry);
+        current.receivedCents += entry.paid_cents;
+        current.openCents += openEntryCents(entry);
+        current.appointments += 1;
+        map.set(id, current);
+      });
+
+    return [...map.values()].sort((a, b) => b.receivedCents - a.receivedCents);
+  }, [data.entries]);
+
+  const totalReceived = rows.reduce((sum, row) => sum + row.receivedCents, 0);
+  const totalOpen = rows.reduce((sum, row) => sum + row.openCents, 0);
+
+  const table = (
+    <section className="rounded-lg border bg-card">
+      <div className="border-b p-4">
+        <p className="font-medium">Produção por profissional</p>
+        <p className="mt-1 text-sm text-muted-foreground">Base operacional para cálculo de comissões e acertos futuros.</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3 font-medium">Profissional</th>
+              <th className="px-4 py-3 text-right font-medium">Atendimentos</th>
+              <th className="px-4 py-3 text-right font-medium">Faturado</th>
+              <th className="px-4 py-3 text-right font-medium">Recebido</th>
+              <th className="px-4 py-3 text-right font-medium">Em aberto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? (
+              rows.map((row) => (
+                <tr key={row.id} className="border-t">
+                  <td className="px-4 py-3 font-medium">{row.professional}</td>
+                  <td className="px-4 py-3 text-right">{row.appointments}</td>
+                  <td className="px-4 py-3 text-right">{formatCurrencyBRL(row.billedCents)}</td>
+                  <td className="px-4 py-3 text-right">{formatCurrencyBRL(row.receivedCents)}</td>
+                  <td className="px-4 py-3 text-right">{formatCurrencyBRL(row.openCents)}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">Nenhum recebimento vinculado a profissional.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 
   return (
     <div className="grid gap-5">
       <header className="border-b pb-4">
         <h2 className="font-semibold">Comissões e repasses</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Estrutura preparada para regras por profissional, serviço, percentual ou valor fixo.
+          Produção por profissional, bases de cálculo e preparação para regras de repasse.
         </p>
       </header>
       <div className="grid gap-3 lg:grid-cols-3">
         <MetricCard label="Base recebida" value={formatCurrencyBRL(totalReceived)} description="Recebimentos vinculados a profissionais" />
-        <MetricCard label="Profissionais com receita" value={String(new Set(professionalEntries.map((entry) => entry.professional_member_id)).size)} description="Com potencial de repasse" />
-        <MetricCard label="Próxima etapa" value="Regras" description="Percentual, fixo, aprovação e recibo de acerto" />
+        <MetricCard label="Em aberto" value={formatCurrencyBRL(totalOpen)} description="Valores ainda não recebidos" tone="warning" />
+        <MetricCard label="Profissionais" value={String(rows.length)} description="Com produção financeira no período carregado" />
       </div>
-      <section className="rounded-lg border bg-card p-4">
-        <p className="font-medium">Modelo operacional sugerido</p>
-        <div className="mt-3 grid gap-2 text-sm text-muted-foreground">
-          <p>1. A comissão nasce somente após pagamento recebido ou faturamento, conforme regra.</p>
-          <p>2. O financeiro aprova o repasse e gera recibo de acerto.</p>
-          <p>3. Estornos de recebimento recalculam ou bloqueiam comissões pendentes.</p>
-        </div>
-      </section>
+
+      {activeView === "rules" ? (
+        <section className="rounded-lg border bg-card p-4">
+          <p className="font-medium">Regras de comissão</p>
+          <div className="mt-3 grid gap-3 text-sm text-muted-foreground lg:grid-cols-3">
+            <InfoBox label="Por profissional" value="Percentual ou valor fixo individual" />
+            <InfoBox label="Por serviço" value="Regra específica quando o serviço exigir repasse diferente" />
+            <InfoBox label="Base de cálculo" value="Recebido ou faturado, conforme política da clínica" />
+          </div>
+          <p className="mt-3 text-sm text-muted-foreground">
+            A estrutura de banco já está preparada para regras persistentes; o próximo passo é ligar cadastro, aprovação e geração automática dos repasses.
+          </p>
+        </section>
+      ) : null}
+
+      {activeView === "production" || activeView === "reports" ? table : null}
+
+      {activeView === "commissions-due" ? (
+        <section className="rounded-lg border bg-card p-4">
+          <p className="font-medium">Comissões a pagar</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Esta visão depende das regras ativas de comissão. Enquanto as regras não forem cadastradas, usamos a produção por profissional como base de conferência.
+          </p>
+          <div className="mt-4">{table}</div>
+        </section>
+      ) : null}
+
+      {activeView === "settlements" || activeView === "receipts" ? (
+        <section className="rounded-lg border bg-card p-4">
+          <p className="font-medium">{activeView === "settlements" ? "Acertos de comissão" : "Recibos de repasse"}</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            A tela já está separada para o fluxo financeiro correto: calcular, aprovar, pagar e emitir recibo de repasse com auditoria.
+          </p>
+        </section>
+      ) : null}
+
+      {activeView !== "production" && activeView !== "reports" && activeView !== "commissions-due" ? table : null}
     </div>
   );
 }
@@ -2096,20 +2493,30 @@ function CommissionsPanel({ data }: { data: FinancialWorkspaceData }) {
 function PreferencesPanel({
   preferences,
   canManage,
+  activeView,
 }: {
   preferences: FinancialPreferences | null;
   canManage: boolean;
+  activeView: FinancialSubsection;
 }) {
   const [open, setOpen] = useState(false);
   if (!preferences) return null;
+  const viewCopy =
+    activeView === "permissions"
+      ? { title: "Permissões financeiras", description: "Resumo operacional de quem deve acessar, baixar, estornar, conciliar e exportar dados financeiros." }
+      : activeView === "documents"
+        ? { title: "Documentos e recibos", description: "Rodapé, padrões de emissão e rastreabilidade dos documentos financeiros." }
+        : activeView === "policies"
+          ? { title: "Políticas de estorno", description: "Regras de correção, estorno e reabertura para proteger o caixa e a auditoria." }
+          : { title: "Cobrança operacional", description: "Regras de cobrança na recepção, pelo profissional, recibos e vencimentos padrão." };
 
   return (
     <div className="grid gap-5">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
         <div>
-          <h2 className="font-semibold">Preferências financeiras</h2>
+          <h2 className="font-semibold">{viewCopy.title}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Regras de cobrança operacional, recibos e vencimentos padrão.
+            {viewCopy.description}
           </p>
         </div>
         <Button disabled={!canManage} onClick={() => setOpen(true)}>
@@ -2134,6 +2541,41 @@ function PreferencesPanel({
           description="Usado em cobranças em aberto"
         />
       </div>
+
+      {activeView === "permissions" ? (
+        <section className="rounded-lg border bg-card p-4">
+          <p className="font-medium">Modelo de acesso recomendado</p>
+          <div className="mt-3 grid gap-3 text-sm text-muted-foreground lg:grid-cols-4">
+            <InfoBox label="Recepção" value="Cobrança de atendimento e recibo, sem visão completa do financeiro" />
+            <InfoBox label="Financeiro" value="Baixas, estornos, relatórios, contas e conciliação" />
+            <InfoBox label="Admin da clínica" value="Preferências, permissões, cadastros e reaberturas" />
+            <InfoBox label="Auditoria" value="Toda alteração crítica gera rastro financeiro e operacional" />
+          </div>
+        </section>
+      ) : null}
+
+      {activeView === "documents" ? (
+        <section className="rounded-lg border bg-card p-4">
+          <p className="font-medium">Padrão de documentos</p>
+          <div className="mt-3 grid gap-3 text-sm text-muted-foreground lg:grid-cols-3">
+            <InfoBox label="Rodapé atual" value={preferences.receipt_footer ?? "Não configurado"} />
+            <InfoBox label="Recibos" value="Emitidos por baixa, com histórico por lançamento e paciente" />
+            <InfoBox label="Ciência de pagamento" value="Disponível para cobranças em aberto" />
+          </div>
+        </section>
+      ) : null}
+
+      {activeView === "policies" ? (
+        <section className="rounded-lg border bg-card p-4">
+          <p className="font-medium">Proteções financeiras</p>
+          <div className="mt-3 grid gap-3 text-sm text-muted-foreground lg:grid-cols-3">
+            <InfoBox label="Estorno" value="Exige motivo e mantém histórico do pagamento original" />
+            <InfoBox label="Conciliação" value="Movimentos conciliados ficam bloqueados até reabertura autorizada" />
+            <InfoBox label="Correção" value="Alterações sensíveis devem ser feitas por fluxo formal e auditável" />
+          </div>
+        </section>
+      ) : null}
+
       <Modal open={open} onOpenChange={setOpen} title="Preferências financeiras" className="max-w-4xl">
         <FinancialPreferencesForm preferences={preferences} onCompleted={() => setOpen(false)} />
       </Modal>

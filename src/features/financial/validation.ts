@@ -173,6 +173,14 @@ export const recurringEntrySchema = z.object({
   active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
 });
 
+export const generateRecurringPayableSchema = z.object({
+  recurring_id: z.string().uuid(),
+  issue_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Informe a data de emissao."),
+  due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Informe o vencimento."),
+  document_number: optionalText,
+  notes: optionalText,
+});
+
 export const encounterChargeSchema = z.object({
   encounter_id: z.string().uuid(),
   amount: currencyString,
