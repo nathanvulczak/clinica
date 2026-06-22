@@ -78,6 +78,17 @@ export type FinancialWorkspace = {
   metrics: FinancialMetrics;
 };
 
+export type FinancialWorkspaceScope =
+  | "full"
+  | "overview"
+  | "receivables"
+  | "payables"
+  | "accounts"
+  | "reconciliation"
+  | "commissions"
+  | "settings"
+  | "encounter-charge";
+
 export type PendingEncounterCharge = {
   encounter_id: string;
   appointment_id: string;
@@ -151,8 +162,10 @@ export async function getFinancialPreferences(clinicId?: string | null) {
 
 export async function getFinancialWorkspace(
   clinicId?: string | null,
+  options: { scope?: FinancialWorkspaceScope } = {},
 ): Promise<FinancialWorkspace> {
   const access = await getFinancialAccess(clinicId);
+  const scope = options.scope ?? "full";
   const empty: FinancialWorkspace = {
     access,
     preferences: clinicId ? defaultPreferences(clinicId) : null,
@@ -176,6 +189,19 @@ export async function getFinancialWorkspace(
   }
 
   const admin = createSupabaseAdminClient();
+  const isScope = (...scopes: FinancialWorkspaceScope[]) => scope === "full" || scopes.includes(scope);
+  const needsPreferences = isScope("settings");
+  const needsAccounts = isScope("overview", "receivables", "payables", "accounts", "reconciliation", "encounter-charge");
+  const needsPaymentMethods = isScope("receivables", "payables", "accounts", "encounter-charge");
+  const needsCardMachines = isScope("overview", "receivables", "payables", "accounts", "encounter-charge");
+  const needsCategories = isScope("receivables", "payables", "accounts");
+  const needsCostCenters = isScope("receivables", "payables", "accounts");
+  const needsHealthPlans = isScope("receivables", "accounts");
+  const needsVendors = isScope("payables", "accounts");
+  const needsEntries = isScope("overview", "receivables", "payables", "reconciliation", "commissions");
+  const needsRecurring = isScope("payables");
+  const needsReconciliations = isScope("reconciliation");
+  const needsPendingCharges = isScope("overview", "receivables", "encounter-charge");
   const [
     preferences,
     { data: accounts },
@@ -190,53 +216,53 @@ export async function getFinancialWorkspace(
     reconciliations,
     pendingEncounterCharges,
   ] = await Promise.all([
-    getFinancialPreferences(clinicId),
-    admin
+    needsPreferences ? getFinancialPreferences(clinicId) : Promise.resolve(defaultPreferences(clinicId)),
+    needsAccounts ? admin
       .from("financial_accounts")
       .select("id, clinic_id, name, account_type, bank_name, agency, account_number, pix_key, opening_balance_cents, current_balance_cents, active, notes")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
-      .order("name"),
-    admin
+      .order("name") : Promise.resolve({ data: [] }),
+    needsPaymentMethods ? admin
       .from("financial_payment_methods")
       .select("id, clinic_id, name, method_type, requires_card_machine, settlement_days, active")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
-      .order("name"),
-    admin
+      .order("name") : Promise.resolve({ data: [] }),
+    needsCardMachines ? admin
       .from("financial_card_machines")
       .select("id, clinic_id, account_id, name, provider, debit_fee_bps, credit_fee_bps, credit_installment_fee_bps, debit_settlement_days, credit_settlement_days, active, notes")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
-      .order("name"),
-    admin
+      .order("name") : Promise.resolve({ data: [] }),
+    needsCategories ? admin
       .from("financial_categories")
       .select("id, clinic_id, name, direction, parent_id, active")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
-      .order("name"),
-    admin
+      .order("name") : Promise.resolve({ data: [] }),
+    needsCostCenters ? admin
       .from("financial_cost_centers")
       .select("id, clinic_id, name, code, active, notes")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
-      .order("name"),
-    admin
+      .order("name") : Promise.resolve({ data: [] }),
+    needsHealthPlans ? admin
       .from("financial_health_plans")
       .select("id, clinic_id, name, document, email, phone, active, notes")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
-      .order("name"),
-    admin
+      .order("name") : Promise.resolve({ data: [] }),
+    needsVendors ? admin
       .from("financial_vendors")
       .select("id, clinic_id, name, document, email, phone, vendor_type, active, notes")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
-      .order("name"),
-    access.canView ? listFinancialEntries(clinicId) : Promise.resolve([]),
-    access.canView ? listFinancialRecurringEntries(clinicId) : Promise.resolve([]),
-    access.canView ? listFinancialReconciliations(clinicId) : Promise.resolve([]),
-    listPendingEncounterCharges(clinicId, access),
+      .order("name") : Promise.resolve({ data: [] }),
+    access.canView && needsEntries ? listFinancialEntries(clinicId) : Promise.resolve([]),
+    access.canView && needsRecurring ? listFinancialRecurringEntries(clinicId) : Promise.resolve([]),
+    access.canView && needsReconciliations ? listFinancialReconciliations(clinicId) : Promise.resolve([]),
+    needsPendingCharges ? listPendingEncounterCharges(clinicId, access) : Promise.resolve([]),
   ]);
 
   const payments = entries.flatMap((entry) => entry.payments);

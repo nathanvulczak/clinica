@@ -73,6 +73,26 @@ body {
   }
 }
 
+.financial-density table {
+  font-size: 13px;
+}
+
+.financial-density table thead {
+  position: sticky;
+  top: 2.5rem;
+  z-index: 5;
+}
+
+.financial-density table th,
+.financial-density table td {
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
+}
+
+.financial-density table td {
+  font-variant-numeric: tabular-nums;
+}
+
 button,
 a,
 input,

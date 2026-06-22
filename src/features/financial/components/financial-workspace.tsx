@@ -1,22 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   Banknote,
   BarChart3,
   Building2,
-  CheckCircle2,
   CreditCard,
   Eye,
   FileText,
   Landmark,
+  MoreHorizontal,
   Plus,
-  ReceiptText,
   RotateCcw,
   Settings2,
   SlidersHorizontal,
-  Sparkles,
   Tags,
   Truck,
 } from "lucide-react";
@@ -26,10 +23,19 @@ import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { FinancialOverview } from "@/features/financial/components/financial-overview";
+import { EmptyState, FinancialPanelHeader, MetricCard } from "@/features/financial/components/financial-ui";
+import { PendingEncounterChargesPanel } from "@/features/financial/components/pending-encounter-charges-panel";
+import {
   CancelFinancialEntryForm,
   CardMachineForm,
   CostCenterForm,
-  EncounterChargeForm,
   FinancialAccountForm,
   FinancialCategoryForm,
   FinancialEntryForm,
@@ -48,7 +54,7 @@ import {
 import type { FinancialSection, FinancialSubsection } from "@/features/financial/navigation";
 import { formatCurrencyBRL } from "@/lib/utils";
 import type { FinancialPayment, FinancialPreferences } from "@/types/domain";
-import type { FinancialEntryWithRelations, FinancialWorkspace as FinancialWorkspaceData, PendingEncounterCharge } from "@/repositories/financial";
+import type { FinancialEntryWithRelations, FinancialWorkspace as FinancialWorkspaceData } from "@/repositories/financial";
 
 const statusLabels: Record<string, string> = {
   pending: "Em aberto",
@@ -115,46 +121,6 @@ function formatDateTime(value: string | null | undefined) {
   }).format(new Date(value));
 }
 
-function MetricCard({
-  label,
-  value,
-  description,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  description: string;
-  tone?: "default" | "success" | "warning";
-}) {
-  return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-sm font-medium">{label}</p>
-      <p
-        className={
-          tone === "success"
-            ? "mt-3 text-2xl font-semibold text-emerald-700"
-            : tone === "warning"
-              ? "mt-3 text-2xl font-semibold text-amber-700"
-              : "mt-3 text-2xl font-semibold"
-        }
-      >
-        {value}
-      </p>
-      <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-    </div>
-  );
-}
-
-function EmptyState({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="rounded-lg border border-dashed px-6 py-12 text-center">
-      <Sparkles className="mx-auto size-8 text-muted-foreground/60" />
-      <p className="mt-3 text-sm font-medium">{title}</p>
-      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-    </div>
-  );
-}
-
 export function FinancialWorkspace({
   data,
   section,
@@ -164,7 +130,7 @@ export function FinancialWorkspace({
   section: FinancialSection;
   activeView: FinancialSubsection;
 }) {
-  if (section === "overview") return <OverviewPanel data={data} />;
+  if (section === "overview") return <FinancialOverview data={data} />;
   if (section === "receivables") return <ReceivablesWorkspace data={data} activeView={activeView} />;
   if (section === "payables") return <PayablesWorkspace data={data} activeView={activeView} />;
   if (section === "accounts") return <RegistriesPanel data={data} activeView={activeView} />;
@@ -173,63 +139,6 @@ export function FinancialWorkspace({
   return <PreferencesPanel preferences={data.preferences} canManage={data.access.canManage} activeView={activeView} />;
 }
 
-function OverviewPanel({ data }: { data: FinancialWorkspaceData }) {
-  const latestEntries = data.entries.slice(0, 8);
-
-  return (
-    <div className="grid gap-5">
-      <div className="grid gap-3 xl:grid-cols-5">
-        <MetricCard label="A receber" value={formatCurrencyBRL(data.metrics.receivableOpenCents)} description="Saldo aberto de pacientes e convênios" />
-        <MetricCard label="Recebido" value={formatCurrencyBRL(data.metrics.receivablePaidCents)} description="Entradas confirmadas" tone="success" />
-        <MetricCard label="A pagar" value={formatCurrencyBRL(data.metrics.payableOpenCents)} description="Despesas abertas" />
-        <MetricCard label="Vencidos" value={formatCurrencyBRL(data.metrics.overdueCents)} description="Atenção operacional" tone="warning" />
-        <MetricCard label="Caixa líquido" value={formatCurrencyBRL(data.metrics.netCashCents)} description="Entradas menos saídas confirmadas" />
-      </div>
-
-      <section className="grid gap-4 rounded-lg border bg-card p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <Sparkles className="size-5" />
-          </div>
-          <div>
-            <p className="font-medium">Inteligência financeira operacional</p>
-            <p className="text-sm text-muted-foreground">
-              Pacientes finalizados sem cobrança, contas vencidas e taxas de cartão aparecem como sinais de ação.
-            </p>
-          </div>
-        </div>
-        <div className="grid gap-3 lg:grid-cols-3">
-          <div className="rounded-md border bg-muted/20 p-3">
-            <p className="text-xs text-muted-foreground">Atendimentos aguardando cobrança</p>
-            <p className="mt-2 text-xl font-semibold">{data.pendingEncounterCharges.length}</p>
-          </div>
-          <div className="rounded-md border bg-muted/20 p-3">
-            <p className="text-xs text-muted-foreground">Contas/caixas ativos</p>
-            <p className="mt-2 text-xl font-semibold">{data.accounts.filter((item) => item.active).length}</p>
-          </div>
-          <div className="rounded-md border bg-muted/20 p-3">
-            <p className="text-xs text-muted-foreground">Máquinas configuradas</p>
-            <p className="mt-2 text-xl font-semibold">{data.cardMachines.filter((item) => item.active).length}</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-3">
-        <div className="flex items-center justify-between gap-3 border-b pb-3">
-          <div>
-            <p className="font-medium">Movimentos recentes</p>
-            <p className="text-sm text-muted-foreground">Últimos lançamentos financeiros da clínica.</p>
-          </div>
-        </div>
-        {latestEntries.length ? (
-          latestEntries.map((entry) => <EntryCard key={entry.id} entry={entry} data={data} compact />)
-        ) : (
-          <EmptyState title="Nenhum lançamento financeiro" description="As cobranças de atendimento e lançamentos manuais aparecerão aqui." />
-        )}
-      </section>
-    </div>
-  );
-}
 
 function ReceivablesWorkspace({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
   if (activeView === "charge") return <ReceivableChargePanel data={data} />;
@@ -855,18 +764,6 @@ function PayableReportsPanel({ data }: { data: FinancialWorkspaceData }) {
   );
 }
 
-function FinancialPanelHeader({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
-  return (
-    <header className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
-      <div>
-        <h2 className="font-semibold">{title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-      </div>
-      {action}
-    </header>
-  );
-}
-
 function FilterDate({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="grid gap-1 text-xs font-medium text-muted-foreground">
@@ -979,198 +876,6 @@ function buildPayableReportHtml(entries: FinancialEntryWithRelations[]) {
         </table>
       </body>
     </html>`;
-}
-
-export function PendingEncounterChargesPanel({ data }: { data: FinancialWorkspaceData }) {
-  const [selected, setSelected] = useState<PendingEncounterCharge | null>(null);
-
-  if (!data.pendingEncounterCharges.length) return null;
-
-  return (
-    <section className="grid gap-3 rounded-lg border bg-card p-4">
-      <div className="flex items-center gap-3">
-        <AlertTriangle className="size-5 text-amber-600" />
-        <div>
-          <p className="font-medium">Atendimentos liberados para cobrança</p>
-          <p className="text-sm text-muted-foreground">
-            A recepção pode cobrar sem abrir acesso ao módulo financeiro completo.
-          </p>
-        </div>
-      </div>
-      <div className="grid gap-2">
-        {data.pendingEncounterCharges.slice(0, 8).map((item) => (
-          <article key={item.encounter_id} className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[1fr_auto] lg:items-center">
-            <div>
-              <p className="font-medium">{item.patient_name}</p>
-              <p className="text-sm text-muted-foreground">
-                {item.service_name} | {item.professional_name} | {formatCurrencyBRL(item.suggested_amount_cents)}
-              </p>
-            </div>
-            <Button size="sm" disabled={!data.access.canChargeEncounter} onClick={() => setSelected(item)}>
-              <ReceiptText />
-              Cobrar
-            </Button>
-          </article>
-        ))}
-      </div>
-      <Modal
-        open={Boolean(selected)}
-        onOpenChange={(open) => {
-          if (!open) setSelected(null);
-        }}
-        title="Cobrar atendimento"
-        description={selected ? `${selected.patient_name} - ${selected.service_name}` : undefined}
-        className="max-w-4xl"
-      >
-        {selected ? (
-          <EncounterChargeForm
-            encounterId={selected.encounter_id}
-            suggestedAmountCents={selected.suggested_amount_cents}
-            accounts={data.accounts}
-            paymentMethods={data.paymentMethods}
-            cardMachines={data.cardMachines}
-            onCompleted={(state) => {
-              setSelected(null);
-              if (state.receiptId) window.open(`/financeiro/recibos/${state.receiptId}`, "_blank");
-            }}
-          />
-        ) : null}
-      </Modal>
-    </section>
-  );
-}
-
-function EntryCard({
-  entry,
-  data,
-  compact,
-}: {
-  entry: FinancialEntryWithRelations;
-  data: FinancialWorkspaceData;
-  compact?: boolean;
-}) {
-  const [settling, setSettling] = useState(false);
-  const [receiptType, setReceiptType] = useState<"payment" | "payment_acknowledgement" | null>(null);
-  const [reversing, setReversing] = useState<FinancialPayment | null>(null);
-  const openCents = openEntryCents(entry);
-  const title = entry.patient?.social_name || entry.patient?.full_name || entry.vendor?.name || entry.description;
-
-  return (
-    <article className="rounded-lg border bg-card p-4">
-      <div className="grid gap-4 xl:grid-cols-[1fr_auto] xl:items-start">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-medium">{title}</p>
-            <Badge>{statusLabels[entry.status] ?? entry.status}</Badge>
-            <Badge className={entry.entry_type === "receivable" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}>
-              {entry.entry_type === "receivable" ? "Receber" : "Pagar"}
-            </Badge>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {entry.description} | venc. {formatDate(entry.due_date)} | total {formatCurrencyBRL(totalEntryCents(entry))}
-          </p>
-          {!compact ? (
-            <div className="mt-3 grid gap-2 text-sm lg:grid-cols-3">
-              <div className="rounded-md border bg-muted/20 p-3">
-                <span className="text-xs text-muted-foreground">Pago</span>
-                <p className="font-medium">{formatCurrencyBRL(entry.paid_cents)}</p>
-              </div>
-              <div className="rounded-md border bg-muted/20 p-3">
-                <span className="text-xs text-muted-foreground">Aberto</span>
-                <p className="font-medium">{formatCurrencyBRL(openCents)}</p>
-              </div>
-              <div className="rounded-md border bg-muted/20 p-3">
-                <span className="text-xs text-muted-foreground">Categoria</span>
-                <p className="font-medium">{entry.category?.name ?? "Sem categoria"}</p>
-              </div>
-            </div>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap gap-2 xl:justify-end">
-          <Button size="sm" variant="outline" disabled={openCents <= 0 || !data.access.canEdit} onClick={() => setSettling(true)}>
-            <CheckCircle2 />
-            Baixar
-          </Button>
-          {entry.entry_type === "receivable" ? (
-            <>
-              <Button size="sm" variant="outline" onClick={() => setReceiptType("payment")}>
-                Recibo
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setReceiptType("payment_acknowledgement")}>
-                Ciencia
-              </Button>
-            </>
-          ) : null}
-        </div>
-      </div>
-
-      {!compact && entry.payments.length ? (
-        <div className="mt-3 grid gap-2">
-          {entry.payments.slice(0, 4).map((payment) => (
-            <div key={payment.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background p-2 text-xs">
-              <span>
-                {payment.status === "reversed" ? "Estornado" : "Confirmado"} | {formatCurrencyBRL(payment.amount_cents)} | taxa{" "}
-                {formatCurrencyBRL(payment.fee_cents)} | {formatDate(payment.paid_at)}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={payment.status === "reversed" || !data.access.canManage}
-                onClick={() => setReversing(payment)}
-              >
-                <RotateCcw />
-                Estornar
-              </Button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      <Modal open={settling} onOpenChange={setSettling} title="Baixar lançamento" description={entry.description} className="max-w-4xl">
-        <SettleEntryForm
-          entryId={entry.id}
-          entryOpenCents={openCents}
-          accounts={data.accounts}
-          paymentMethods={data.paymentMethods}
-          cardMachines={data.cardMachines}
-          onCompleted={(state) => {
-            setSettling(false);
-            if (state.receiptId) window.open(`/financeiro/recibos/${state.receiptId}`, "_blank");
-          }}
-        />
-      </Modal>
-      <Modal
-        open={Boolean(receiptType)}
-        onOpenChange={(open) => {
-          if (!open) setReceiptType(null);
-        }}
-        title={receiptType === "payment" ? "Emitir recibo" : "Emitir ciência de pagamento"}
-        className="max-w-lg"
-      >
-        {receiptType ? (
-          <ReceiptForm
-            entryId={entry.id}
-            type={receiptType}
-            onCompleted={(state) => {
-              setReceiptType(null);
-              if (state.receiptId) window.open(`/financeiro/recibos/${state.receiptId}`, "_blank");
-            }}
-          />
-        ) : null}
-      </Modal>
-      <Modal
-        open={Boolean(reversing)}
-        onOpenChange={(open) => {
-          if (!open) setReversing(null);
-        }}
-        title="Estornar baixa"
-        description="Informe o motivo para manter rastreabilidade financeira."
-        className="max-w-lg"
-      >
-        {reversing ? <ReversePaymentForm payment={reversing} onCompleted={() => setReversing(null)} /> : null}
-      </Modal>
-    </article>
-  );
 }
 
 function RegistriesPanel({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
@@ -1589,6 +1294,7 @@ function EntriesTable({
   const [healthPlanId, setHealthPlanId] = useState("all");
   const [vendorId, setVendorId] = useState("all");
   const [accountId, setAccountId] = useState("all");
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
@@ -1662,7 +1368,8 @@ function EntriesTable({
         <MetricCard label="Conciliados" value={String(filtered.filter(entryHasReconciliation).length)} description="Com movimento bancário travado" />
       </div>
 
-      <div className="grid gap-3 rounded-md border bg-muted/20 p-3 xl:grid-cols-4">
+      <div className="grid gap-2.5 rounded-md border bg-muted/20 p-3">
+        <div className="grid gap-2.5 xl:grid-cols-[minmax(240px,1.5fr)_180px_170px_170px_auto]">
         <label className="grid gap-1 text-xs font-medium text-muted-foreground">
           Buscar
           <input
@@ -1702,6 +1409,22 @@ function EntriesTable({
             className="h-9 rounded-md border bg-background px-3 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </label>
+        <div className="flex items-end">
+          <Button
+            type="button"
+            size="sm"
+            variant={advancedFiltersOpen ? "secondary" : "outline"}
+            className="h-9 w-full"
+            onClick={() => setAdvancedFiltersOpen((current) => !current)}
+          >
+            <SlidersHorizontal />
+            Mais filtros
+          </Button>
+        </div>
+        </div>
+
+        {advancedFiltersOpen ? (
+          <div className="grid gap-2.5 border-t pt-3 xl:grid-cols-4">
         <label className="grid gap-1 text-xs font-medium text-muted-foreground">
           Categoria
           <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
@@ -1793,21 +1516,23 @@ function EntriesTable({
             Limpar filtros
           </Button>
         </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="overflow-x-auto rounded-md border">
-        <table className="w-full min-w-[1120px] text-sm">
-          <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+        <table className="w-full min-w-[1080px] text-[13px]">
+          <thead className="sticky top-10 z-10 bg-muted/90 text-left text-xs text-muted-foreground backdrop-blur">
             <tr>
-              <th className="px-4 py-3 font-medium">{entryType === "receivable" ? "Paciente/Origem" : "Fornecedor/Origem"}</th>
-              <th className="px-4 py-3 font-medium">Descrição</th>
-              <th className="px-4 py-3 font-medium">Vencimento</th>
-              <th className="px-4 py-3 text-right font-medium">Total</th>
-              <th className="px-4 py-3 text-right font-medium">Pago</th>
-              <th className="px-4 py-3 text-right font-medium">Aberto</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Conciliação</th>
-              <th className="px-4 py-3 text-right font-medium">Ações</th>
+              <th className="px-3 py-2 font-medium">{entryType === "receivable" ? "Paciente/Origem" : "Fornecedor/Origem"}</th>
+              <th className="px-3 py-2 font-medium">Descrição</th>
+              <th className="px-3 py-2 font-medium">Vencimento</th>
+              <th className="px-3 py-2 text-right font-medium">Total</th>
+              <th className="px-3 py-2 text-right font-medium">Pago</th>
+              <th className="px-3 py-2 text-right font-medium">Aberto</th>
+              <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium">Conciliação</th>
+              <th className="sticky right-0 bg-muted/95 px-3 py-2 text-right font-medium">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -1866,24 +1591,24 @@ function EntryTableRow({
 
   return (
     <tr className="border-t align-top">
-      <td className="px-4 py-3">
+      <td className="px-3 py-2.5">
         <p className="font-medium">{party}</p>
         <p className="mt-1 text-xs text-muted-foreground">{entry.category?.name ?? "Sem categoria"}</p>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-3 py-2.5">
         <p className="font-medium">{entry.description}</p>
         <p className="mt-1 text-xs text-muted-foreground">
           {entry.entry_type === "payable" ? documentTypeLabel(entry.document_type) : entry.origin}
           {entry.document_number ? ` | ${entry.document_number}` : ""}
         </p>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-3 py-2.5 tabular-nums">
         <span className={isOverdue(entry) ? "font-medium text-amber-700" : undefined}>{formatDate(entry.due_date)}</span>
       </td>
-      <td className="px-4 py-3 text-right">{formatCurrencyBRL(totalEntryCents(entry))}</td>
-      <td className="px-4 py-3 text-right">{formatCurrencyBRL(entry.paid_cents)}</td>
-      <td className="px-4 py-3 text-right font-medium">{formatCurrencyBRL(openCents)}</td>
-      <td className="px-4 py-3">
+      <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(totalEntryCents(entry))}</td>
+      <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(entry.paid_cents)}</td>
+      <td className="px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(openCents)}</td>
+      <td className="px-3 py-2.5">
         <div className="grid gap-1">
           <Badge className={isOverdue(entry) ? "bg-amber-500/10 text-amber-700" : undefined}>
             {isOverdue(entry) ? "Vencido" : statusLabels[entry.status] ?? entry.status}
@@ -1891,33 +1616,43 @@ function EntryTableRow({
           {entryHasReversal(entry) ? <span className="text-xs text-destructive">Possui estorno</span> : null}
         </div>
       </td>
-      <td className="px-4 py-3">
+      <td className="px-3 py-2.5">
         <Badge className={locked ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground"}>
           {locked ? "Conciliado e bloqueado" : "Pendente"}
         </Badge>
       </td>
-      <td className="px-4 py-3">
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="outline" disabled={openCents <= 0 || !data.access.canEdit || locked} onClick={() => setSettling(true)}>
+      <td className="sticky right-0 bg-card px-2 py-2 shadow-[-8px_0_12px_-12px_rgb(0_0_0/0.35)]">
+        <div className="flex justify-end gap-1">
+          <Button className="h-8 px-2.5 text-xs" size="sm" variant="outline" disabled={openCents <= 0 || !data.access.canEdit || locked} onClick={() => setSettling(true)}>
             Baixar
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setDetailing(true)}>
-            Detalhar
+          <Button className="size-8 p-0" size="icon" variant="ghost" title="Detalhar lançamento" onClick={() => setDetailing(true)}>
+            <Eye />
           </Button>
-          <Button size="sm" variant="outline" disabled={!data.access.canEdit || locked || entry.status === "cancelled"} onClick={() => setEditing(true)}>
-            Editar
-          </Button>
-          {entryType === "receivable" ? (
-            <Button size="sm" variant="outline" onClick={() => setReceiptType(openCents > 0 ? "payment_acknowledgement" : "payment")}>
-              Documento
-            </Button>
-          ) : null}
-          <Button size="sm" variant="ghost" disabled={!latestPayment || latestPayment.status === "reversed" || !data.access.canManage || locked} onClick={() => latestPayment && setReversing(latestPayment)}>
-            Estornar
-          </Button>
-          <Button size="sm" variant="ghost" disabled={!data.access.canManage || locked || entry.status === "cancelled" || entry.paid_cents > 0} onClick={() => setCancelling(true)}>
-            Cancelar
-          </Button>
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button className="size-8 p-0" size="icon" variant="ghost" title="Mais ações">
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-48">
+              <DropdownMenuItem disabled={!data.access.canEdit || locked || entry.status === "cancelled"} onSelect={() => setEditing(true)}>
+                Editar lançamento
+              </DropdownMenuItem>
+              {entryType === "receivable" ? (
+                <DropdownMenuItem onSelect={() => setReceiptType(openCents > 0 ? "payment_acknowledgement" : "payment")}>
+                  Emitir documento
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={!latestPayment || latestPayment.status === "reversed" || !data.access.canManage || locked} onSelect={() => latestPayment && setReversing(latestPayment)}>
+                Estornar baixa
+              </DropdownMenuItem>
+              <DropdownMenuItem className="text-destructive focus:text-destructive" disabled={!data.access.canManage || locked || entry.status === "cancelled" || entry.paid_cents > 0} onSelect={() => setCancelling(true)}>
+                Cancelar lançamento
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <Modal open={detailing} onOpenChange={setDetailing} title="Detalhes do lançamento" description={entry.description} className="max-w-5xl">

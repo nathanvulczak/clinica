@@ -35,7 +35,7 @@ export default async function FinanceiroPage({
     ? params.view
     : getDefaultFinancialSubsection(section);
   const { activeClinic } = await getActiveClinicContext();
-  const data = await getFinancialWorkspace(activeClinic?.id);
+  const data = await getFinancialWorkspace(activeClinic?.id, { scope: section });
 
   if (activeClinic && !data.access.canView) {
     await auditDeniedModuleAccess(
@@ -46,7 +46,7 @@ export default async function FinanceiroPage({
   }
 
   return (
-    <div className="grid gap-5">
+    <div className="financial-density grid gap-4">
       {!activeClinic ? (
         <Card>
           <CardHeader>

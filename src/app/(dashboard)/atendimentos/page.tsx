@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { ClinicalQueue } from "@/features/clinical-workflow/components/clinical-queue";
-import { PendingEncounterChargesPanel } from "@/features/financial/components/financial-workspace";
+import { PendingEncounterChargesPanel } from "@/features/financial/components/pending-encounter-charges-panel";
 import {
   getClinicalWorkflowAccess,
   listClinicalEncounters,
@@ -21,7 +21,7 @@ export default async function AtendimentosPage() {
       ? await Promise.all([
           listClinicalEncounters(activeClinic.id, { statuses: ACTIVE_CARE_STATUSES }),
           getRegistrationPreferences(activeClinic.id),
-          getFinancialWorkspace(activeClinic.id),
+          getFinancialWorkspace(activeClinic.id, { scope: "encounter-charge" }),
         ])
       : [[], null, null];
 
