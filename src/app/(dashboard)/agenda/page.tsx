@@ -28,6 +28,7 @@ import {
 import { getAppUrl } from "@/lib/env";
 import type { AppointmentStatus } from "@/types/domain";
 import { PageHeader } from "@/components/app/page-header";
+import { RealtimeClinicSync } from "@/components/app/realtime-clinic-sync";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -161,6 +162,7 @@ export default async function AgendaPage({
         </Card>
       ) : (
         <div className="grid gap-6">
+          <div className="flex justify-end"><RealtimeClinicSync clinicId={activeClinic.id} tables={["appointments"]} visible /></div>
           <Card>
             <CardHeader>
               <CardTitle>Filtros da agenda</CardTitle>

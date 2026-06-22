@@ -649,6 +649,7 @@ export type FinancialBankImport = {
   account_id: string;
   file_name: string;
   file_type: "ofx" | "csv";
+  file_hash: string | null;
   status: FinancialBankImportStatus;
   period_start: string | null;
   period_end: string | null;
@@ -657,6 +658,31 @@ export type FinancialBankImport = {
   completed_at: string | null;
   completed_by: string | null;
   notes: string | null;
+  deleted_reason: string | null;
+  deleted_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialMonthlyClosing = {
+  id: string;
+  clinic_id: string;
+  period_month: string;
+  status: "closed" | "reopened";
+  receivable_cents: number;
+  revenue_cents: number;
+  payable_cents: number;
+  expense_cents: number;
+  result_cents: number;
+  open_receivable_cents: number;
+  open_payable_cents: number;
+  snapshot: Record<string, unknown>;
+  notes: string | null;
+  closed_at: string;
+  closed_by: string | null;
+  reopened_at: string | null;
+  reopened_by: string | null;
+  reopening_reason: string | null;
   created_at: string;
   updated_at: string;
 };

@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { LockKeyhole } from "lucide-react";
+import { Activity, FileCheck2, History, LockKeyhole } from "lucide-react";
 import { ACTIVE_CARE_STATUSES } from "@/config/clinical-workflow";
 import { PageHeader } from "@/components/app/page-header";
+import { RealtimeClinicSync } from "@/components/app/realtime-clinic-sync";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,12 +33,14 @@ function normalizeSection(value?: string): MedicalRecordSection {
 }
 
 function formatDateTime(value: string | null | undefined) {
-  if (!value) return "Data nao informada";
+  if (!value) return "Data não informada";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Data inválida";
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
     timeStyle: "short",
     timeZone: "America/Sao_Paulo",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 export default async function ProntuariosPage({
@@ -81,54 +84,58 @@ export default async function ProntuariosPage({
   return (
     <>
       <PageHeader
-        title="Prontuarios"
-        description="Evolucao clinica, documentos, comentarios por paciente e fechamento do atendimento."
+        title="Prontuários"
+        description="Evolução clínica, documentos, histórico por paciente e fechamento seguro do atendimento."
       />
 
       {!activeClinic ? (
         <Card>
           <CardHeader>
-            <CardTitle>Clinica ativa necessaria</CardTitle>
-            <CardDescription>Selecione uma clinica para acessar os prontuarios.</CardDescription>
+            <CardTitle>Clínica ativa necessária</CardTitle>
+            <CardDescription>Selecione uma clínica para acessar os prontuários.</CardDescription>
           </CardHeader>
         </Card>
       ) : !canView ? (
         <Card>
           <CardHeader>
             <CardTitle>Acesso restrito</CardTitle>
-            <CardDescription>Seu perfil nao possui acesso ao modulo de Prontuarios.</CardDescription>
+            <CardDescription>Seu perfil não possui acesso ao módulo de Prontuários.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-3 rounded-lg border p-4 text-sm text-muted-foreground">
               <LockKeyhole className="size-5 text-primary" />
-              Solicite a permissao de acesso ao prontuario ao responsavel pela clinica.
+              Solicite a permissão de acesso ao prontuário ao responsável pela clínica.
             </div>
           </CardContent>
         </Card>
       ) : (
         <div className="grid gap-5">
+          <section className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+            <div className="flex items-center gap-2 text-sm"><Activity className="size-4 text-primary" /><span className="font-medium">Operação clínica</span><span className="text-muted-foreground">dados restritos à clínica ativa</span></div>
+            <RealtimeClinicSync clinicId={activeClinic.id} tables={["clinical_encounters"]} visible />
+          </section>
           <MedicalLgpdAckCard acceptedAt={lgpdAck?.accepted_at} />
           <div className="grid gap-3 lg:grid-cols-3">
-            <div className="rounded-lg border bg-card p-4">
-              <p className="text-sm font-medium">Liberados para consulta</p>
-              <p className="mt-1 text-xs text-muted-foreground">Aguardando abertura do prontuario</p>
-              <p className="mt-3 text-2xl font-semibold">{readyCount}</p>
+            <div className="rounded-lg border bg-card p-3.5">
+              <div className="flex items-center justify-between"><p className="text-sm font-medium">Liberados</p><FileCheck2 className="size-4 text-emerald-600" /></div>
+              <p className="mt-2 text-xl font-semibold tabular-nums">{readyCount}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Aguardando abertura do prontuário</p>
             </div>
-            <div className="rounded-lg border bg-card p-4">
-              <p className="text-sm font-medium">Em atendimento</p>
-              <p className="mt-1 text-xs text-muted-foreground">Prontuario em andamento</p>
-              <p className="mt-3 text-2xl font-semibold">{activeCount}</p>
+            <div className="rounded-lg border bg-card p-3.5">
+              <div className="flex items-center justify-between"><p className="text-sm font-medium">Em atendimento</p><Activity className="size-4 text-primary" /></div>
+              <p className="mt-2 text-xl font-semibold tabular-nums">{activeCount}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Prontuários em andamento</p>
             </div>
-            <div className="rounded-lg border bg-card p-4">
-              <p className="text-sm font-medium">Concluidos</p>
-              <p className="mt-1 text-xs text-muted-foreground">Registros clinicos fechados</p>
-              <p className="mt-3 text-2xl font-semibold">{completedCount}</p>
+            <div className="rounded-lg border bg-card p-3.5">
+              <div className="flex items-center justify-between"><p className="text-sm font-medium">Concluídos</p><History className="size-4 text-muted-foreground" /></div>
+              <p className="mt-2 text-xl font-semibold tabular-nums">{completedCount}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Registros clínicos fechados</p>
             </div>
           </div>
 
           {section === "queue" ? (
             <>
-              <div className="rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
+              <div className="rounded-lg border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
                 <strong className="font-medium text-foreground">Fluxo:</strong> pacientes liberados
                 pela Enfermagem ou atendimento direto aparecem aqui. Ao abrir a ficha, o atendimento
                 inicia; ao finalizar, ele sai da fila operacional.
@@ -138,35 +145,10 @@ export default async function ProntuariosPage({
           ) : null}
 
           {section === "records" ? (
-            <div className="grid gap-3">
-              {records.length ? (
-                records.map((record) => (
-                  <article key={record.id} className="rounded-lg border bg-card p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="font-medium">
-                          {record.patient?.social_name || record.patient?.full_name || "Paciente"}
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {record.professional?.profile?.full_name || "Profissional"} |{" "}
-                          {formatDateTime(record.updated_at)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge>{medicalRecordStatusLabel(record.status)}</Badge>
-                        <Button asChild size="sm" variant="outline">
-                          <Link href={`/prontuarios/${record.encounter_id}`}>Abrir</Link>
-                        </Button>
-                      </div>
-                    </div>
-                  </article>
-                ))
-              ) : (
-                <div className="rounded-lg border border-dashed px-6 py-12 text-center text-sm text-muted-foreground">
-                  Nenhum prontuario registrado ainda.
-                </div>
-              )}
-            </div>
+            <section className="overflow-hidden rounded-lg border bg-card">
+              <div className="border-b px-4 py-3"><p className="text-sm font-medium">Registros clínicos</p><p className="mt-0.5 text-xs text-muted-foreground">Histórico por paciente, profissional e situação.</p></div>
+              <div className="overflow-x-auto"><table className="w-full min-w-[820px] text-[13px]"><thead className="bg-muted/60 text-left text-[11px] uppercase text-muted-foreground"><tr><th className="min-w-56 px-3 py-2.5">Paciente</th><th className="min-w-48 px-3 py-2.5">Profissional</th><th className="w-40 px-3 py-2.5">Atualização</th><th className="w-28 px-3 py-2.5">Situação</th><th className="w-24 px-3 py-2.5 text-right">Ação</th></tr></thead><tbody>{records.length ? records.map((record) => <tr key={record.id} className="border-t"><td className="whitespace-normal break-words px-3 py-2.5 font-medium">{record.patient?.social_name || record.patient?.full_name || "Paciente"}</td><td className="whitespace-normal break-words px-3 py-2.5">{record.professional?.profile?.full_name || "Profissional"}</td><td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">{formatDateTime(record.updated_at)}</td><td className="px-3 py-2.5"><Badge>{medicalRecordStatusLabel(record.status)}</Badge></td><td className="px-3 py-2.5 text-right"><Button asChild size="sm" variant="outline"><Link href={`/prontuarios/${record.encounter_id}`}>Abrir</Link></Button></td></tr>) : <tr><td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">Nenhum prontuário registrado ainda.</td></tr>}</tbody></table></div>
+            </section>
           ) : null}
 
           {section === "patients" ? <PatientMedicalOverviewPanel overviews={patientOverviews} /> : null}
@@ -174,30 +156,7 @@ export default async function ProntuariosPage({
           {section === "reports" && reports ? (
             <div className="grid gap-4">
               <div className="grid gap-3 lg:grid-cols-4">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium">Prontuarios</CardTitle>
-                  </CardHeader>
-                  <CardContent className="text-2xl font-semibold">{reports.totalRecords}</CardContent>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium">Concluidos</CardTitle>
-                  </CardHeader>
-                  <CardContent className="text-2xl font-semibold">{reports.completedRecords}</CardContent>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium">Rascunhos</CardTitle>
-                  </CardHeader>
-                  <CardContent className="text-2xl font-semibold">{reports.draftRecords}</CardContent>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium">Documentos emitidos</CardTitle>
-                  </CardHeader>
-                  <CardContent className="text-2xl font-semibold">{reports.issuedDocuments}</CardContent>
-                </Card>
+                {[{ label: "Prontuários", value: reports.totalRecords }, { label: "Concluídos", value: reports.completedRecords }, { label: "Rascunhos", value: reports.draftRecords }, { label: "Documentos emitidos", value: reports.issuedDocuments }].map((item) => <div key={item.label} className="rounded-lg border bg-card p-3.5"><p className="text-xs font-medium text-muted-foreground">{item.label}</p><p className="mt-2 text-xl font-semibold tabular-nums">{item.value}</p></div>)}
               </div>
               <div className="grid gap-4 lg:grid-cols-2">
                 <Card>

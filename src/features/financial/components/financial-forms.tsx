@@ -1,21 +1,24 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { Building2, Calculator, Check, CreditCard, Landmark, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Tags, Truck, Upload, XCircle } from "lucide-react";
+import { Building2, Calculator, CalendarCheck, Check, CreditCard, Landmark, LockOpen, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Tags, Trash2, Truck, Upload, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import {
   cancelFinancialEntryAction,
   completeFinancialBankImportAction,
+  closeFinancialMonthAction,
   createEncounterChargeAction,
   createFinancialReconciliationAction,
   generateFinancialCommissionsAction,
+  deleteFinancialBankImportAction,
   importFinancialBankStatementAction,
   generatePayableFromRecurringAction,
   issueFinancialReceiptAction,
   reverseFinancialReconciliationAction,
   reverseFinancialPaymentAction,
+  reopenFinancialMonthAction,
   saveCardMachineAction,
   saveCostCenterAction,
   saveFinancialAccountAction,
@@ -36,6 +39,7 @@ import { formatCpfOrCnpj, formatCurrencyInput, formatPhone, normalizeEmail } fro
 import { formatCurrencyBRL } from "@/lib/utils";
 import type {
   FinancialAccount,
+  FinancialBankImport,
   FinancialCardMachine,
   FinancialCategory,
   FinancialCostCenter,
@@ -47,6 +51,7 @@ import type {
   FinancialHealthPlan,
   FinancialPayment,
   FinancialPaymentMethod,
+  FinancialMonthlyClosing,
   FinancialPreferences,
   FinancialReconciliation,
   FinancialRecurringEntry,
@@ -1242,6 +1247,25 @@ export function CompleteBankImportForm({ importId, onCompleted }: { importId: st
   const [state, action, pending] = useActionState(completeFinancialBankImportAction, {});
   useActionToast(state, onCompleted);
   return <form action={action} className="flex justify-end"><input type="hidden" name="import_id" value={importId} /><Button disabled={pending}><Check />{pending ? "Concluindo..." : "Concluir revisão"}</Button></form>;
+}
+
+export function DeleteBankImportForm({ bankImport, onCompleted }: { bankImport: FinancialBankImport; onCompleted?: () => void }) {
+  const [state, action, pending] = useActionState(deleteFinancialBankImportAction, {});
+  useActionToast(state, onCompleted);
+  return <form action={action} className="grid gap-4"><input type="hidden" name="import_id" value={bankImport.id} /><div className="rounded-md border border-destructive/20 bg-destructive/5 p-3 text-sm">O arquivo <strong>{bankImport.file_name}</strong> e seus movimentos importados serão removidos da operação. Lançamentos financeiros existentes não serão apagados.</div><TextArea name="reason" label="Motivo da exclusão" /><div className="flex justify-end"><Button variant="destructive" disabled={pending}><Trash2 />{pending ? "Excluindo..." : "Excluir importação"}</Button></div></form>;
+}
+
+export function MonthlyCloseForm({ onCompleted }: { onCompleted?: () => void }) {
+  const [state, action, pending] = useActionState(closeFinancialMonthAction, {});
+  useActionToast(state, onCompleted);
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  return <form action={action} className="grid gap-4"><Field name="period_month" label="Mês de competência" type="month" defaultValue={currentMonth} required /><div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">Antes de fechar, o sistema verifica movimentos bancários pendentes e importações ainda não revisadas. Após o fechamento, lançamentos e baixas do mês ficam protegidos.</div><TextArea name="notes" label="Observações do fechamento" /><div className="flex justify-end"><Button disabled={pending}><CalendarCheck />{pending ? "Validando período..." : "Fechar mês"}</Button></div></form>;
+}
+
+export function ReopenMonthlyCloseForm({ closing, onCompleted }: { closing: FinancialMonthlyClosing; onCompleted?: () => void }) {
+  const [state, action, pending] = useActionState(reopenFinancialMonthAction, {});
+  useActionToast(state, onCompleted);
+  return <form action={action} className="grid gap-4"><input type="hidden" name="closing_id" value={closing.id} /><div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-900">A reabertura libera correções no mês e será registrada como ação crítica na auditoria.</div><TextArea name="reason" label="Motivo da reabertura" /><div className="flex justify-end"><Button variant="destructive" disabled={pending}><LockOpen />{pending ? "Reabrindo..." : "Reabrir mês"}</Button></div></form>;
 }
 
 export function ReceiptForm({

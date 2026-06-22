@@ -30,6 +30,8 @@ export type FinancialSubsection =
   | "history"
   | "divergences"
   | "imports"
+  | "monthly-close"
+  | "dre"
   | "rules"
   | "production"
   | "commissions-due"
@@ -104,12 +106,13 @@ export const financialSections: FinancialNavItem[] = [
     icon: "reconciliation",
     children: [
       { key: "statements", label: "Extratos" },
-      { key: "close-period", label: "Conciliar período" },
-      { key: "pending", label: "Pendentes" },
-      { key: "history", label: "Histórico" },
-      { key: "divergences", label: "Divergências" },
+      { key: "close-period", label: "Conciliação individual" },
+      { key: "pending", label: "Pendências bancárias" },
       { key: "imports", label: "Importações bancárias" },
-      { key: "reports", label: "Relatórios" },
+      { key: "divergences", label: "Divergências" },
+      { key: "monthly-close", label: "Fechamento mensal" },
+      { key: "dre", label: "DRE gerencial" },
+      { key: "history", label: "Histórico de conciliações" },
     ],
   },
   {

@@ -6,11 +6,13 @@ import {
   BarChart3,
   Building2,
   Calculator,
+  CalendarCheck,
   CheckCircle2,
   CreditCard,
   Eye,
   FileText,
   Landmark,
+  LockOpen,
   MoreHorizontal,
   Plus,
   RotateCcw,
@@ -18,6 +20,7 @@ import {
   SlidersHorizontal,
   Tags,
   Truck,
+  Trash2,
   Upload,
   XCircle,
 } from "lucide-react";
@@ -50,13 +53,16 @@ import {
   CommissionSettlementForm,
   CommissionStatusForm,
   CompleteBankImportForm,
+  DeleteBankImportForm,
   GenerateCommissionsForm,
   GenerateRecurringPayableForm,
   HealthPlanForm,
   PaymentMethodForm,
   ReconciliationForm,
+  MonthlyCloseForm,
   ReceiptForm,
   ReverseReconciliationForm,
+  ReopenMonthlyCloseForm,
   ReversePaymentForm,
   SettleEntryForm,
   VendorForm,
@@ -167,6 +173,7 @@ export function FinancialWorkspace({
     commissionRules: data.commissionRules ?? [],
     commissions: data.commissions ?? [],
     bankImports: (data.bankImports ?? []).map((item) => ({ ...item, items: item.items ?? [] })),
+    monthlyClosings: data.monthlyClosings ?? [],
     professionals: data.professionals ?? [],
     services: data.services ?? [],
     pendingEncounterCharges: data.pendingEncounterCharges ?? [],
@@ -1122,6 +1129,7 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
   const [checkedMovementIds, setCheckedMovementIds] = useState<string[]>([]);
   const [importingStatement, setImportingStatement] = useState(false);
   const [reviewingImportId, setReviewingImportId] = useState<string | null>(null);
+  const [deletingImportId, setDeletingImportId] = useState<string | null>(null);
   const accountMap = useMemo(() => new Map(data.accounts.map((account) => [account.id, account])), [data.accounts]);
   const reconciliationMap = useMemo(
     () => new Map(data.reconciliations.map((item) => [item.id, item])),
@@ -1170,6 +1178,7 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
   const statementAccount = statementAccountId ? accountMap.get(statementAccountId) ?? null : null;
   const statementRows = statementAccountId ? rows.filter(({ payment }) => payment.account_id === statementAccountId) : [];
   const reviewingImport = reviewingImportId ? data.bankImports.find((item) => item.id === reviewingImportId) ?? null : null;
+  const deletingImport = deletingImportId ? data.bankImports.find((item) => item.id === deletingImportId) ?? null : null;
 
   function toggleMovement(paymentId: string) {
     const row = pendingRows.find(({ payment }) => payment.id === paymentId);
@@ -1185,7 +1194,7 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
     activeView === "statements"
       ? { title: "Extratos por conta", description: "Consulte movimentos por conta, período, entrada, saída e status de conciliação." }
       : activeView === "close-period"
-        ? { title: "Conciliar período", description: "Confira movimentos, marque cada item e feche a conciliação contra o saldo bancário." }
+        ? { title: "Conciliação individual", description: "Confira e marque somente os movimentos que constam no extrato da conta." }
         : activeView === "pending"
           ? { title: "Movimentos pendentes", description: "Itens confirmados que ainda precisam ser conferidos antes do fechamento bancário." }
           : activeView === "history"
@@ -1194,7 +1203,11 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
               ? { title: "Divergências de conciliação", description: "Compare saldo esperado, saldo informado e diferenças antes de encerrar o período." }
               : activeView === "imports"
                 ? { title: "Importações bancárias", description: "Importe OFX ou CSV, revise correspondências automáticas e trate divergências antes do fechamento." }
-              : { title: "Relatórios de conciliação", description: "Visão consolidada dos movimentos conciliados, pendentes e reabertos." };
+                : activeView === "monthly-close"
+                  ? { title: "Fechamento mensal", description: "Valide pendências, consolide os resultados e proteja o período contra alterações posteriores." }
+                  : activeView === "dre"
+                    ? { title: "DRE gerencial", description: "Receitas, despesas e resultado por competência, categoria e clínica." }
+                    : { title: "Relatórios de conciliação", description: "Visão consolidada dos movimentos conciliados, pendentes e reabertos." };
 
   useEffect(() => {
     const visibleIds = new Set(rows.map(({ payment }) => payment.id));
@@ -1203,6 +1216,8 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
       return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next;
     });
   }, [rows]);
+
+  const showFilters = ["statements", "close-period", "pending"].includes(activeView);
 
   return (
     <div className="grid gap-5">
@@ -1214,38 +1229,38 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={!data.access.canManage} onClick={() => setImportingStatement(true)}><Upload />Importar extrato</Button>
-          <Button variant="outline" onClick={() => setReportOpen(true)}><FileText />Movimentos</Button>
-          <Button disabled={!data.access.canManage || data.accounts.length === 0 || checkedPendingCount === 0} onClick={() => setCreating(true)}><BarChart3 />Conciliar selecionados</Button>
+          {activeView === "imports" ? <Button disabled={!data.access.canManage} onClick={() => setImportingStatement(true)}><Upload />Importar extrato</Button> : null}
+          {activeView === "statements" || activeView === "pending" ? <Button variant="outline" onClick={() => setReportOpen(true)}><FileText />Gerar relatório</Button> : null}
+          {activeView === "close-period" ? <Button disabled={!data.access.canManage || data.accounts.length === 0 || checkedPendingCount === 0} onClick={() => setCreating(true)}><BarChart3 />Conciliar selecionados</Button> : null}
         </div>
       </header>
 
-      <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4">
+      {showFilters ? <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3">
         <div>
           <p className="font-medium">Filtros rápidos</p>
           <p className="text-sm text-muted-foreground">{rangeLabel(range)} | {accountSummary}</p>
         </div>
         <Button variant="outline" onClick={() => setFiltersOpen(true)}><SlidersHorizontal />Selecionar contas e período</Button>
-      </section>
+      </section> : null}
 
-      <div className="grid gap-3 xl:grid-cols-4">
+      {activeView === "statements" || activeView === "close-period" || activeView === "pending" ? <div className="grid gap-3 xl:grid-cols-4">
         <MetricCard label="Entradas no filtro" value={formatCurrencyBRL(totalIn)} description="Recebimentos confirmados" tone="success" />
         <MetricCard label="Saídas no filtro" value={formatCurrencyBRL(totalOut)} description="Pagamentos confirmados" />
         <MetricCard label="Movimentos pendentes" value={String(pendingRows.length)} description="Ainda sem conciliação" tone={pendingRows.length ? "warning" : "default"} />
         <MetricCard label="Saldo líquido" value={formatCurrencyBRL(totalIn - totalOut)} description="Entradas menos saídas do período" />
-      </div>
+      </div> : null}
 
-      <div className="grid gap-3 lg:grid-cols-3">
+      {activeView === "statements" ? <div className="grid gap-3 lg:grid-cols-3">
         {data.accounts.filter((account) => activeAccountIds.includes(account.id)).map((account) => {
           const accountRows = rows.filter(({ payment }) => payment.account_id === account.id);
           const periodNet = accountRows.reduce((sum, row) => sum + (row.payment.direction === "in" ? row.payment.net_amount_cents : -row.payment.net_amount_cents), 0);
           const pendingCount = accountRows.filter(({ payment }) => !payment.reconciliation_id).length;
           return (
-            <div key={account.id} className="rounded-lg border bg-card p-4">
+            <div key={account.id} className="rounded-lg border bg-card p-3.5">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium">{account.name}</p>
-                  <p className="mt-3 text-2xl font-semibold">{formatCurrencyBRL(account.current_balance_cents)}</p>
+                  <p className="mt-2 text-xl font-semibold tabular-nums">{formatCurrencyBRL(account.current_balance_cents)}</p>
                 </div>
                 <Button size="sm" variant="outline" onClick={() => setStatementAccountId(account.id)}>
                   <Eye />
@@ -1259,9 +1274,9 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
             </div>
           );
         })}
-      </div>
+      </div> : null}
 
-      {pendingRows.length ? (
+      {activeView === "close-period" && pendingRows.length ? (
         <section className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-900">
           <p className="font-medium">Conferência pendente</p>
           <p className="mt-1">
@@ -1274,14 +1289,11 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
         </section>
       ) : null}
 
-      <MovementTable
-        rows={rows}
-        checkable
-        checkedIds={checkedMovementIds}
-        onToggle={toggleMovement}
-      />
+      {activeView === "statements" ? <MovementTable rows={rows} /> : null}
+      {activeView === "close-period" ? <MovementTable rows={pendingRows} checkable checkedIds={checkedMovementIds} onToggle={toggleMovement} /> : null}
+      {activeView === "pending" ? <MovementTable rows={pendingRows} /> : null}
 
-      <section className="rounded-lg border bg-card p-4">
+      {activeView === "imports" ? <section className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between gap-3 border-b pb-3">
           <div><p className="font-medium">Importações bancárias</p><p className="text-sm text-muted-foreground">OFX/CSV com correspondência automática por conta, data, natureza e valor.</p></div>
           <Button size="sm" variant="outline" disabled={!data.access.canManage} onClick={() => setImportingStatement(true)}><Upload />Nova importação</Button>
@@ -1290,13 +1302,19 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
           {data.bankImports.length ? data.bankImports.slice(0, 8).map((item) => (
             <article key={item.id} className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[1fr_auto] lg:items-center">
               <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-medium">{item.file_name}</p><Badge className={item.status === "completed" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}>{item.status === "completed" ? "Revisado" : "Em revisão"}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{item.account?.name ?? "Conta"} | {item.total_rows} movimentos | {item.matched_rows} correspondências | {formatDate(item.period_start)} a {formatDate(item.period_end)}</p></div>
-              <Button size="sm" variant="outline" onClick={() => setReviewingImportId(item.id)}><Eye />Revisar</Button>
+              <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => setReviewingImportId(item.id)}><Eye />Revisar</Button><Button size="icon" variant="ghost" title="Excluir importação" disabled={!data.access.canManage} onClick={() => setDeletingImportId(item.id)}><Trash2 /></Button></div>
             </article>
           )) : <EmptyState title="Nenhum extrato importado" description="Importe OFX ou CSV para comparar o banco com os movimentos do sistema." />}
         </div>
-      </section>
+      </section> : null}
 
-      <section className="rounded-lg border bg-card p-4">
+      {activeView === "divergences" ? <BankDivergencesPanel imports={data.bankImports} onReview={setReviewingImportId} /> : null}
+
+      {activeView === "monthly-close" ? <MonthlyClosingPanel data={data} /> : null}
+
+      {activeView === "dre" ? <FinancialDrePanel data={data} /> : null}
+
+      {activeView === "history" ? <section className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between gap-3 border-b pb-3"><div><p className="font-medium">Histórico de conciliações</p><p className="text-sm text-muted-foreground">Fechamentos por período, conta, responsável e status.</p></div></div>
         <div className="mt-3 grid gap-2">
           {data.reconciliations.length ? data.reconciliations.slice(0, 12).map((reconciliation) => (
@@ -1306,7 +1324,7 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
             </article>
           )) : <EmptyState title="Nenhuma conciliação fechada" description="Feche uma conciliação bancária para travar os movimentos conferidos." />}
         </div>
-      </section>
+      </section> : null}
 
       <Modal open={filtersOpen} onOpenChange={setFiltersOpen} title="Filtros rápidos" className="max-w-2xl"><QuickReconciliationFilters accounts={data.accounts} range={range} selectedAccounts={selectedAccounts} onApply={(nextRange, nextAccounts) => { setRange(nextRange); setSelectedAccounts(nextAccounts); setFiltersOpen(false); }} /></Modal>
       <Modal open={creating} onOpenChange={setCreating} title="Fechar conciliação bancária" description="Somente os movimentos marcados serão travados neste fechamento." className="max-w-4xl"><ReconciliationForm accounts={selectedAccountId ? data.accounts.filter((item) => item.id === selectedAccountId) : data.accounts} paymentIds={checkedMovementIds} defaultAccountId={selectedAccountId} onCompleted={() => { setCreating(false); setCheckedMovementIds([]); }} /></Modal>
@@ -1314,6 +1332,7 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
       <Modal open={importingStatement} onOpenChange={setImportingStatement} title="Importar extrato bancário" description="O arquivo é analisado no servidor e não fica armazenado; apenas os movimentos estruturados são registrados." className="max-w-2xl"><BankStatementImportForm accounts={data.accounts} onCompleted={() => setImportingStatement(false)} /></Modal>
       <Modal open={Boolean(statementAccountId)} onOpenChange={(open) => { if (!open) setStatementAccountId(null); }} title={statementAccount ? `Extrato - ${statementAccount.name}` : "Extrato da conta"} description="Movimentos do período filtrado, com status de conciliação." className="max-w-[min(1180px,calc(100vw-3rem))]"><MovementTable rows={statementRows} compact scrollable /></Modal>
       <Modal open={Boolean(reviewingImport)} onOpenChange={(open) => { if (!open) setReviewingImportId(null); }} title={reviewingImport ? `Revisão - ${reviewingImport.file_name}` : "Revisão do extrato"} description="Correspondências são sugestões automáticas; movimentos pendentes podem ser lançamentos ausentes ou divergências." className="max-w-[min(1100px,calc(100vw-3rem))]">{reviewingImport ? <BankImportReview data={reviewingImport} canApprove={data.access.canApprove} onCompleted={() => setReviewingImportId(null)} /> : null}</Modal>
+      <Modal open={Boolean(deletingImport)} onOpenChange={(open) => { if (!open) setDeletingImportId(null); }} title="Excluir importação bancária" description="A exclusão não remove lançamentos financeiros existentes." className="max-w-lg">{deletingImport ? <DeleteBankImportForm bankImport={deletingImport} onCompleted={() => setDeletingImportId(null)} /> : null}</Modal>
       <Modal open={Boolean(detailing)} onOpenChange={(open) => { if (!open) setDetailing(null); }} title="Detalhes da conciliação" description="Resumo somente para consulta. Nenhum dado pode ser alterado aqui." className="max-w-5xl">{detailing ? <ReconciliationDetail reconciliation={detailing} rows={rows.filter(({ payment }) => payment.reconciliation_id === detailing.id)} /> : null}</Modal>
       <Modal open={Boolean(reversing)} onOpenChange={(open) => { if (!open) setReversing(null); }} title="Reabrir conciliação" description="Use somente para correção auditada de movimentos já conferidos." className="max-w-lg">{reversing ? <ReverseReconciliationForm reconciliation={reversing} onCompleted={() => setReversing(null)} /> : null}</Modal>
     </div>
@@ -1609,18 +1628,18 @@ function EntriesTable({
         ) : null}
       </div>
 
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full min-w-[1080px] text-[13px]">
-          <thead className="sticky top-10 z-10 bg-muted/90 text-left text-xs text-muted-foreground backdrop-blur">
+      <div className="overflow-x-auto rounded-md border bg-card">
+        <table className="w-full min-w-[1260px] text-[13px]">
+          <thead className="bg-muted/60 text-left text-[11px] uppercase text-muted-foreground">
             <tr>
-              <th className="px-3 py-2 font-medium">{entryType === "receivable" ? "Paciente/Origem" : "Fornecedor/Origem"}</th>
-              <th className="px-3 py-2 font-medium">Descrição</th>
-              <th className="px-3 py-2 font-medium">Vencimento</th>
-              <th className="px-3 py-2 text-right font-medium">Total</th>
-              <th className="px-3 py-2 text-right font-medium">Pago</th>
-              <th className="px-3 py-2 text-right font-medium">Aberto</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium">Conciliação</th>
+              <th className="min-w-56 px-3 py-2.5 font-medium">{entryType === "receivable" ? "Paciente/Origem" : "Fornecedor/Origem"}</th>
+              <th className="min-w-72 px-3 py-2.5 font-medium">Descrição</th>
+              <th className="w-28 px-3 py-2.5 font-medium">Vencimento</th>
+              <th className="w-28 px-3 py-2.5 text-right font-medium">Total</th>
+              <th className="w-28 px-3 py-2.5 text-right font-medium">Pago</th>
+              <th className="w-28 px-3 py-2.5 text-right font-medium">Aberto</th>
+              <th className="w-28 px-3 py-2.5 font-medium">Status</th>
+              <th className="w-40 px-3 py-2.5 font-medium">Conciliação</th>
               <th className="sticky right-0 bg-muted/95 px-3 py-2 text-right font-medium">Ações</th>
             </tr>
           </thead>
@@ -1680,23 +1699,23 @@ function EntryTableRow({
 
   return (
     <tr className="border-t align-top">
-      <td className="px-3 py-2.5">
-        <p className="font-medium">{party}</p>
+      <td className="min-w-56 px-3 py-2.5">
+        <p className="whitespace-normal break-words font-medium">{party}</p>
         <p className="mt-1 text-xs text-muted-foreground">{entry.category?.name ?? "Sem categoria"}</p>
       </td>
-      <td className="px-3 py-2.5">
-        <p className="font-medium">{entry.description}</p>
+      <td className="min-w-72 px-3 py-2.5">
+        <p className="whitespace-normal break-words font-medium">{entry.description}</p>
         <p className="mt-1 text-xs text-muted-foreground">
           {entry.entry_type === "payable" ? documentTypeLabel(entry.document_type) : entry.origin}
           {entry.document_number ? ` | ${entry.document_number}` : ""}
         </p>
       </td>
-      <td className="px-3 py-2.5 tabular-nums">
+      <td className="whitespace-nowrap px-3 py-2.5 tabular-nums">
         <span className={isOverdue(entry) ? "font-medium text-amber-700" : undefined}>{formatDate(entry.due_date)}</span>
       </td>
-      <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(totalEntryCents(entry))}</td>
-      <td className="px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(entry.paid_cents)}</td>
-      <td className="px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(openCents)}</td>
+      <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(totalEntryCents(entry))}</td>
+      <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(entry.paid_cents)}</td>
+      <td className="whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(openCents)}</td>
       <td className="px-3 py-2.5">
         <div className="grid gap-1">
           <Badge className={isOverdue(entry) ? "bg-amber-500/10 text-amber-700" : undefined}>
@@ -1996,6 +2015,83 @@ function InfoBox({ label, value }: { label: string; value: string }) {
   );
 }
 
+function BankDivergencesPanel({
+  imports,
+  onReview,
+}: {
+  imports: FinancialWorkspaceData["bankImports"];
+  onReview: (id: string) => void;
+}) {
+  const rows = imports.flatMap((batch) => batch.items.filter((item) => item.status === "pending").map((item) => ({ batch, item })));
+  const total = rows.reduce((sum, row) => sum + (row.item.direction === "in" ? row.item.amount_cents : -row.item.amount_cents), 0);
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 lg:grid-cols-3">
+        <MetricCard label="Sem correspondência" value={String(rows.length)} description="Movimentos bancários sem par" tone={rows.length ? "warning" : "default"} />
+        <MetricCard label="Impacto líquido" value={formatCurrencyBRL(total)} description="Entradas menos saídas divergentes" />
+        <MetricCard label="Arquivos envolvidos" value={String(new Set(rows.map((row) => row.batch.id)).size)} description="Importações que exigem revisão" />
+      </div>
+      <section className="rounded-lg border bg-card">
+        <div className="border-b p-3.5"><p className="font-medium">Movimentos para investigar</p><p className="mt-1 text-sm text-muted-foreground">Confirme se são tarifas bancárias, lançamentos ausentes ou diferenças de data e descrição.</p></div>
+        <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-[13px]"><thead className="bg-muted/50 text-left text-[11px] uppercase text-muted-foreground"><tr><th className="px-3 py-2.5">Data</th><th className="px-3 py-2.5">Conta</th><th className="px-3 py-2.5">Descrição bancária</th><th className="px-3 py-2.5">Arquivo</th><th className="px-3 py-2.5">Natureza</th><th className="px-3 py-2.5 text-right">Valor</th><th className="px-3 py-2.5 text-right">Ação</th></tr></thead><tbody>{rows.length ? rows.map(({ batch, item }) => <tr key={item.id} className="border-t align-top"><td className="whitespace-nowrap px-3 py-2.5">{formatDate(item.transaction_date)}</td><td className="px-3 py-2.5">{batch.account?.name ?? "Conta"}</td><td className="max-w-[320px] whitespace-normal break-words px-3 py-2.5 font-medium">{item.description}</td><td className="max-w-[220px] whitespace-normal break-all px-3 py-2.5 text-muted-foreground">{batch.file_name}</td><td className="px-3 py-2.5">{item.direction === "in" ? "Entrada" : "Saída"}</td><td className="whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(item.amount_cents)}</td><td className="px-3 py-2.5 text-right"><Button size="sm" variant="outline" onClick={() => onReview(batch.id)}><Eye />Revisar arquivo</Button></td></tr>) : <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">Nenhuma divergência bancária pendente.</td></tr>}</tbody></table></div>
+      </section>
+    </div>
+  );
+}
+
+function MonthlyClosingPanel({ data }: { data: FinancialWorkspaceData }) {
+  const [closingOpen, setClosingOpen] = useState(false);
+  const [reopeningId, setReopeningId] = useState<string | null>(null);
+  const reopening = reopeningId ? data.monthlyClosings.find((item) => item.id === reopeningId) ?? null : null;
+  const current = data.monthlyClosings[0] ?? null;
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 lg:grid-cols-3">
+        <MetricCard label="Último período" value={current ? formatMonth(current.period_month) : "Não fechado"} description={current?.status === "closed" ? "Período protegido" : "Período reaberto"} tone={current?.status === "closed" ? "success" : "warning"} />
+        <MetricCard label="Resultado do fechamento" value={current ? formatCurrencyBRL(current.result_cents) : formatCurrencyBRL(0)} description="Receitas recebidas menos despesas pagas" />
+        <MetricCard label="Pendências atuais" value={String(data.payments.filter((item) => item.status === "confirmed" && !item.reconciliation_id && item.account_id).length)} description="Movimentos ainda sem conciliação" tone="warning" />
+      </div>
+      <section className="rounded-lg border bg-card p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-3"><div><p className="font-medium">Controle de competência</p><p className="mt-1 text-sm text-muted-foreground">O fechamento cria uma fotografia gerencial e bloqueia alterações no mês.</p></div><Button disabled={!data.access.canApprove} onClick={() => setClosingOpen(true)}><CalendarCheck />Novo fechamento</Button></div>
+        <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[920px] text-[13px]"><thead className="bg-muted/50 text-left text-[11px] uppercase text-muted-foreground"><tr><th className="px-3 py-2.5">Competência</th><th className="px-3 py-2.5">Situação</th><th className="px-3 py-2.5 text-right">Recebido</th><th className="px-3 py-2.5 text-right">Pago</th><th className="px-3 py-2.5 text-right">Resultado</th><th className="px-3 py-2.5">Responsável</th><th className="px-3 py-2.5 text-right">Ação</th></tr></thead><tbody>{data.monthlyClosings.length ? data.monthlyClosings.map((item) => <tr key={item.id} className="border-t"><td className="whitespace-nowrap px-3 py-2.5 font-medium">{formatMonth(item.period_month)}</td><td className="px-3 py-2.5"><Badge className={item.status === "closed" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}>{item.status === "closed" ? "Fechado" : "Reaberto"}</Badge></td><td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(item.revenue_cents)}</td><td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(item.expense_cents)}</td><td className="whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(item.result_cents)}</td><td className="px-3 py-2.5">{item.closed_by_profile?.full_name ?? "Usuário"}</td><td className="px-3 py-2.5 text-right">{item.status === "closed" ? <Button size="sm" variant="outline" disabled={!data.access.canApprove} onClick={() => setReopeningId(item.id)}><LockOpen />Reabrir</Button> : <span className="text-xs text-muted-foreground">{item.reopening_reason ?? "Aguardando novo fechamento"}</span>}</td></tr>) : <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">Nenhum período financeiro fechado.</td></tr>}</tbody></table></div>
+      </section>
+      <Modal open={closingOpen} onOpenChange={setClosingOpen} title="Fechar mês financeiro" description="A operação será validada e registrada na auditoria." className="max-w-xl"><MonthlyCloseForm onCompleted={() => setClosingOpen(false)} /></Modal>
+      <Modal open={Boolean(reopening)} onOpenChange={(open) => { if (!open) setReopeningId(null); }} title="Reabrir mês financeiro" className="max-w-lg">{reopening ? <ReopenMonthlyCloseForm closing={reopening} onCompleted={() => setReopeningId(null)} /> : null}</Modal>
+    </div>
+  );
+}
+
+function formatMonth(value: string) {
+  const date = /^\d{4}-\d{2}/.test(value) ? new Date(`${value.slice(0, 7)}-01T12:00:00`) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Período inválido";
+  return new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(date);
+}
+
+function FinancialDrePanel({ data }: { data: FinancialWorkspaceData }) {
+  const availableMonths = useMemo(() => [...new Set(data.entries.map((entry) => entry.competence_date?.slice(0, 7)).filter(Boolean))].sort().reverse() as string[], [data.entries]);
+  const [month, setMonth] = useState(() => availableMonths[0] ?? new Date().toISOString().slice(0, 7));
+  const entries = data.entries.filter((entry) => entry.competence_date?.startsWith(month) && entry.status !== "cancelled");
+  const revenues = entries.filter((entry) => entry.entry_type === "receivable");
+  const expenses = entries.filter((entry) => entry.entry_type === "payable");
+  const grossRevenue = revenues.reduce((sum, entry) => sum + entry.amount_cents + (entry.freight_cents ?? 0) + entry.addition_cents, 0);
+  const deductions = revenues.reduce((sum, entry) => sum + entry.discount_cents, 0);
+  const netRevenue = grossRevenue - deductions;
+  const operatingExpenses = expenses.reduce((sum, entry) => sum + totalEntryCents(entry), 0);
+  const result = netRevenue - operatingExpenses;
+  const categoryMap = new Map(data.categories.map((item) => [item.id, item.name]));
+  const categoryRows = [...new Map(entries.map((entry) => [entry.category_id ?? `${entry.entry_type}-uncategorized`, { id: entry.category_id ?? `${entry.entry_type}-uncategorized`, name: entry.category_id ? categoryMap.get(entry.category_id) ?? "Categoria" : "Sem categoria", direction: entry.entry_type, value: 0 }])).values()];
+  for (const row of categoryRows) row.value = entries.filter((entry) => (entry.category_id ?? `${entry.entry_type}-uncategorized`) === row.id).reduce((sum, entry) => sum + totalEntryCents(entry), 0);
+  const scale = Math.max(...categoryRows.map((item) => item.value), 1);
+  return (
+    <div className="grid gap-4">
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3"><div><p className="font-medium">Regime de competência</p><p className="text-sm text-muted-foreground">Resultado gerencial dos lançamentos com competência no período.</p></div><label className="flex items-center gap-2 text-sm font-medium">Competência<input type="month" value={month} onChange={(event) => setMonth(event.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm font-normal" /></label></section>
+      <div className="grid gap-3 lg:grid-cols-4"><MetricCard label="Receita bruta" value={formatCurrencyBRL(grossRevenue)} description="Faturamento do período" /><MetricCard label="Deduções" value={formatCurrencyBRL(deductions)} description="Descontos concedidos" tone="warning" /><MetricCard label="Despesas operacionais" value={formatCurrencyBRL(operatingExpenses)} description="Custos e despesas lançados" /><MetricCard label="Resultado gerencial" value={formatCurrencyBRL(result)} description={result >= 0 ? "Superávit operacional" : "Déficit operacional"} tone={result >= 0 ? "success" : "warning"} /></div>
+      <section className="rounded-lg border bg-card"><div className="border-b p-3.5"><p className="font-medium">Demonstração do resultado</p><p className="mt-1 text-sm text-muted-foreground">{formatMonth(`${month}-01`)} | valores por competência.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-[13px]"><tbody><tr className="border-b bg-muted/20"><td className="px-3 py-2.5 font-medium">Receita bruta</td><td className="px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(grossRevenue)}</td></tr><tr className="border-b"><td className="px-3 py-2.5 text-muted-foreground">(-) Deduções e descontos</td><td className="px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(-deductions)}</td></tr><tr className="border-b bg-emerald-500/5"><td className="px-3 py-2.5 font-medium">Receita líquida</td><td className="px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(netRevenue)}</td></tr><tr className="border-b"><td className="px-3 py-2.5 text-muted-foreground">(-) Custos e despesas operacionais</td><td className="px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(-operatingExpenses)}</td></tr><tr className={result >= 0 ? "bg-emerald-500/10" : "bg-amber-500/10"}><td className="px-3 py-3 font-semibold">Resultado do período</td><td className="px-3 py-3 text-right font-semibold tabular-nums">{formatCurrencyBRL(result)}</td></tr></tbody></table></div></section>
+      <section className="rounded-lg border bg-card"><div className="border-b p-3.5"><p className="font-medium">Composição por categoria</p></div><div className="grid gap-3 p-4">{categoryRows.length ? categoryRows.sort((a, b) => b.value - a.value).map((row) => <div key={row.id} className="grid gap-1.5"><div className="flex items-center justify-between gap-3 text-[13px]"><span>{row.name}</span><span className="font-medium tabular-nums">{formatCurrencyBRL(row.value)}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className={row.direction === "receivable" ? "h-full bg-emerald-500" : "h-full bg-amber-500"} style={{ width: `${Math.max((row.value / scale) * 100, 2)}%` }} /></div></div>) : <p className="py-6 text-center text-sm text-muted-foreground">Nenhum lançamento para esta competência.</p>}</div></section>
+    </div>
+  );
+}
+
 function MovementTable({
   rows,
   compact,
@@ -2025,8 +2121,8 @@ function MovementTable({
         </div>
       ) : null}
       <div className={scrollable ? "max-h-[65vh] overflow-auto" : "overflow-x-auto"}>
-        <table className="w-full min-w-[920px] table-fixed text-[13px]">
-          <thead className="sticky top-0 z-10 bg-muted text-left text-[11px] uppercase text-muted-foreground shadow-sm">
+        <table className="w-full min-w-[1120px] text-[13px]">
+          <thead className={scrollable ? "sticky top-0 z-10 bg-muted text-left text-[11px] uppercase text-muted-foreground shadow-sm" : "bg-muted/60 text-left text-[11px] uppercase text-muted-foreground"}>
             <tr>
               {checkable ? <th className="w-28 px-3 py-2.5 font-medium">Conferido</th> : null}
               <th className="w-24 px-3 py-2.5 font-medium">Data</th>
@@ -2062,15 +2158,15 @@ function MovementTable({
                     </td>
                   ) : null}
                   <td className="whitespace-nowrap px-3 py-2.5 tabular-nums">{formatDate(payment.paid_at)}</td>
-                  <td className="truncate px-3 py-2.5" title={account?.name ?? "Sem conta"}>{account?.name ?? "Sem conta"}</td>
+                  <td className="max-w-44 whitespace-normal break-words px-3 py-2.5">{account?.name ?? "Sem conta"}</td>
                   <td className="px-3 py-2.5">
                     <Badge className={payment.direction === "in" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}>
                       {payment.direction === "in" ? "Entrada" : "Saída"}
                     </Badge>
                   </td>
                   <td className="px-3 py-2.5">
-                    <p className="truncate font-medium" title={entry.description}>{entry.description}</p>
-                    <p className="truncate text-xs text-muted-foreground">
+                    <p className="max-w-72 whitespace-normal break-words font-medium">{entry.description}</p>
+                    <p className="max-w-72 whitespace-normal break-words text-xs text-muted-foreground">
                       {entry.patient?.social_name || entry.patient?.full_name || entry.vendor?.name || "Sem vinculação"}
                     </p>
                   </td>
@@ -2082,7 +2178,7 @@ function MovementTable({
                       {payment.reconciliation_id ? "Conciliado" : "Pendente"}
                     </Badge>
                   </td>
-                  <td className="truncate px-3 py-2.5" title={reconciliation?.closed_by_profile?.full_name ?? ""}>{reconciliation?.closed_by_profile?.full_name ?? "-"}</td>
+                  <td className="max-w-48 whitespace-normal break-words px-3 py-2.5">{reconciliation?.closed_by_profile?.full_name ?? "-"}</td>
                 </tr>
               ))
             ) : (
@@ -2118,11 +2214,11 @@ function BankImportReview({
         <InfoBox label="Divergências" value={String(pending)} />
       </div>
       <div className="max-h-[55vh] overflow-auto rounded-lg border">
-        <table className="w-full min-w-[760px] table-fixed text-[13px]">
+        <table className="w-full min-w-[860px] text-[13px]">
           <thead className="sticky top-0 z-10 bg-muted text-left text-[11px] uppercase text-muted-foreground shadow-sm">
             <tr><th className="w-24 px-3 py-2.5">Data</th><th className="w-72 px-3 py-2.5">Descrição</th><th className="w-24 px-3 py-2.5">Natureza</th><th className="w-28 px-3 py-2.5 text-right">Valor</th><th className="w-32 px-3 py-2.5">Situação</th><th className="w-24 px-3 py-2.5">Confiança</th></tr>
           </thead>
-          <tbody>{data.items.map((item) => <tr key={item.id} className="border-t"><td className="whitespace-nowrap px-3 py-2.5">{formatDate(item.transaction_date)}</td><td className="truncate px-3 py-2.5" title={item.description}>{item.description}</td><td className="px-3 py-2.5">{item.direction === "in" ? "Entrada" : "Saída"}</td><td className="whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(item.amount_cents)}</td><td className="px-3 py-2.5"><Badge className={item.status === "matched" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}>{item.status === "matched" ? "Correspondente" : "Sem par"}</Badge></td><td className="px-3 py-2.5">{item.match_confidence ? `${item.match_confidence}%` : "-"}</td></tr>)}</tbody>
+          <tbody>{data.items.map((item) => <tr key={item.id} className="border-t align-top"><td className="whitespace-nowrap px-3 py-2.5">{formatDate(item.transaction_date)}</td><td className="max-w-96 whitespace-normal break-words px-3 py-2.5">{item.description}</td><td className="px-3 py-2.5">{item.direction === "in" ? "Entrada" : "Saída"}</td><td className="whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(item.amount_cents)}</td><td className="px-3 py-2.5"><Badge className={item.status === "matched" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}>{item.status === "matched" ? "Correspondente" : "Sem par"}</Badge></td><td className="px-3 py-2.5">{item.match_confidence ? `${item.match_confidence}%` : "-"}</td></tr>)}</tbody>
         </table>
       </div>
       {pending ? <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-900"><strong>{pending} divergência(s).</strong> Confira se são tarifas, lançamentos ausentes ou datas diferentes antes de fechar a conciliação.</div> : null}

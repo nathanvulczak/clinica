@@ -13,11 +13,13 @@ import {
 import type { PatientMedicalOverview } from "@/repositories/medical-records";
 
 function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Data inválida";
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
     timeStyle: "short",
     timeZone: "America/Sao_Paulo",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function PatientCommentForm({
@@ -37,10 +39,10 @@ function PatientCommentForm({
 
   useEffect(() => {
     if (state.error) {
-      toast({ title: "Comentario nao salvo", description: state.error, variant: "destructive" });
+      toast({ title: "Comentário não salvo", description: state.error, variant: "destructive" });
     }
     if (state.success) {
-      toast({ title: "Comentario clinico", description: state.success });
+      toast({ title: "Comentário clínico", description: state.success });
     }
   }, [state.error, state.success, toast]);
 
@@ -52,11 +54,11 @@ function PatientCommentForm({
       <div className="grid gap-3 lg:grid-cols-[1fr_180px_auto]">
         <textarea
           name="comment"
-          placeholder="Adicionar comentario clinico interno sobre este paciente..."
+          placeholder="Adicionar comentário clínico interno sobre este paciente..."
           className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
         <Select name="visibility" defaultValue="clinical">
-          <option value="clinical">Equipe clinica</option>
+          <option value="clinical">Equipe clínica</option>
           <option value="private">Privado</option>
         </Select>
         <Button disabled={pending}>
@@ -72,7 +74,7 @@ export function PatientMedicalOverviewPanel({ overviews }: { overviews: PatientM
   if (!overviews.length) {
     return (
       <div className="rounded-lg border border-dashed px-6 py-12 text-center text-sm text-muted-foreground">
-        Nenhum paciente com prontuario registrado ainda.
+        Nenhum paciente com prontuário registrado ainda.
       </div>
     );
   }
@@ -84,32 +86,32 @@ export function PatientMedicalOverviewPanel({ overviews }: { overviews: PatientM
         const patientName = overview.patient?.social_name || overview.patient?.full_name || "Paciente";
 
         return (
-          <article key={overview.patient?.id ?? latestRecord.patient_id} className="grid gap-4 rounded-lg border bg-card p-4">
+          <article key={overview.patient?.id ?? latestRecord.patient_id} className="grid gap-3 rounded-lg border bg-card p-3.5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="font-medium">{patientName}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {overview.records.length} prontuario(s) | ultimo registro {formatDate(latestRecord.updated_at)}
+                  {overview.records.length} prontuário(s) | último registro {formatDate(latestRecord.updated_at)}
                 </p>
               </div>
               <Button asChild size="sm" variant="outline">
-                <Link href={`/prontuarios/${latestRecord.encounter_id}`}>Abrir ultimo prontuario</Link>
+                <Link href={`/prontuarios/${latestRecord.encounter_id}`}>Abrir último prontuário</Link>
               </Button>
             </div>
 
             <div className="grid gap-2">
-              <p className="text-sm font-medium">Comentarios recentes</p>
+              <p className="text-sm font-medium">Comentários recentes</p>
               {overview.comments.length ? (
                 overview.comments.slice(0, 3).map((comment) => (
                   <div key={comment.id} className="rounded-md border bg-background p-3 text-sm">
                     <p>{comment.comment}</p>
                     <p className="mt-2 text-xs text-muted-foreground">
-                      {comment.author?.full_name ?? "Usuario"} | {formatDate(comment.created_at)}
+                      {comment.author?.full_name ?? "Usuário"} | {formatDate(comment.created_at)}
                     </p>
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-muted-foreground">Nenhum comentario clinico registrado.</p>
+                <p className="text-sm text-muted-foreground">Nenhum comentário clínico registrado.</p>
               )}
             </div>
 

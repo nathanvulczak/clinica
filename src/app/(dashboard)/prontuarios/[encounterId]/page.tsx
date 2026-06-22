@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, ClipboardCheck, Eye, LockKeyhole } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
+import { RealtimeClinicSync } from "@/components/app/realtime-clinic-sync";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getActiveClinicContext } from "@/features/clinics/context";
@@ -26,16 +27,16 @@ export default async function MedicalRecordPage({
   if (!access.canViewAll && !access.canViewOwn) {
     return (
       <>
-        <PageHeader title="Prontuario" description="Ficha clinica do atendimento." />
+        <PageHeader title="Prontuário" description="Ficha clínica do atendimento." />
         <Card>
           <CardHeader>
             <CardTitle>Acesso restrito</CardTitle>
-            <CardDescription>Seu perfil nao possui acesso ao modulo de Prontuarios.</CardDescription>
+            <CardDescription>Seu perfil não possui acesso ao módulo de Prontuários.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-3 rounded-lg border p-4 text-sm text-muted-foreground">
               <LockKeyhole className="size-5 text-primary" />
-              Solicite a liberacao de acesso ao prontuario ao responsavel pela clinica.
+              Solicite a liberação de acesso ao prontuário ao responsável pela clínica.
             </div>
           </CardContent>
         </Card>
@@ -53,14 +54,14 @@ export default async function MedicalRecordPage({
   return (
     <>
       <PageHeader
-        title="Prontuario do atendimento"
-        description="Evolucao medica, conduta, prescricoes e fechamento da consulta."
+        title="Prontuário do atendimento"
+        description="Evolução clínica, conduta, prescrições e fechamento da consulta."
         action={
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline">
               <Link href="/prontuarios">
                 <ArrowLeft />
-                Voltar aos prontuarios
+                Voltar aos prontuários
               </Link>
             </Button>
             <Button asChild>
@@ -78,30 +79,19 @@ export default async function MedicalRecordPage({
       />
 
       <div className="grid gap-5">
-        <div className="grid gap-3 rounded-lg border bg-muted/20 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
+        <div className="grid gap-3 rounded-lg border bg-muted/20 px-4 py-3 lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
-            <p className="text-sm font-medium">Registro clinico auditavel</p>
+            <p className="text-sm font-medium">Registro clínico auditável</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Salve rascunhos durante a consulta. Ao finalizar, o atendimento sera concluido e
-              ficara pronto para os proximos fluxos administrativos e financeiros.
+              Salve rascunhos durante a consulta. Ao finalizar, o atendimento será concluído e
+              seguirá para os próximos fluxos administrativos e financeiros.
             </p>
           </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <ClipboardCheck className="size-4 text-primary" />
-            Auditoria ativa
-          </div>
+          <div className="grid justify-items-end gap-1.5"><div className="flex items-center gap-2 text-sm text-muted-foreground"><ClipboardCheck className="size-4 text-primary" />Auditoria ativa</div><RealtimeClinicSync clinicId={activeClinic.id} tables={["clinical_encounters"]} visible /></div>
         </div>
 
         {detail.status === "consultation_completed" ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Consulta concluida</CardTitle>
-              <CardDescription>
-                Correcoes continuam disponiveis conforme permissao e preferencias da clinica, com
-                motivo registrado em auditoria.
-              </CardDescription>
-            </CardHeader>
-          </Card>
+          <section className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-4 py-3"><p className="text-sm font-medium text-emerald-900">Consulta concluída</p><p className="mt-1 text-sm text-emerald-800">Correções permanecem disponíveis conforme permissão, sempre com motivo e auditoria.</p></section>
         ) : null}
 
         <MedicalRecordForm detail={detail} preferences={preferences} />

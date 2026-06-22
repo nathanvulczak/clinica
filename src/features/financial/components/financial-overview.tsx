@@ -70,7 +70,7 @@ export function FinancialOverview({ data }: { data: FinancialWorkspace }) {
         {latestEntries.length ? (
           <div className="overflow-x-auto rounded-md border bg-card">
             <table className="w-full min-w-[820px] text-[13px]">
-              <thead className="sticky top-10 z-10 bg-muted/80 text-left text-xs text-muted-foreground backdrop-blur">
+              <thead className="bg-muted/60 text-left text-xs text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 font-medium">Origem</th>
                   <th className="px-3 py-2 font-medium">Descrição</th>

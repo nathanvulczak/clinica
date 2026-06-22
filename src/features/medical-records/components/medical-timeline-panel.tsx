@@ -6,11 +6,13 @@ import { Button } from "@/components/ui/button";
 import type { MedicalTimelineEvent } from "@/repositories/medical-records";
 
 function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Data inválida";
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
     timeStyle: "short",
     timeZone: "America/Sao_Paulo",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function toneClass(tone: MedicalTimelineEvent["tone"]) {
@@ -25,12 +27,12 @@ export function MedicalTimelinePanel({ events }: { events: MedicalTimelineEvent[
   const visibleEvents = expanded ? events.slice(0, 40) : [];
 
   return (
-    <section className="grid gap-4 rounded-lg border bg-card p-4">
+    <section className="grid gap-3 rounded-lg border bg-card p-3.5">
       <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
         <div>
-          <p className="font-medium">Linha do tempo clinica</p>
+          <p className="font-medium">Linha do tempo clínica</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Historico consolidado do atendimento, documentos, anexos, comentarios e correcoes.
+            Histórico consolidado do atendimento, documentos, anexos, comentários e correções.
           </p>
           <p className="mt-2 text-xs text-muted-foreground">
             {events.length
@@ -75,7 +77,7 @@ export function MedicalTimelinePanel({ events }: { events: MedicalTimelineEvent[
           </div>
         ) : (
           <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-            A linha do tempo sera preenchida conforme o atendimento avancar.
+            A linha do tempo será preenchida conforme o atendimento avançar.
           </div>
         )
       ) : null}

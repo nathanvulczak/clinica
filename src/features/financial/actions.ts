@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getActiveClinicContext } from "@/features/clinics/context";
@@ -93,6 +94,9 @@ function financialError(error: { message?: string } | null, fallback: string) {
   }
   if (message.includes("financial_reconciliation_locked")) {
     return "Este lançamento faz parte de uma conciliação bancária fechada. Reabra a conciliação antes de alterar.";
+  }
+  if (message.includes("financial_period_closed")) {
+    return "O período financeiro está fechado. Reabra o mês com autorização antes de alterar lançamentos.";
   }
   return fallback;
 }
@@ -2207,6 +2211,18 @@ export async function importFinancialBankStatementAction(
   const { data: account } = await admin.from("financial_accounts").select("id, name").eq("id", accountId).eq("clinic_id", context.activeClinic.id).is("deleted_at", null).maybeSingle();
   if (!account) return { error: "Conta financeira não encontrada." };
   const content = await file.text();
+  const fileHash = createHash("sha256").update(content).digest("hex");
+  const { data: duplicateImport } = await admin
+    .from("financial_bank_imports")
+    .select("id, file_name, created_at")
+    .eq("clinic_id", context.activeClinic.id)
+    .eq("account_id", accountId)
+    .eq("file_hash", fileHash)
+    .is("deleted_at", null)
+    .maybeSingle<{ id: string; file_name: string; created_at: string }>();
+  if (duplicateImport) {
+    return { error: `Este arquivo já foi importado para esta conta em ${new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(duplicateImport.created_at))}.` };
+  }
   const rows = extension === "ofx" ? parseBankOfx(content) : parseBankCsv(content);
   if (!rows.length) return { error: "Nenhum movimento válido foi identificado. Confira as colunas de data, descrição e valor." };
   if (rows.length > 5000) return { error: "O arquivo possui mais de 5.000 movimentos. Divida-o em períodos menores." };
@@ -2222,7 +2238,7 @@ export async function importFinancialBankStatementAction(
     if (match) usedPayments.add(match.payment.id);
     return { ...row, matchedPaymentId: match?.payment.id ?? null, confidence: match ? (match.dayDifference < 0.6 ? 100 : 85) : null };
   });
-  const { data: batch, error: batchError } = await admin.from("financial_bank_imports").insert({ clinic_id: context.activeClinic.id, account_id: accountId, file_name: file.name.slice(0, 220), file_type: extension, status: "ready", period_start: sortedDates[0], period_end: sortedDates.at(-1), total_rows: rows.length, matched_rows: matchedRows.filter((row) => row.matchedPaymentId).length, notes: String(formData.get("notes") ?? "").trim() || null, created_by: context.user.id, updated_by: context.user.id }).select("id").single<{ id: string }>();
+  const { data: batch, error: batchError } = await admin.from("financial_bank_imports").insert({ clinic_id: context.activeClinic.id, account_id: accountId, file_name: file.name.slice(0, 220), file_type: extension, file_hash: fileHash, status: "ready", period_start: sortedDates[0], period_end: sortedDates.at(-1), total_rows: rows.length, matched_rows: matchedRows.filter((row) => row.matchedPaymentId).length, notes: String(formData.get("notes") ?? "").trim() || null, created_by: context.user.id, updated_by: context.user.id }).select("id").single<{ id: string }>();
   if (batchError || !batch) return { error: financialError(batchError, "Não foi possível registrar a importação.") };
   const { error: itemError } = await admin.from("financial_bank_import_items").insert(matchedRows.map((row) => ({ clinic_id: context.activeClinic.id, import_id: batch.id, transaction_date: row.date, description: row.description, document_number: row.document, direction: row.direction, amount_cents: row.amountCents, external_id: row.externalId, status: row.matchedPaymentId ? "matched" : "pending", matched_payment_id: row.matchedPaymentId, match_confidence: row.confidence, raw_data: row.raw, created_by: context.user.id, updated_by: context.user.id })));
   if (itemError) { await admin.from("financial_bank_imports").update({ status: "failed", updated_by: context.user.id }).eq("id", batch.id); return { error: financialError(itemError, "O arquivo foi lido, mas os movimentos não foram gravados.") }; }
@@ -2248,6 +2264,123 @@ export async function completeFinancialBankImportAction(
   await logAuditEvent({ clinicId: context.activeClinic.id, userId: context.user.id, actionType: "financial_bank_import_completed", module: "financial", recordTable: "financial_bank_imports", recordId: importId, oldValues: batch, newValues: payload, notes: "Revisão de importação bancária concluída." });
   revalidateFinancial();
   return { success: "Revisão do extrato concluída. As correspondências permanecem disponíveis para conciliação." };
+}
+
+export async function deleteFinancialBankImportAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const importId = String(formData.get("import_id") ?? "");
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (!/^[0-9a-f-]{36}$/i.test(importId)) return { error: "Importação inválida." };
+  if (reason.length < 8) return { error: "Informe um motivo com pelo menos 8 caracteres." };
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "Você não possui permissão para excluir importações bancárias." };
+  const admin = createSupabaseAdminClient();
+  const { data: batch } = await admin.from("financial_bank_imports").select("*").eq("id", importId).eq("clinic_id", context.activeClinic.id).is("deleted_at", null).maybeSingle();
+  if (!batch) return { error: "Arquivo importado não encontrado." };
+  const deletedAt = new Date().toISOString();
+  const { error: itemError } = await admin.from("financial_bank_import_items").update({ deleted_at: deletedAt, updated_by: context.user.id }).eq("import_id", importId).eq("clinic_id", context.activeClinic.id).is("deleted_at", null);
+  if (itemError) return { error: financialError(itemError, "Não foi possível remover os movimentos importados.") };
+  const { error } = await admin.from("financial_bank_imports").update({ deleted_at: deletedAt, deleted_reason: reason, deleted_by: context.user.id, updated_by: context.user.id }).eq("id", importId);
+  if (error) return { error: financialError(error, "Não foi possível excluir o arquivo importado.") };
+  await logAuditEvent({ clinicId: context.activeClinic.id, userId: context.user.id, actionType: "financial_bank_import_deleted", module: "financial", recordTable: "financial_bank_imports", recordId: importId, oldValues: batch, newValues: { deleted_at: deletedAt, reason }, level: "critical", notes: "Importação bancária removida por exclusão lógica." });
+  revalidateFinancial();
+  return { success: "Arquivo importado excluído. O histórico permanece na auditoria." };
+}
+
+function financialMonthBounds(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return null;
+  const start = `${match[1]}-${match[2]}-01`;
+  const end = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  return { start, end };
+}
+
+export async function closeFinancialMonthAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const period = String(formData.get("period_month") ?? "");
+  const notes = String(formData.get("notes") ?? "").trim() || null;
+  const bounds = financialMonthBounds(period);
+  if (!bounds) return { error: "Selecione um mês válido." };
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canApprove) return { error: "Você não possui permissão para fechar períodos financeiros." };
+  const admin = createSupabaseAdminClient();
+  const { data: existing } = await admin.from("financial_monthly_closings").select("*").eq("clinic_id", context.activeClinic.id).eq("period_month", bounds.start).is("deleted_at", null).maybeSingle();
+  if (existing?.status === "closed") return { error: "Este mês já está fechado." };
+
+  const periodStartIso = `${bounds.start}T00:00:00.000Z`;
+  const periodEndIso = `${bounds.end}T23:59:59.999Z`;
+  const [{ data: entries }, { data: pendingPayments }, { data: pendingImports }] = await Promise.all([
+    admin.from("financial_entries").select("id, entry_type, category_id, amount_cents, discount_cents, freight_cents, addition_cents, paid_cents, status").eq("clinic_id", context.activeClinic.id).gte("competence_date", bounds.start).lte("competence_date", bounds.end).is("deleted_at", null).neq("status", "cancelled"),
+    admin.from("financial_payments").select("id").eq("clinic_id", context.activeClinic.id).eq("status", "confirmed").not("account_id", "is", null).is("reconciliation_id", null).gte("paid_at", periodStartIso).lte("paid_at", periodEndIso).is("deleted_at", null).limit(1),
+    admin.from("financial_bank_imports").select("id").eq("clinic_id", context.activeClinic.id).eq("status", "ready").lte("period_start", bounds.end).gte("period_end", bounds.start).is("deleted_at", null).limit(1),
+  ]);
+  if (pendingPayments?.length) return { error: "Existem movimentos bancários não conciliados neste mês." };
+  if (pendingImports?.length) return { error: "Existe uma importação bancária aguardando revisão neste mês." };
+
+  const normalizedEntries = entries ?? [];
+  const total = (entry: (typeof normalizedEntries)[number]) => Number(entry.amount_cents) - Number(entry.discount_cents) + Number(entry.freight_cents ?? 0) + Number(entry.addition_cents);
+  const receivables = normalizedEntries.filter((entry) => entry.entry_type === "receivable");
+  const payables = normalizedEntries.filter((entry) => entry.entry_type === "payable");
+  const receivableCents = receivables.reduce((sum, entry) => sum + total(entry), 0);
+  const revenueCents = receivables.reduce((sum, entry) => sum + Number(entry.paid_cents), 0);
+  const payableCents = payables.reduce((sum, entry) => sum + total(entry), 0);
+  const expenseCents = payables.reduce((sum, entry) => sum + Number(entry.paid_cents), 0);
+  const payload = {
+    clinic_id: context.activeClinic.id,
+    period_month: bounds.start,
+    status: "closed",
+    receivable_cents: receivableCents,
+    revenue_cents: revenueCents,
+    payable_cents: payableCents,
+    expense_cents: expenseCents,
+    result_cents: revenueCents - expenseCents,
+    open_receivable_cents: Math.max(receivableCents - revenueCents, 0),
+    open_payable_cents: Math.max(payableCents - expenseCents, 0),
+    snapshot: { entry_count: normalizedEntries.length, period_start: bounds.start, period_end: bounds.end },
+    notes,
+    closed_at: new Date().toISOString(),
+    closed_by: context.user.id,
+    updated_by: context.user.id,
+  };
+  const query = existing
+    ? admin.from("financial_monthly_closings").update(payload).eq("id", existing.id)
+    : admin.from("financial_monthly_closings").insert({ ...payload, created_by: context.user.id });
+  const { data: closing, error } = await query.select("id").single<{ id: string }>();
+  if (error || !closing) return { error: financialError(error, "Não foi possível fechar o período financeiro.") };
+  await logAuditEvent({ clinicId: context.activeClinic.id, userId: context.user.id, actionType: "financial_month_closed", module: "financial", recordTable: "financial_monthly_closings", recordId: closing.id, oldValues: existing, newValues: payload, level: "critical", notes: "Fechamento financeiro mensal concluído." });
+  revalidateFinancial();
+  return { success: "Mês financeiro fechado. Os lançamentos do período estão protegidos." };
+}
+
+export async function reopenFinancialMonthAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const closingId = String(formData.get("closing_id") ?? "");
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (!/^[0-9a-f-]{36}$/i.test(closingId)) return { error: "Fechamento inválido." };
+  if (reason.length < 8) return { error: "Informe o motivo da reabertura com pelo menos 8 caracteres." };
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canApprove) return { error: "Você não possui permissão para reabrir períodos financeiros." };
+  const admin = createSupabaseAdminClient();
+  const { data: closing } = await admin.from("financial_monthly_closings").select("*").eq("id", closingId).eq("clinic_id", context.activeClinic.id).eq("status", "closed").is("deleted_at", null).maybeSingle();
+  if (!closing) return { error: "Fechamento mensal não encontrado." };
+  const payload = { status: "reopened", reopened_at: new Date().toISOString(), reopened_by: context.user.id, reopening_reason: reason, updated_by: context.user.id };
+  const { error } = await admin.from("financial_monthly_closings").update(payload).eq("id", closingId);
+  if (error) return { error: financialError(error, "Não foi possível reabrir o mês financeiro.") };
+  await logAuditEvent({ clinicId: context.activeClinic.id, userId: context.user.id, actionType: "financial_month_reopened", module: "financial", recordTable: "financial_monthly_closings", recordId: closingId, oldValues: closing, newValues: payload, level: "critical", notes: reason });
+  revalidateFinancial();
+  return { success: "Mês financeiro reaberto para correções auditadas." };
 }
 
 async function createPayment({

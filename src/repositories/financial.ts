@@ -15,6 +15,7 @@ import type {
   FinancialEntryItem,
   FinancialHealthPlan,
   FinancialLedgerEntry,
+  FinancialMonthlyClosing,
   FinancialPayment,
   FinancialPaymentMethod,
   FinancialPreferences,
@@ -79,6 +80,11 @@ export type FinancialBankImportWithItems = FinancialBankImport & {
   items: FinancialBankImportItem[];
 };
 
+export type FinancialMonthlyClosingWithRelations = FinancialMonthlyClosing & {
+  closed_by_profile: { full_name: string } | null;
+  reopened_by_profile: { full_name: string } | null;
+};
+
 export type FinancialProfessionalOption = { id: string; profile: { full_name: string } | null };
 export type FinancialServiceOption = { id: string; name: string };
 
@@ -99,6 +105,7 @@ export type FinancialWorkspace = {
   commissionRules: FinancialCommissionRuleWithRelations[];
   commissions: FinancialCommissionWithRelations[];
   bankImports: FinancialBankImportWithItems[];
+  monthlyClosings: FinancialMonthlyClosingWithRelations[];
   professionals: FinancialProfessionalOption[];
   services: FinancialServiceOption[];
   pendingEncounterCharges: PendingEncounterCharge[];
@@ -210,6 +217,7 @@ export async function getFinancialWorkspace(
     commissionRules: [],
     commissions: [],
     bankImports: [],
+    monthlyClosings: [],
     professionals: [],
     services: [],
     pendingEncounterCharges: [],
@@ -226,7 +234,7 @@ export async function getFinancialWorkspace(
   const needsAccounts = isScope("overview", "receivables", "payables", "accounts", "reconciliation", "commissions", "encounter-charge");
   const needsPaymentMethods = isScope("receivables", "payables", "accounts", "commissions", "encounter-charge");
   const needsCardMachines = isScope("overview", "receivables", "payables", "accounts", "encounter-charge");
-  const needsCategories = isScope("receivables", "payables", "accounts");
+  const needsCategories = isScope("receivables", "payables", "accounts", "reconciliation");
   const needsCostCenters = isScope("receivables", "payables", "accounts");
   const needsHealthPlans = isScope("receivables", "accounts");
   const needsVendors = isScope("payables", "accounts");
@@ -235,6 +243,7 @@ export async function getFinancialWorkspace(
   const needsReconciliations = isScope("reconciliation");
   const needsCommissions = isScope("commissions");
   const needsBankImports = isScope("reconciliation");
+  const needsMonthlyClosings = isScope("reconciliation");
   const needsPendingCharges = isScope("overview", "receivables", "encounter-charge");
   const [
     preferences,
@@ -250,6 +259,7 @@ export async function getFinancialWorkspace(
     reconciliations,
     commissionData,
     bankImports,
+    monthlyClosings,
     professionals,
     services,
     pendingEncounterCharges,
@@ -302,6 +312,7 @@ export async function getFinancialWorkspace(
     access.canView && needsReconciliations ? listFinancialReconciliations(clinicId) : Promise.resolve([]),
     access.canView && needsCommissions ? listFinancialCommissions(clinicId) : Promise.resolve({ rules: [], commissions: [] }),
     access.canView && needsBankImports ? listFinancialBankImports(clinicId) : Promise.resolve([]),
+    access.canView && needsMonthlyClosings ? listFinancialMonthlyClosings(clinicId) : Promise.resolve([]),
     access.canView && needsCommissions ? listFinancialProfessionals(clinicId) : Promise.resolve([]),
     access.canView && needsCommissions ? listFinancialServices(clinicId) : Promise.resolve([]),
     needsPendingCharges ? listPendingEncounterCharges(clinicId, access) : Promise.resolve([]),
@@ -326,6 +337,7 @@ export async function getFinancialWorkspace(
     commissionRules: commissionData.rules,
     commissions: commissionData.commissions,
     bankImports,
+    monthlyClosings,
     professionals,
     services,
     pendingEncounterCharges,
@@ -643,6 +655,30 @@ export async function listFinancialBankImports(clinicId: string): Promise<Financ
     ...item,
     account: accountMap.get(item.account_id) ?? null,
     items: itemsByImport.get(item.id) ?? [],
+  }));
+}
+
+export async function listFinancialMonthlyClosings(clinicId: string): Promise<FinancialMonthlyClosingWithRelations[]> {
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin
+    .from("financial_monthly_closings")
+    .select("*")
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .order("period_month", { ascending: false })
+    .limit(36);
+  if (error || !data?.length) return [];
+
+  const closings = data as FinancialMonthlyClosing[];
+  const profileIds = [...new Set(closings.flatMap((item) => [item.closed_by, item.reopened_by]).filter(Boolean))] as string[];
+  const { data: profiles } = profileIds.length
+    ? await admin.from("profiles").select("id, full_name").in("id", profileIds)
+    : { data: [] };
+  const profileMap = new Map((profiles ?? []).map((item) => [item.id, item]));
+  return closings.map((item) => ({
+    ...item,
+    closed_by_profile: item.closed_by ? profileMap.get(item.closed_by) ?? null : null,
+    reopened_by_profile: item.reopened_by ? profileMap.get(item.reopened_by) ?? null : null,
   }));
 }
 
