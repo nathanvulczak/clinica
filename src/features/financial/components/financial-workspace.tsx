@@ -144,13 +144,49 @@ export function FinancialWorkspace({
   section: FinancialSection;
   activeView: FinancialSubsection;
 }) {
-  if (section === "overview") return <FinancialOverview data={data} />;
-  if (section === "receivables") return <ReceivablesWorkspace data={data} activeView={activeView} />;
-  if (section === "payables") return <PayablesWorkspace data={data} activeView={activeView} />;
-  if (section === "accounts") return <RegistriesPanel data={data} activeView={activeView} />;
-  if (section === "reconciliation") return <ReconciliationPanel data={data} activeView={activeView} />;
-  if (section === "commissions") return <CommissionsPanel data={data} activeView={activeView} />;
-  return <PreferencesPanel preferences={data.preferences} canManage={data.access.canManage} activeView={activeView} />;
+  const safeData: FinancialWorkspaceData = {
+    ...data,
+    accounts: data.accounts ?? [],
+    paymentMethods: data.paymentMethods ?? [],
+    cardMachines: data.cardMachines ?? [],
+    categories: data.categories ?? [],
+    costCenters: data.costCenters ?? [],
+    healthPlans: data.healthPlans ?? [],
+    vendors: data.vendors ?? [],
+    entries: (data.entries ?? []).map((entry) => ({
+      ...entry,
+      payments: entry.payments ?? [],
+      receipts: entry.receipts ?? [],
+      items: entry.items ?? [],
+      events: entry.events ?? [],
+      ledgerEntries: entry.ledgerEntries ?? [],
+    })),
+    payments: data.payments ?? [],
+    recurringEntries: data.recurringEntries ?? [],
+    reconciliations: data.reconciliations ?? [],
+    commissionRules: data.commissionRules ?? [],
+    commissions: data.commissions ?? [],
+    bankImports: (data.bankImports ?? []).map((item) => ({ ...item, items: item.items ?? [] })),
+    professionals: data.professionals ?? [],
+    services: data.services ?? [],
+    pendingEncounterCharges: data.pendingEncounterCharges ?? [],
+    metrics: data.metrics ?? {
+      receivableOpenCents: 0,
+      receivablePaidCents: 0,
+      payableOpenCents: 0,
+      payablePaidCents: 0,
+      overdueCents: 0,
+      netCashCents: 0,
+    },
+  };
+
+  if (section === "overview") return <FinancialOverview data={safeData} />;
+  if (section === "receivables") return <ReceivablesWorkspace data={safeData} activeView={activeView} />;
+  if (section === "payables") return <PayablesWorkspace data={safeData} activeView={activeView} />;
+  if (section === "accounts") return <RegistriesPanel data={safeData} activeView={activeView} />;
+  if (section === "reconciliation") return <ReconciliationPanel data={safeData} activeView={activeView} />;
+  if (section === "commissions") return <CommissionsPanel data={safeData} activeView={activeView} />;
+  return <PreferencesPanel preferences={safeData.preferences} canManage={safeData.access.canManage} activeView={activeView} />;
 }
 
 
@@ -1091,7 +1127,10 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
     () => new Map(data.reconciliations.map((item) => [item.id, item])),
     [data.reconciliations],
   );
-  const activeAccountIds = selectedAccounts.length ? selectedAccounts : data.accounts.map((account) => account.id);
+  const activeAccountIds = useMemo(
+    () => selectedAccounts.length ? selectedAccounts : data.accounts.map((account) => account.id),
+    [data.accounts, selectedAccounts],
+  );
   const rangeStart = useMemo(() => getRangeStart(range), [range]);
   const rangeEnd = useMemo(() => {
     const date = new Date();
@@ -1159,7 +1198,10 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
 
   useEffect(() => {
     const visibleIds = new Set(rows.map(({ payment }) => payment.id));
-    setCheckedMovementIds((current) => current.filter((id) => visibleIds.has(id)));
+    setCheckedMovementIds((current) => {
+      const next = current.filter((id) => visibleIds.has(id));
+      return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next;
+    });
   }, [rows]);
 
   return (

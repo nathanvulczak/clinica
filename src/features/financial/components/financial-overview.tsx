@@ -17,15 +17,18 @@ function totalEntryCents(entry: FinancialEntryWithRelations) {
 }
 
 function formatDate(value: string) {
+  if (!value) return "Não informado";
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Data inválida";
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
     timeZone: "America/Sao_Paulo",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 export function FinancialOverview({ data }: { data: FinancialWorkspace }) {
   const latestEntries = [...data.entries]
-    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+    .sort((a, b) => (new Date(b.updated_at).getTime() || 0) - (new Date(a.updated_at).getTime() || 0))
     .slice(0, 8);
 
   return (
