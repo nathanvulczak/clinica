@@ -1,14 +1,17 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { Building2, Check, CreditCard, Landmark, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Tags, Truck, XCircle } from "lucide-react";
+import { Building2, Calculator, Check, CreditCard, Landmark, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Tags, Truck, Upload, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import {
   cancelFinancialEntryAction,
+  completeFinancialBankImportAction,
   createEncounterChargeAction,
   createFinancialReconciliationAction,
+  generateFinancialCommissionsAction,
+  importFinancialBankStatementAction,
   generatePayableFromRecurringAction,
   issueFinancialReceiptAction,
   reverseFinancialReconciliationAction,
@@ -16,6 +19,7 @@ import {
   saveCardMachineAction,
   saveCostCenterAction,
   saveFinancialAccountAction,
+  saveFinancialCommissionRuleAction,
   saveFinancialCategoryAction,
   saveFinancialEntryAction,
   saveFinancialPreferencesAction,
@@ -24,6 +28,8 @@ import {
   savePaymentMethodAction,
   saveVendorAction,
   settleFinancialEntryAction,
+  settleFinancialCommissionAction,
+  updateFinancialCommissionStatusAction,
   type FinancialActionState,
 } from "@/features/financial/actions";
 import { formatCpfOrCnpj, formatCurrencyInput, formatPhone, normalizeEmail } from "@/lib/formatters";
@@ -36,6 +42,8 @@ import type {
   FinancialEntry,
   FinancialEntryItem,
   FinancialEntryType,
+  FinancialCommission,
+  FinancialCommissionRule,
   FinancialHealthPlan,
   FinancialPayment,
   FinancialPaymentMethod,
@@ -1086,14 +1094,18 @@ export function ReversePaymentForm({ payment, onCompleted }: { payment: Financia
 
 export function ReconciliationForm({
   accounts,
+  paymentIds,
+  defaultAccountId,
   onCompleted,
 }: {
   accounts: FinancialAccount[];
+  paymentIds: string[];
+  defaultAccountId?: string;
   onCompleted?: () => void;
 }) {
   const [state, action, pending] = useActionState(createFinancialReconciliationAction, {});
   useActionToast(state, onCompleted);
-  const [selectedAccountId, setSelectedAccountId] = useState(accounts[0]?.id ?? "");
+  const [selectedAccountId, setSelectedAccountId] = useState(defaultAccountId ?? accounts[0]?.id ?? "");
   const today = new Date().toISOString().slice(0, 10);
   const firstDay = new Date();
   firstDay.setDate(1);
@@ -1101,6 +1113,7 @@ export function ReconciliationForm({
   return (
     <form action={action} className="grid gap-4">
       <input type="hidden" name="account_id" value={selectedAccountId} />
+      <input type="hidden" name="payment_ids_json" value={JSON.stringify(paymentIds)} />
       <div className="grid gap-2">
         <p className="text-sm font-medium">Conta para conciliar</p>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -1128,8 +1141,8 @@ export function ReconciliationForm({
         <MoneyInput name="bank_balance" label="Saldo bancário final conferido" required />
       </div>
       <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
-        O sistema conciliará todos os movimentos confirmados, ainda pendentes de conciliação, da conta e período selecionados.
-        O fechamento só será permitido quando o saldo calculado bater com o saldo bancário final informado.
+        {paymentIds.length} movimento(s) selecionado(s) serão conciliados. O fechamento só será permitido quando o saldo
+        calculado desses itens bater com o saldo bancário final informado.
       </div>
       <TextArea name="notes" label="Observações da conciliação" />
       <div className="flex justify-end">
@@ -1167,6 +1180,68 @@ export function ReverseReconciliationForm({
       </div>
     </form>
   );
+}
+
+export function CommissionRuleForm({
+  rule,
+  professionals,
+  services,
+  onCompleted,
+}: {
+  rule?: FinancialCommissionRule | null;
+  professionals: Array<{ id: string; profile: { full_name: string } | null }>;
+  services: Array<{ id: string; name: string }>;
+  onCompleted?: () => void;
+}) {
+  const [state, action, pending] = useActionState(saveFinancialCommissionRuleAction, {});
+  const [ruleType, setRuleType] = useState<"percent" | "fixed">(rule?.rule_type ?? "percent");
+  useActionToast(state, onCompleted);
+  const value = rule ? (rule.rule_type === "percent" ? String(rule.value_bps / 100) : (rule.value_cents / 100).toFixed(2).replace(".", ",")) : "";
+  return (
+    <form action={action} className="grid gap-4">
+      {rule ? <input type="hidden" name="id" value={rule.id} /> : null}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <label className="grid gap-2 text-sm font-medium">Profissional<Select name="professional_member_id" defaultValue={rule?.professional_member_id ?? "none"}><option value="none">Todos os profissionais</option>{professionals.map((item) => <option key={item.id} value={item.id}>{item.profile?.full_name ?? "Profissional"}</option>)}</Select></label>
+        <label className="grid gap-2 text-sm font-medium">Serviço<Select name="service_id" defaultValue={rule?.service_id ?? "none"}><option value="none">Todos os serviços</option>{services.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
+        <label className="grid gap-2 text-sm font-medium">Tipo da regra<Select name="rule_type" value={ruleType} onChange={(event) => setRuleType(event.target.value as "percent" | "fixed")}><option value="percent">Percentual</option><option value="fixed">Valor fixo</option></Select></label>
+        <Field name="value" label={ruleType === "percent" ? "Percentual (%)" : "Valor fixo (R$)"} type="text" defaultValue={value} required />
+        <label className="grid gap-2 text-sm font-medium">Calcular sobre<Select name="calculate_on" defaultValue={rule?.calculate_on ?? "received"}><option value="received">Valor recebido</option><option value="billed">Valor faturado</option></Select></label>
+        <label className="mt-7 flex items-center gap-2 text-sm"><input type="checkbox" name="active" defaultChecked={rule?.active ?? true} /> Regra ativa</label>
+      </div>
+      <TextArea name="notes" label="Observações" defaultValue={rule?.notes ?? ""} />
+      <div className="flex justify-end"><Button disabled={pending}><Save />{pending ? "Salvando..." : "Salvar regra"}</Button></div>
+    </form>
+  );
+}
+
+export function GenerateCommissionsForm({ onCompleted }: { onCompleted?: () => void }) {
+  const [state, action, pending] = useActionState(generateFinancialCommissionsAction, {});
+  useActionToast(state, onCompleted);
+  return <form action={action} className="grid gap-4"><div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">O sistema aplicará a regra mais específica por profissional e serviço. Comissões já calculadas não serão duplicadas.</div><div className="flex justify-end"><Button disabled={pending}><Calculator />{pending ? "Calculando..." : "Calcular comissões"}</Button></div></form>;
+}
+
+export function CommissionStatusForm({ commission, actionType, onCompleted }: { commission: FinancialCommission; actionType: "approve" | "cancel"; onCompleted?: () => void }) {
+  const [state, action, pending] = useActionState(updateFinancialCommissionStatusAction, {});
+  useActionToast(state, onCompleted);
+  return <form action={action} className="grid gap-4"><input type="hidden" name="commission_id" value={commission.id} /><input type="hidden" name="action" value={actionType} /><div className="rounded-md border bg-muted/20 p-3 text-sm">Valor do repasse: <strong>{formatCurrencyBRL(commission.commission_cents)}</strong></div>{actionType === "cancel" ? <TextArea name="reason" label="Motivo do cancelamento" /> : null}<div className="flex justify-end"><Button variant={actionType === "cancel" ? "destructive" : "default"} disabled={pending}>{pending ? "Confirmando..." : actionType === "approve" ? "Aprovar comissão" : "Cancelar comissão"}</Button></div></form>;
+}
+
+export function CommissionSettlementForm({ commission, accounts, paymentMethods, onCompleted }: { commission: FinancialCommission; accounts: FinancialAccount[]; paymentMethods: FinancialPaymentMethod[]; onCompleted?: () => void }) {
+  const [state, action, pending] = useActionState(settleFinancialCommissionAction, {});
+  useActionToast(state, onCompleted);
+  return <form action={action} className="grid gap-4"><input type="hidden" name="commission_id" value={commission.id} /><div className="rounded-md border bg-muted/20 p-3 text-sm">Repasse aprovado: <strong>{formatCurrencyBRL(commission.commission_cents)}</strong>. O pagamento criará uma conta paga e um movimento no livro-caixa.</div><div className="grid gap-4 lg:grid-cols-2"><label className="grid gap-2 text-sm font-medium">Conta de saída<Select name="account_id" required defaultValue=""><option value="" disabled>Selecione</option>{accounts.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label><label className="grid gap-2 text-sm font-medium">Forma de pagamento<Select name="payment_method_id" defaultValue="none"><option value="none">Não informada</option>{paymentMethods.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label><Field name="paid_at" label="Data e hora do pagamento" type="datetime-local" defaultValue={new Date().toISOString().slice(0, 16)} required /></div><TextArea name="notes" label="Observações do acerto" /><div className="flex justify-end"><Button disabled={pending || !accounts.length}><ReceiptText />{pending ? "Registrando..." : "Confirmar pagamento"}</Button></div></form>;
+}
+
+export function BankStatementImportForm({ accounts, onCompleted }: { accounts: FinancialAccount[]; onCompleted?: () => void }) {
+  const [state, action, pending] = useActionState(importFinancialBankStatementAction, {});
+  useActionToast(state, onCompleted);
+  return <form action={action} className="grid gap-4"><label className="grid gap-2 text-sm font-medium">Conta do extrato<Select name="account_id" required defaultValue=""><option value="" disabled>Selecione</option>{accounts.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label><label className="grid gap-2 text-sm font-medium">Arquivo bancário<input type="file" name="statement_file" accept=".ofx,.csv,text/csv,application/x-ofx" required className="rounded-md border bg-background px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium" /><span className="text-xs font-normal text-muted-foreground">OFX ou CSV, até 5 MB. Para CSV use colunas de data, descrição e valor.</span></label><TextArea name="notes" label="Observações da importação" /><div className="flex justify-end"><Button disabled={pending}><Upload />{pending ? "Lendo e conciliando..." : "Importar extrato"}</Button></div></form>;
+}
+
+export function CompleteBankImportForm({ importId, onCompleted }: { importId: string; onCompleted?: () => void }) {
+  const [state, action, pending] = useActionState(completeFinancialBankImportAction, {});
+  useActionToast(state, onCompleted);
+  return <form action={action} className="flex justify-end"><input type="hidden" name="import_id" value={importId} /><Button disabled={pending}><Check />{pending ? "Concluindo..." : "Concluir revisão"}</Button></form>;
 }
 
 export function ReceiptForm({

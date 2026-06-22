@@ -29,6 +29,7 @@ export type FinancialSubsection =
   | "pending"
   | "history"
   | "divergences"
+  | "imports"
   | "rules"
   | "production"
   | "commissions-due"
@@ -107,6 +108,7 @@ export const financialSections: FinancialNavItem[] = [
       { key: "pending", label: "Pendentes" },
       { key: "history", label: "Histórico" },
       { key: "divergences", label: "Divergências" },
+      { key: "imports", label: "Importações bancárias" },
       { key: "reports", label: "Relatórios" },
     ],
   },

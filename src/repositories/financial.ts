@@ -3,8 +3,12 @@ import { getClinicAuthorization } from "@/services/authorization/clinic-access";
 import type {
   AppRole,
   FinancialAccount,
+  FinancialBankImport,
+  FinancialBankImportItem,
   FinancialCardMachine,
   FinancialCategory,
+  FinancialCommission,
+  FinancialCommissionRule,
   FinancialCostCenter,
   FinancialEntry,
   FinancialEntryEvent,
@@ -60,6 +64,24 @@ export type FinancialReconciliationWithRelations = FinancialReconciliation & {
   reversed_by_profile: { full_name: string } | null;
 };
 
+export type FinancialCommissionRuleWithRelations = FinancialCommissionRule & {
+  professional: { id: string; profile: { full_name: string } | null } | null;
+  service: { id: string; name: string } | null;
+};
+
+export type FinancialCommissionWithRelations = FinancialCommission & {
+  professional: { id: string; profile: { full_name: string } | null } | null;
+  entry: { id: string; description: string; due_date: string } | null;
+};
+
+export type FinancialBankImportWithItems = FinancialBankImport & {
+  account: Pick<FinancialAccount, "id" | "name"> | null;
+  items: FinancialBankImportItem[];
+};
+
+export type FinancialProfessionalOption = { id: string; profile: { full_name: string } | null };
+export type FinancialServiceOption = { id: string; name: string };
+
 export type FinancialWorkspace = {
   access: FinancialAccess;
   preferences: FinancialPreferences | null;
@@ -74,6 +96,11 @@ export type FinancialWorkspace = {
   payments: FinancialPayment[];
   recurringEntries: FinancialRecurringEntryWithRelations[];
   reconciliations: FinancialReconciliationWithRelations[];
+  commissionRules: FinancialCommissionRuleWithRelations[];
+  commissions: FinancialCommissionWithRelations[];
+  bankImports: FinancialBankImportWithItems[];
+  professionals: FinancialProfessionalOption[];
+  services: FinancialServiceOption[];
   pendingEncounterCharges: PendingEncounterCharge[];
   metrics: FinancialMetrics;
 };
@@ -180,6 +207,11 @@ export async function getFinancialWorkspace(
     payments: [],
     recurringEntries: [],
     reconciliations: [],
+    commissionRules: [],
+    commissions: [],
+    bankImports: [],
+    professionals: [],
+    services: [],
     pendingEncounterCharges: [],
     metrics: emptyMetrics(),
   };
@@ -191,8 +223,8 @@ export async function getFinancialWorkspace(
   const admin = createSupabaseAdminClient();
   const isScope = (...scopes: FinancialWorkspaceScope[]) => scope === "full" || scopes.includes(scope);
   const needsPreferences = isScope("settings");
-  const needsAccounts = isScope("overview", "receivables", "payables", "accounts", "reconciliation", "encounter-charge");
-  const needsPaymentMethods = isScope("receivables", "payables", "accounts", "encounter-charge");
+  const needsAccounts = isScope("overview", "receivables", "payables", "accounts", "reconciliation", "commissions", "encounter-charge");
+  const needsPaymentMethods = isScope("receivables", "payables", "accounts", "commissions", "encounter-charge");
   const needsCardMachines = isScope("overview", "receivables", "payables", "accounts", "encounter-charge");
   const needsCategories = isScope("receivables", "payables", "accounts");
   const needsCostCenters = isScope("receivables", "payables", "accounts");
@@ -201,6 +233,8 @@ export async function getFinancialWorkspace(
   const needsEntries = isScope("overview", "receivables", "payables", "reconciliation", "commissions");
   const needsRecurring = isScope("payables");
   const needsReconciliations = isScope("reconciliation");
+  const needsCommissions = isScope("commissions");
+  const needsBankImports = isScope("reconciliation");
   const needsPendingCharges = isScope("overview", "receivables", "encounter-charge");
   const [
     preferences,
@@ -214,6 +248,10 @@ export async function getFinancialWorkspace(
     entries,
     recurringEntries,
     reconciliations,
+    commissionData,
+    bankImports,
+    professionals,
+    services,
     pendingEncounterCharges,
   ] = await Promise.all([
     needsPreferences ? getFinancialPreferences(clinicId) : Promise.resolve(defaultPreferences(clinicId)),
@@ -262,6 +300,10 @@ export async function getFinancialWorkspace(
     access.canView && needsEntries ? listFinancialEntries(clinicId) : Promise.resolve([]),
     access.canView && needsRecurring ? listFinancialRecurringEntries(clinicId) : Promise.resolve([]),
     access.canView && needsReconciliations ? listFinancialReconciliations(clinicId) : Promise.resolve([]),
+    access.canView && needsCommissions ? listFinancialCommissions(clinicId) : Promise.resolve({ rules: [], commissions: [] }),
+    access.canView && needsBankImports ? listFinancialBankImports(clinicId) : Promise.resolve([]),
+    access.canView && needsCommissions ? listFinancialProfessionals(clinicId) : Promise.resolve([]),
+    access.canView && needsCommissions ? listFinancialServices(clinicId) : Promise.resolve([]),
     needsPendingCharges ? listPendingEncounterCharges(clinicId, access) : Promise.resolve([]),
   ]);
 
@@ -281,6 +323,11 @@ export async function getFinancialWorkspace(
     payments,
     recurringEntries,
     reconciliations,
+    commissionRules: commissionData.rules,
+    commissions: commissionData.commissions,
+    bankImports,
+    professionals,
+    services,
     pendingEncounterCharges,
     metrics: calculateMetrics(entries),
   };
@@ -482,6 +529,120 @@ export async function listFinancialRecurringEntries(clinicId: string): Promise<F
     vendor: item.vendor_id ? vendorMap.get(item.vendor_id) ?? null : null,
     category: item.category_id ? categoryMap.get(item.category_id) ?? null : null,
     costCenter: item.cost_center_id ? costCenterMap.get(item.cost_center_id) ?? null : null,
+  }));
+}
+
+export async function listFinancialProfessionals(clinicId: string): Promise<FinancialProfessionalOption[]> {
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin
+    .from("clinic_members")
+    .select("id, profile:profiles!clinic_members_user_id_fkey(full_name)")
+    .eq("clinic_id", clinicId)
+    .eq("status", "active")
+    .in("role", ["doctor", "nurse", "professional"])
+    .is("deleted_at", null)
+    .order("created_at");
+
+  return (data ?? []).map((row) => normalizeProfessional(row)).filter(Boolean) as FinancialProfessionalOption[];
+}
+
+export async function listFinancialServices(clinicId: string): Promise<FinancialServiceOption[]> {
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin
+    .from("clinic_services")
+    .select("id, name")
+    .eq("clinic_id", clinicId)
+    .eq("active", true)
+    .is("deleted_at", null)
+    .order("name");
+  return (data ?? []) as FinancialServiceOption[];
+}
+
+export async function listFinancialCommissions(clinicId: string): Promise<{
+  rules: FinancialCommissionRuleWithRelations[];
+  commissions: FinancialCommissionWithRelations[];
+}> {
+  const admin = createSupabaseAdminClient();
+  const [{ data: ruleRows }, { data: commissionRows }] = await Promise.all([
+    admin
+      .from("financial_commission_rules")
+      .select("*")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false }),
+    admin
+      .from("financial_commissions")
+      .select("*")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(250),
+  ]);
+
+  const rules = (ruleRows ?? []) as FinancialCommissionRule[];
+  const commissions = (commissionRows ?? []) as FinancialCommission[];
+  const professionalIds = [...new Set([...rules, ...commissions].map((item) => item.professional_member_id).filter(Boolean))] as string[];
+  const serviceIds = [...new Set(rules.map((item) => item.service_id).filter(Boolean))] as string[];
+  const entryIds = [...new Set(commissions.map((item) => item.entry_id).filter(Boolean))] as string[];
+  const [{ data: professionals }, { data: services }, { data: entries }] = await Promise.all([
+    professionalIds.length
+      ? admin.from("clinic_members").select("id, profile:profiles!clinic_members_user_id_fkey(full_name)").in("id", professionalIds)
+      : Promise.resolve({ data: [] }),
+    serviceIds.length
+      ? admin.from("clinic_services").select("id, name").in("id", serviceIds)
+      : Promise.resolve({ data: [] }),
+    entryIds.length
+      ? admin.from("financial_entries").select("id, description, due_date").in("id", entryIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+  const professionalMap = new Map((professionals ?? []).map((item) => [item.id, normalizeProfessional(item)]));
+  const serviceMap = new Map((services ?? []).map((item) => [item.id, item]));
+  const entryMap = new Map((entries ?? []).map((item) => [item.id, item]));
+
+  return {
+    rules: rules.map((rule) => ({
+      ...rule,
+      professional: rule.professional_member_id ? professionalMap.get(rule.professional_member_id) ?? null : null,
+      service: rule.service_id ? serviceMap.get(rule.service_id) ?? null : null,
+    })),
+    commissions: commissions.map((commission) => ({
+      ...commission,
+      professional: professionalMap.get(commission.professional_member_id) ?? null,
+      entry: commission.entry_id ? entryMap.get(commission.entry_id) ?? null : null,
+    })),
+  };
+}
+
+export async function listFinancialBankImports(clinicId: string): Promise<FinancialBankImportWithItems[]> {
+  const admin = createSupabaseAdminClient();
+  const { data: importRows, error } = await admin
+    .from("financial_bank_imports")
+    .select("*")
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(30);
+  if (error || !importRows?.length) return [];
+
+  const imports = importRows as FinancialBankImport[];
+  const importIds = imports.map((item) => item.id);
+  const accountIds = [...new Set(imports.map((item) => item.account_id))];
+  const [{ data: itemRows }, { data: accounts }] = await Promise.all([
+    admin
+      .from("financial_bank_import_items")
+      .select("*")
+      .in("import_id", importIds)
+      .is("deleted_at", null)
+      .order("transaction_date", { ascending: false })
+      .limit(1200),
+    admin.from("financial_accounts").select("id, name").in("id", accountIds),
+  ]);
+  const itemsByImport = groupBy((itemRows ?? []) as FinancialBankImportItem[], "import_id");
+  const accountMap = new Map((accounts ?? []).map((item) => [item.id, item]));
+  return imports.map((item) => ({
+    ...item,
+    account: accountMap.get(item.account_id) ?? null,
+    items: itemsByImport.get(item.id) ?? [],
   }));
 }
 

@@ -73,14 +73,32 @@ body {
   }
 }
 
-.financial-density table {
-  font-size: 13px;
+@keyframes landing-float {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -7px, 0); }
 }
 
-.financial-density table thead {
-  position: sticky;
-  top: 2.5rem;
-  z-index: 5;
+@keyframes landing-pulse-row {
+  0%, 70%, 100% { opacity: 0.86; transform: translateX(0); }
+  35% { opacity: 1; transform: translateX(3px); }
+}
+
+@keyframes landing-rise {
+  from { transform: scaleY(0.55); opacity: 0.45; }
+  to { transform: scaleY(1); opacity: 1; }
+}
+
+.landing-window { animation: landing-float 7s ease-in-out infinite; }
+.landing-appointment { animation: landing-pulse-row 4.8s ease-in-out infinite; }
+.landing-workflow-row { animation: landing-pulse-row 5.6s ease-in-out infinite; }
+.landing-bar { transform-origin: bottom; animation: landing-rise 1.2s ease-out both; }
+
+@media (max-width: 1023px) {
+  .landing-product-scene { opacity: 0.18; right: -62%; }
+}
+
+.financial-density table {
+  font-size: 13px;
 }
 
 .financial-density table th,
@@ -145,5 +163,12 @@ textarea {
   .welcome-screen,
   .welcome-content {
     transition-duration: 1ms;
+  }
+
+  .landing-window,
+  .landing-appointment,
+  .landing-workflow-row,
+  .landing-bar {
+    animation: none;
   }
 }

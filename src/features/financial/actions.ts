@@ -6,6 +6,8 @@ import { getActiveClinicContext } from "@/features/clinics/context";
 import {
   cancelFinancialEntrySchema,
   cardMachineSchema,
+  commissionRuleSchema,
+  commissionStatusSchema,
   costCenterSchema,
   encounterChargeSchema,
   financialAccountSchema,
@@ -22,6 +24,7 @@ import {
   receiptSchema,
   reversePaymentSchema,
   settleEntrySchema,
+  settleCommissionSchema,
   vendorSchema,
 } from "@/features/financial/validation";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -1524,6 +1527,17 @@ export async function createFinancialReconciliationAction(
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
 
+  let selectedPaymentIds: string[] = [];
+  try {
+    const raw = JSON.parse(String(formData.get("payment_ids_json") ?? "[]"));
+    selectedPaymentIds = Array.isArray(raw)
+      ? [...new Set(raw.filter((value): value is string => typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value)))]
+      : [];
+  } catch {
+    return { error: "A seleção de movimentos é inválida. Atualize a página e tente novamente." };
+  }
+  if (!selectedPaymentIds.length) return { error: "Selecione ao menos um movimento pendente para conciliar." };
+
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
   if (!context.access.canManage) return { error: "Você não possui permissão para fechar conciliação bancária." };
@@ -1546,6 +1560,7 @@ export async function createFinancialReconciliationAction(
     .eq("clinic_id", context.activeClinic.id)
     .eq("account_id", parsed.data.account_id)
     .eq("status", "confirmed")
+    .in("id", selectedPaymentIds)
     .is("deleted_at", null)
     .is("reconciliation_id", null)
     .gte("paid_at", periodStart)
@@ -1553,7 +1568,10 @@ export async function createFinancialReconciliationAction(
 
   if (error) return { error: financialError(error, "Não foi possível buscar os movimentos do período.") };
   if (!payments?.length) {
-    return { error: "Não existem movimentos confirmados e pendentes de conciliação para esta conta no período." };
+    return { error: "Os movimentos selecionados não estão mais disponíveis para conciliação. Atualize a página." };
+  }
+  if (payments.length !== selectedPaymentIds.length) {
+    return { error: "Parte dos movimentos selecionados pertence a outra conta, período ou já foi conciliada." };
   }
 
   const totalIn = payments
@@ -1857,6 +1875,379 @@ export async function saveFinancialPreferencesAction(
 
   revalidateFinancial();
   return { success: "Preferencias financeiras salvas." };
+}
+
+export async function saveFinancialCommissionRuleAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = commissionRuleSchema.safeParse({
+    id: formData.get("id") || undefined,
+    professional_member_id: formData.get("professional_member_id") || undefined,
+    service_id: formData.get("service_id") || undefined,
+    rule_type: formData.get("rule_type"),
+    value: String(formData.get("value") ?? "").replace(/\./g, "").replace(",", "."),
+    calculate_on: formData.get("calculate_on"),
+    notes: formData.get("notes"),
+    active: formData.get("active") ?? "off",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Regra inválida." };
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "Você não possui permissão para gerenciar regras de comissão." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = parsed.data.id
+    ? await admin.from("financial_commission_rules").select("*").eq("id", parsed.data.id).eq("clinic_id", context.activeClinic.id).maybeSingle()
+    : { data: null };
+  const payload = {
+    clinic_id: context.activeClinic.id,
+    professional_member_id: parsed.data.professional_member_id,
+    service_id: parsed.data.service_id,
+    rule_type: parsed.data.rule_type,
+    value_bps: parsed.data.rule_type === "percent" ? percentToBps(parsed.data.value) : 0,
+    value_cents: parsed.data.rule_type === "fixed" ? Math.round(parsed.data.value * 100) : 0,
+    calculate_on: parsed.data.calculate_on,
+    active: parsed.data.active,
+    notes: parsed.data.notes,
+    updated_by: context.user.id,
+  };
+  const query = parsed.data.id
+    ? admin.from("financial_commission_rules").update(payload).eq("id", parsed.data.id).eq("clinic_id", context.activeClinic.id)
+    : admin.from("financial_commission_rules").insert({ ...payload, created_by: context.user.id });
+  const { data, error } = await query.select("id").single<{ id: string }>();
+  if (error || !data) return { error: financialError(error, "Não foi possível salvar a regra de comissão.") };
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: parsed.data.id ? "financial_commission_rule_updated" : "financial_commission_rule_created",
+    module: "financial",
+    recordTable: "financial_commission_rules",
+    recordId: data.id,
+    oldValues: previous,
+    newValues: payload,
+  });
+  revalidateFinancial();
+  return { success: parsed.data.id ? "Regra de comissão atualizada." : "Regra de comissão criada." };
+}
+
+export async function generateFinancialCommissionsAction(
+  _state: FinancialActionState,
+  _formData: FormData,
+): Promise<FinancialActionState> {
+  void _state;
+  void _formData;
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "Você não possui permissão para calcular comissões." };
+  const admin = createSupabaseAdminClient();
+  const { data: rules } = await admin
+    .from("financial_commission_rules")
+    .select("*")
+    .eq("clinic_id", context.activeClinic.id)
+    .eq("active", true)
+    .is("deleted_at", null);
+  if (!rules?.length) return { error: "Cadastre ao menos uma regra ativa antes de calcular as comissões." };
+
+  const { data: entries } = await admin
+    .from("financial_entries")
+    .select("id, appointment_id, professional_member_id, amount_cents, discount_cents, freight_cents, addition_cents, status")
+    .eq("clinic_id", context.activeClinic.id)
+    .eq("entry_type", "receivable")
+    .not("professional_member_id", "is", null)
+    .neq("status", "cancelled")
+    .is("deleted_at", null)
+    .limit(1000);
+  if (!entries?.length) return { error: "Não há produção financeira vinculada a profissionais." };
+  const entryIds = entries.map((entry) => entry.id);
+  const appointmentIds = entries.map((entry) => entry.appointment_id).filter(Boolean) as string[];
+  const [{ data: payments }, { data: appointments }, { data: existing }] = await Promise.all([
+    admin.from("financial_payments").select("id, entry_id, net_amount_cents").in("entry_id", entryIds).eq("status", "confirmed").is("deleted_at", null),
+    appointmentIds.length ? admin.from("appointments").select("id, service_id").in("id", appointmentIds) : Promise.resolve({ data: [] }),
+    admin.from("financial_commissions").select("entry_id, payment_id, professional_member_id").eq("clinic_id", context.activeClinic.id).is("deleted_at", null),
+  ]);
+  const appointmentMap = new Map((appointments ?? []).map((item) => [item.id, item.service_id]));
+  const paymentsByEntry = new Map<string, Array<{ id: string; entry_id: string; net_amount_cents: number }>>();
+  for (const payment of payments ?? []) paymentsByEntry.set(payment.entry_id, [...(paymentsByEntry.get(payment.entry_id) ?? []), payment]);
+  const existingKeys = new Set((existing ?? []).map((item) => `${item.professional_member_id}:${item.entry_id}:${item.payment_id ?? "billed"}`));
+  const inserts: Array<Record<string, unknown>> = [];
+
+  for (const entry of entries) {
+    const professionalId = entry.professional_member_id as string;
+    const serviceId = entry.appointment_id ? appointmentMap.get(entry.appointment_id) ?? null : null;
+    const rule = [...rules]
+      .filter((item) => (!item.professional_member_id || item.professional_member_id === professionalId) && (!item.service_id || item.service_id === serviceId))
+      .sort((a, b) => Number(Boolean(b.professional_member_id)) + Number(Boolean(b.service_id)) - Number(Boolean(a.professional_member_id)) - Number(Boolean(a.service_id)))[0];
+    if (!rule) continue;
+    const sources = rule.calculate_on === "received"
+      ? (paymentsByEntry.get(entry.id) ?? []).map((payment) => ({ paymentId: payment.id, base: Number(payment.net_amount_cents) }))
+      : [{ paymentId: null, base: Number(entry.amount_cents) - Number(entry.discount_cents) + Number(entry.freight_cents ?? 0) + Number(entry.addition_cents) }];
+    for (const source of sources) {
+      const key = `${professionalId}:${entry.id}:${source.paymentId ?? "billed"}`;
+      if (existingKeys.has(key)) continue;
+      const commissionCents = rule.rule_type === "percent"
+        ? Math.round((source.base * Number(rule.value_bps)) / 10000)
+        : Number(rule.value_cents);
+      if (commissionCents <= 0) continue;
+      inserts.push({
+        clinic_id: context.activeClinic.id,
+        professional_member_id: professionalId,
+        entry_id: entry.id,
+        payment_id: source.paymentId,
+        rule_id: rule.id,
+        base_amount_cents: source.base,
+        commission_cents: commissionCents,
+        status: "pending",
+        created_by: context.user.id,
+        updated_by: context.user.id,
+      });
+      existingKeys.add(key);
+    }
+  }
+  if (!inserts.length) return { success: "As comissões já estão atualizadas para a produção disponível." };
+  const { error } = await admin.from("financial_commissions").insert(inserts);
+  if (error) return { error: financialError(error, "Não foi possível gerar as comissões.") };
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "financial_commissions_generated",
+    module: "financial",
+    recordTable: "financial_commissions",
+    newValues: { generated_count: inserts.length },
+    notes: "Comissões calculadas a partir das regras ativas.",
+  });
+  revalidateFinancial();
+  return { success: `${inserts.length} comissão(ões) calculada(s).` };
+}
+
+export async function updateFinancialCommissionStatusAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = commissionStatusSchema.safeParse({
+    commission_id: formData.get("commission_id"),
+    action: formData.get("action"),
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Ação inválida." };
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canApprove) return { error: "Você não possui permissão para aprovar ou cancelar comissões." };
+  if (parsed.data.action === "cancel" && (!parsed.data.reason || parsed.data.reason.length < 8)) return { error: "Informe um motivo com pelo menos 8 caracteres." };
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = await admin.from("financial_commissions").select("*").eq("id", parsed.data.commission_id).eq("clinic_id", context.activeClinic.id).is("deleted_at", null).maybeSingle();
+  if (!previous || previous.status === "paid") return { error: "Comissão não encontrada ou já paga." };
+  const payload = parsed.data.action === "approve"
+    ? { status: "approved", approved_at: new Date().toISOString(), approved_by: context.user.id, updated_by: context.user.id }
+    : { status: "cancelled", cancelled_at: new Date().toISOString(), cancelled_by: context.user.id, cancellation_reason: parsed.data.reason, updated_by: context.user.id };
+  const { error } = await admin.from("financial_commissions").update(payload).eq("id", parsed.data.commission_id);
+  if (error) return { error: financialError(error, "Não foi possível atualizar a comissão.") };
+  await logAuditEvent({ clinicId: context.activeClinic.id, userId: context.user.id, actionType: parsed.data.action === "approve" ? "financial_commission_approved" : "financial_commission_cancelled", module: "financial", recordTable: "financial_commissions", recordId: parsed.data.commission_id, oldValues: previous, newValues: payload, level: parsed.data.action === "cancel" ? "critical" : "info", notes: parsed.data.reason });
+  revalidateFinancial();
+  return { success: parsed.data.action === "approve" ? "Comissão aprovada para pagamento." : "Comissão cancelada com auditoria." };
+}
+
+export async function settleFinancialCommissionAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = settleCommissionSchema.safeParse({
+    commission_id: formData.get("commission_id"),
+    account_id: formData.get("account_id"),
+    payment_method_id: formData.get("payment_method_id") || undefined,
+    paid_at: formData.get("paid_at"),
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados do pagamento inválidos." };
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "Você não possui permissão para pagar comissões." };
+  const admin = createSupabaseAdminClient();
+  const { data: commission } = await admin.from("financial_commissions").select("*").eq("id", parsed.data.commission_id).eq("clinic_id", context.activeClinic.id).eq("status", "approved").is("deleted_at", null).maybeSingle();
+  if (!commission) return { error: "A comissão precisa estar aprovada antes do pagamento." };
+  const { data: professional } = await admin.from("clinic_members").select("profile:profiles!clinic_members_user_id_fkey(full_name)").eq("id", commission.professional_member_id).maybeSingle<{ profile: { full_name: string } | { full_name: string }[] | null }>();
+  const professionalName = Array.isArray(professional?.profile) ? professional.profile[0]?.full_name : professional?.profile?.full_name;
+  const paidAt = new Date(parsed.data.paid_at).toISOString();
+  const { data: entry, error: entryError } = await admin.from("financial_entries").insert({
+    clinic_id: context.activeClinic.id,
+    entry_type: "payable",
+    origin: "commission",
+    status: "paid",
+    professional_member_id: commission.professional_member_id,
+    description: `Repasse de comissão - ${professionalName ?? "Profissional"}`,
+    document_type: "receipt",
+    issue_date: paidAt.slice(0, 10),
+    due_date: paidAt.slice(0, 10),
+    competence_date: paidAt.slice(0, 7) + "-01",
+    amount_cents: commission.commission_cents,
+    discount_cents: 0,
+    freight_cents: 0,
+    addition_cents: 0,
+    paid_cents: commission.commission_cents,
+    notes: parsed.data.notes,
+    created_by: context.user.id,
+    updated_by: context.user.id,
+  }).select("id").single<{ id: string }>();
+  if (entryError || !entry) return { error: financialError(entryError, "Não foi possível criar o lançamento do repasse.") };
+  const payment = await createPayment({ admin, clinicId: context.activeClinic.id, userId: context.user.id, entryId: entry.id, entryType: "payable", amountCents: commission.commission_cents, accountId: parsed.data.account_id, paymentMethodId: parsed.data.payment_method_id, cardMachineId: null, paidAt, notes: parsed.data.notes });
+  if (payment.error) return { error: payment.error };
+  const payload = { status: "paid", paid_at: paidAt, settled_by: context.user.id, settlement_entry_id: entry.id, updated_by: context.user.id };
+  const { error } = await admin.from("financial_commissions").update(payload).eq("id", commission.id);
+  if (error) return { error: financialError(error, "O repasse foi lançado, mas a comissão não foi atualizada.") };
+  await logAuditEvent({ clinicId: context.activeClinic.id, userId: context.user.id, actionType: "financial_commission_paid", module: "financial", recordTable: "financial_commissions", recordId: commission.id, oldValues: commission, newValues: { ...payload, payment_id: payment.paymentId }, level: "critical", notes: "Repasse de comissão pago e lançado no livro-caixa." });
+  revalidateFinancial();
+  return { success: "Comissão paga e registrada no livro-caixa." };
+}
+
+type ParsedBankRow = {
+  date: string;
+  description: string;
+  document: string | null;
+  direction: "in" | "out";
+  amountCents: number;
+  externalId: string | null;
+  raw: Record<string, unknown>;
+};
+
+function normalizeBankDate(value: string) {
+  const raw = value.trim();
+  const br = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  const iso = raw.match(/^(\d{4})[-/]?(\d{2})[-/]?(\d{2})/);
+  return iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : null;
+}
+
+function bankAmountToCents(value: string) {
+  const cleaned = value.replace(/[^0-9,.-]/g, "").trim();
+  if (!cleaned) return 0;
+  const normalized = cleaned.includes(",") ? cleaned.replace(/\./g, "").replace(",", ".") : cleaned;
+  return Math.round(Math.abs(Number(normalized)) * 100);
+}
+
+function splitCsvLine(line: string, separator: string) {
+  const fields: string[] = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"') {
+      if (quoted && line[index + 1] === '"') { value += '"'; index += 1; } else quoted = !quoted;
+    } else if (char === separator && !quoted) { fields.push(value.trim()); value = ""; } else value += char;
+  }
+  fields.push(value.trim());
+  return fields;
+}
+
+function normalizeHeader(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function parseBankCsv(content: string): ParsedBankRow[] {
+  const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return [];
+  const separator = (lines[0].match(/;/g)?.length ?? 0) >= (lines[0].match(/,/g)?.length ?? 0) ? ";" : ",";
+  const headers = splitCsvLine(lines[0], separator).map(normalizeHeader);
+  const find = (...names: string[]) => headers.findIndex((header) => names.includes(header));
+  const dateIndex = find("data", "date", "dtmovimento", "datamovimento");
+  const descriptionIndex = find("descricao", "historico", "memo", "description", "lancamento");
+  const amountIndex = find("valor", "amount", "valorlancamento");
+  const directionIndex = find("tipo", "natureza", "direction", "debitooucredito");
+  const documentIndex = find("documento", "doc", "numero", "id");
+  if (dateIndex < 0 || descriptionIndex < 0 || amountIndex < 0) return [];
+  return lines.slice(1).map((line, lineIndex) => {
+    const values = splitCsvLine(line, separator);
+    const date = normalizeBankDate(values[dateIndex] ?? "");
+    const rawAmount = values[amountIndex] ?? "";
+    const amountCents = bankAmountToCents(rawAmount);
+    const directionText = (values[directionIndex] ?? "").toLowerCase();
+    const direction: "in" | "out" = rawAmount.trim().startsWith("-") || /deb|saida|débito/.test(directionText) ? "out" : "in";
+    if (!date || !amountCents) return null;
+    return { date, description: values[descriptionIndex]?.trim() || "Movimento bancário", document: values[documentIndex]?.trim() || null, direction, amountCents, externalId: values[documentIndex]?.trim() || `csv-${lineIndex + 1}`, raw: Object.fromEntries(headers.map((header, index) => [header || `coluna_${index + 1}`, values[index] ?? ""])) };
+  }).filter(Boolean) as ParsedBankRow[];
+}
+
+function ofxTag(block: string, tag: string) {
+  return block.match(new RegExp(`<${tag}>([^<\\r\\n]+)`, "i"))?.[1]?.trim() ?? "";
+}
+
+function parseBankOfx(content: string): ParsedBankRow[] {
+  return [...content.matchAll(/<STMTTRN>([\s\S]*?)(?:<\/STMTTRN>|(?=<STMTTRN>)|$)/gi)].map((match, index) => {
+    const block = match[1];
+    const rawAmount = ofxTag(block, "TRNAMT");
+    const amountCents = bankAmountToCents(rawAmount);
+    const date = normalizeBankDate(ofxTag(block, "DTPOSTED").slice(0, 8));
+    if (!date || !amountCents) return null;
+    return {
+      date,
+      description: ofxTag(block, "MEMO") || ofxTag(block, "NAME") || "Movimento bancário",
+      document: ofxTag(block, "CHECKNUM") || null,
+      direction: rawAmount.trim().startsWith("-") || /DEBIT/i.test(ofxTag(block, "TRNTYPE")) ? "out" : "in",
+      amountCents,
+      externalId: ofxTag(block, "FITID") || `ofx-${index + 1}`,
+      raw: { trntype: ofxTag(block, "TRNTYPE"), fitid: ofxTag(block, "FITID") },
+    };
+  }).filter(Boolean) as ParsedBankRow[];
+}
+
+export async function importFinancialBankStatementAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "Você não possui permissão para importar extratos bancários." };
+  const accountId = String(formData.get("account_id") ?? "");
+  const file = formData.get("statement_file");
+  if (!/^[0-9a-f-]{36}$/i.test(accountId)) return { error: "Selecione a conta do extrato." };
+  if (!(file instanceof File) || file.size === 0) return { error: "Selecione um arquivo OFX ou CSV." };
+  if (file.size > 5 * 1024 * 1024) return { error: "O arquivo deve ter no máximo 5 MB." };
+  const extension = file.name.split(".").pop()?.toLowerCase();
+  if (extension !== "ofx" && extension !== "csv") return { error: "Formato não suportado. Use OFX ou CSV." };
+  const admin = createSupabaseAdminClient();
+  const { data: account } = await admin.from("financial_accounts").select("id, name").eq("id", accountId).eq("clinic_id", context.activeClinic.id).is("deleted_at", null).maybeSingle();
+  if (!account) return { error: "Conta financeira não encontrada." };
+  const content = await file.text();
+  const rows = extension === "ofx" ? parseBankOfx(content) : parseBankCsv(content);
+  if (!rows.length) return { error: "Nenhum movimento válido foi identificado. Confira as colunas de data, descrição e valor." };
+  if (rows.length > 5000) return { error: "O arquivo possui mais de 5.000 movimentos. Divida-o em períodos menores." };
+  const sortedDates = rows.map((row) => row.date).sort();
+  const start = new Date(`${sortedDates[0]}T00:00:00Z`); start.setUTCDate(start.getUTCDate() - 2);
+  const end = new Date(`${sortedDates.at(-1)}T23:59:59Z`); end.setUTCDate(end.getUTCDate() + 2);
+  const { data: payments } = await admin.from("financial_payments").select("id, direction, net_amount_cents, paid_at").eq("clinic_id", context.activeClinic.id).eq("account_id", accountId).eq("status", "confirmed").is("deleted_at", null).is("reconciliation_id", null).gte("paid_at", start.toISOString()).lte("paid_at", end.toISOString());
+  const usedPayments = new Set<string>();
+  const matchedRows = rows.map((row) => {
+    const rowTime = new Date(`${row.date}T12:00:00Z`).getTime();
+    const candidates = (payments ?? []).filter((payment) => !usedPayments.has(payment.id) && payment.direction === row.direction && Number(payment.net_amount_cents) === row.amountCents).map((payment) => ({ payment, dayDifference: Math.abs(new Date(payment.paid_at).getTime() - rowTime) / 86400000 })).filter((item) => item.dayDifference <= 2).sort((a, b) => a.dayDifference - b.dayDifference);
+    const match = candidates[0];
+    if (match) usedPayments.add(match.payment.id);
+    return { ...row, matchedPaymentId: match?.payment.id ?? null, confidence: match ? (match.dayDifference < 0.6 ? 100 : 85) : null };
+  });
+  const { data: batch, error: batchError } = await admin.from("financial_bank_imports").insert({ clinic_id: context.activeClinic.id, account_id: accountId, file_name: file.name.slice(0, 220), file_type: extension, status: "ready", period_start: sortedDates[0], period_end: sortedDates.at(-1), total_rows: rows.length, matched_rows: matchedRows.filter((row) => row.matchedPaymentId).length, notes: String(formData.get("notes") ?? "").trim() || null, created_by: context.user.id, updated_by: context.user.id }).select("id").single<{ id: string }>();
+  if (batchError || !batch) return { error: financialError(batchError, "Não foi possível registrar a importação.") };
+  const { error: itemError } = await admin.from("financial_bank_import_items").insert(matchedRows.map((row) => ({ clinic_id: context.activeClinic.id, import_id: batch.id, transaction_date: row.date, description: row.description, document_number: row.document, direction: row.direction, amount_cents: row.amountCents, external_id: row.externalId, status: row.matchedPaymentId ? "matched" : "pending", matched_payment_id: row.matchedPaymentId, match_confidence: row.confidence, raw_data: row.raw, created_by: context.user.id, updated_by: context.user.id })));
+  if (itemError) { await admin.from("financial_bank_imports").update({ status: "failed", updated_by: context.user.id }).eq("id", batch.id); return { error: financialError(itemError, "O arquivo foi lido, mas os movimentos não foram gravados.") }; }
+  await logAuditEvent({ clinicId: context.activeClinic.id, userId: context.user.id, actionType: "financial_bank_statement_imported", module: "financial", recordTable: "financial_bank_imports", recordId: batch.id, newValues: { account_id: accountId, file_name: file.name, rows: rows.length, matched: usedPayments.size }, notes: "Extrato bancário importado para revisão." });
+  revalidateFinancial();
+  return { success: `Extrato importado: ${rows.length} movimento(s), ${usedPayments.size} correspondência(s) automática(s).` };
+}
+
+export async function completeFinancialBankImportAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const importId = String(formData.get("import_id") ?? "");
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canApprove) return { error: "Você não possui permissão para concluir a revisão do extrato." };
+  const admin = createSupabaseAdminClient();
+  const { data: batch } = await admin.from("financial_bank_imports").select("*").eq("id", importId).eq("clinic_id", context.activeClinic.id).eq("status", "ready").is("deleted_at", null).maybeSingle();
+  if (!batch) return { error: "Importação pronta para revisão não encontrada." };
+  const payload = { status: "completed", completed_at: new Date().toISOString(), completed_by: context.user.id, updated_by: context.user.id };
+  const { error } = await admin.from("financial_bank_imports").update(payload).eq("id", importId);
+  if (error) return { error: financialError(error, "Não foi possível concluir a revisão do extrato.") };
+  await logAuditEvent({ clinicId: context.activeClinic.id, userId: context.user.id, actionType: "financial_bank_import_completed", module: "financial", recordTable: "financial_bank_imports", recordId: importId, oldValues: batch, newValues: payload, notes: "Revisão de importação bancária concluída." });
+  revalidateFinancial();
+  return { success: "Revisão do extrato concluída. As correspondências permanecem disponíveis para conciliação." };
 }
 
 async function createPayment({

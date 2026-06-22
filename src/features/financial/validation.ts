@@ -228,6 +228,31 @@ export const reconciliationSchema = z
     }
   });
 
+export const commissionRuleSchema = z.object({
+  id: z.string().uuid().optional(),
+  professional_member_id: optionalUuid,
+  service_id: optionalUuid,
+  rule_type: z.enum(["percent", "fixed"]),
+  value: z.coerce.number().min(0.01, "Informe um valor de comissão maior que zero."),
+  calculate_on: z.enum(["billed", "received"]),
+  notes: optionalText,
+  active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
+});
+
+export const commissionStatusSchema = z.object({
+  commission_id: z.string().uuid(),
+  action: z.enum(["approve", "cancel"]),
+  reason: optionalText,
+});
+
+export const settleCommissionSchema = z.object({
+  commission_id: z.string().uuid(),
+  account_id: z.string().uuid(),
+  payment_method_id: optionalUuid,
+  paid_at: z.string().min(10),
+  notes: optionalText,
+});
+
 export const reverseReconciliationSchema = z.object({
   reconciliation_id: z.string().uuid(),
   reason: z.string().trim().min(8, "Informe o motivo para reabrir a conciliação.").max(700),

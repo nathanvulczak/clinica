@@ -389,6 +389,9 @@ export type FinancialEntryType = "receivable" | "payable";
 export type FinancialEntryStatus = "pending" | "partial" | "paid" | "overdue" | "cancelled" | "refunded";
 export type FinancialPaymentStatus = "confirmed" | "reversed";
 export type FinancialReconciliationStatus = "closed" | "reversed";
+export type FinancialCommissionStatus = "pending" | "approved" | "paid" | "cancelled";
+export type FinancialBankImportStatus = "processing" | "ready" | "completed" | "cancelled" | "failed";
+export type FinancialBankImportItemStatus = "pending" | "matched" | "ignored" | "reconciled";
 export type FinancialDocumentType = "nfe" | "nfse" | "receipt" | "contract" | "other";
 export type FinancialEntryEventType =
   | "created"
@@ -598,6 +601,80 @@ export type FinancialReconciliation = {
   reversed_by: string | null;
   reversal_reason: string | null;
   notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialCommissionRule = {
+  id: string;
+  clinic_id: string;
+  professional_member_id: string | null;
+  service_id: string | null;
+  rule_type: "percent" | "fixed";
+  value_bps: number;
+  value_cents: number;
+  calculate_on: "billed" | "received";
+  active: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialCommission = {
+  id: string;
+  clinic_id: string;
+  professional_member_id: string;
+  entry_id: string | null;
+  payment_id: string | null;
+  rule_id: string | null;
+  status: FinancialCommissionStatus;
+  base_amount_cents: number;
+  commission_cents: number;
+  approved_at: string | null;
+  approved_by: string | null;
+  paid_at: string | null;
+  settled_by: string | null;
+  settlement_entry_id: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancellation_reason: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialBankImport = {
+  id: string;
+  clinic_id: string;
+  account_id: string;
+  file_name: string;
+  file_type: "ofx" | "csv";
+  status: FinancialBankImportStatus;
+  period_start: string | null;
+  period_end: string | null;
+  total_rows: number;
+  matched_rows: number;
+  completed_at: string | null;
+  completed_by: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialBankImportItem = {
+  id: string;
+  clinic_id: string;
+  import_id: string;
+  transaction_date: string;
+  description: string;
+  document_number: string | null;
+  direction: "in" | "out";
+  amount_cents: number;
+  external_id: string | null;
+  status: FinancialBankImportItemStatus;
+  matched_payment_id: string | null;
+  match_confidence: number | null;
+  raw_data: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };

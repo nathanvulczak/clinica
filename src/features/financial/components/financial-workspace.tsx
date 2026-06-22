@@ -5,6 +5,8 @@ import {
   Banknote,
   BarChart3,
   Building2,
+  Calculator,
+  CheckCircle2,
   CreditCard,
   Eye,
   FileText,
@@ -16,6 +18,8 @@ import {
   SlidersHorizontal,
   Tags,
   Truck,
+  Upload,
+  XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,6 +38,7 @@ import { EmptyState, FinancialPanelHeader, MetricCard } from "@/features/financi
 import { PendingEncounterChargesPanel } from "@/features/financial/components/pending-encounter-charges-panel";
 import {
   CancelFinancialEntryForm,
+  BankStatementImportForm,
   CardMachineForm,
   CostCenterForm,
   FinancialAccountForm,
@@ -41,6 +46,11 @@ import {
   FinancialEntryForm,
   FinancialPreferencesForm,
   FinancialRecurringEntryForm,
+  CommissionRuleForm,
+  CommissionSettlementForm,
+  CommissionStatusForm,
+  CompleteBankImportForm,
+  GenerateCommissionsForm,
   GenerateRecurringPayableForm,
   HealthPlanForm,
   PaymentMethodForm,
@@ -106,19 +116,23 @@ function openEntryCents(entry: FinancialEntryWithRelations) {
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "Não informado";
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Data inválida";
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
     timeZone: "America/Sao_Paulo",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "Não informado";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Data inválida";
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
     timeStyle: "short",
     timeZone: "America/Sao_Paulo",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 export function FinancialWorkspace({
@@ -1060,6 +1074,7 @@ function rangeLabel(range: ReconciliationRange) {
 }
 
 function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
+  const { toast } = useToast();
   const [range, setRange] = useState<ReconciliationRange>("week");
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -1069,6 +1084,8 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
   const [detailing, setDetailing] = useState<(typeof data.reconciliations)[number] | null>(null);
   const [statementAccountId, setStatementAccountId] = useState<string | null>(null);
   const [checkedMovementIds, setCheckedMovementIds] = useState<string[]>([]);
+  const [importingStatement, setImportingStatement] = useState(false);
+  const [reviewingImportId, setReviewingImportId] = useState<string | null>(null);
   const accountMap = useMemo(() => new Map(data.accounts.map((account) => [account.id, account])), [data.accounts]);
   const reconciliationMap = useMemo(
     () => new Map(data.reconciliations.map((item) => [item.id, item])),
@@ -1097,20 +1114,34 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
         .filter(({ payment }) => {
           if (payment.account_id && !activeAccountIds.includes(payment.account_id)) return false;
           const paidAt = new Date(payment.paid_at);
+          if (Number.isNaN(paidAt.getTime())) return false;
           return paidAt >= rangeStart && paidAt <= rangeEnd;
         })
-        .sort((a, b) => new Date(b.payment.paid_at).getTime() - new Date(a.payment.paid_at).getTime()),
+        .sort((a, b) => (new Date(b.payment.paid_at).getTime() || 0) - (new Date(a.payment.paid_at).getTime() || 0)),
     [accountMap, activeAccountIds, data.entries, rangeEnd, rangeStart, reconciliationMap],
   );
 
   const pendingRows = rows.filter(({ payment }) => !payment.reconciliation_id);
   const checkedPendingCount = pendingRows.filter(({ payment }) => checkedMovementIds.includes(payment.id)).length;
-  const allPendingChecked = pendingRows.length === 0 || checkedPendingCount === pendingRows.length;
+  const selectedPendingRows = pendingRows.filter(({ payment }) => checkedMovementIds.includes(payment.id));
+  const selectedAccountId = selectedPendingRows[0]?.payment.account_id ?? undefined;
   const totalIn = rows.filter(({ payment }) => payment.direction === "in").reduce((sum, row) => sum + row.payment.net_amount_cents, 0);
   const totalOut = rows.filter(({ payment }) => payment.direction === "out").reduce((sum, row) => sum + row.payment.net_amount_cents, 0);
   const accountSummary = activeAccountIds.length === data.accounts.length ? "Todas as contas" : activeAccountIds.length + " conta(s)";
   const statementAccount = statementAccountId ? accountMap.get(statementAccountId) ?? null : null;
   const statementRows = statementAccountId ? rows.filter(({ payment }) => payment.account_id === statementAccountId) : [];
+  const reviewingImport = reviewingImportId ? data.bankImports.find((item) => item.id === reviewingImportId) ?? null : null;
+
+  function toggleMovement(paymentId: string) {
+    const row = pendingRows.find(({ payment }) => payment.id === paymentId);
+    if (!row) return;
+    const currentAccount = selectedPendingRows[0]?.payment.account_id;
+    if (!checkedMovementIds.includes(paymentId) && currentAccount && row.payment.account_id !== currentAccount) {
+      toast({ title: "Conciliação por conta", description: "Selecione movimentos de uma única conta por fechamento." });
+      return;
+    }
+    setCheckedMovementIds((current) => current.includes(paymentId) ? current.filter((id) => id !== paymentId) : [...current, paymentId]);
+  }
   const viewCopy =
     activeView === "statements"
       ? { title: "Extratos por conta", description: "Consulte movimentos por conta, período, entrada, saída e status de conciliação." }
@@ -1122,6 +1153,8 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
             ? { title: "Histórico de conciliações", description: "Fechamentos por conta, período, responsável, status e reaberturas auditadas." }
             : activeView === "divergences"
               ? { title: "Divergências de conciliação", description: "Compare saldo esperado, saldo informado e diferenças antes de encerrar o período." }
+              : activeView === "imports"
+                ? { title: "Importações bancárias", description: "Importe OFX ou CSV, revise correspondências automáticas e trate divergências antes do fechamento." }
               : { title: "Relatórios de conciliação", description: "Visão consolidada dos movimentos conciliados, pendentes e reabertos." };
 
   useEffect(() => {
@@ -1139,8 +1172,9 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={!data.access.canManage} onClick={() => setImportingStatement(true)}><Upload />Importar extrato</Button>
           <Button variant="outline" onClick={() => setReportOpen(true)}><FileText />Movimentos</Button>
-          <Button disabled={!data.access.canManage || data.accounts.length === 0 || !allPendingChecked} onClick={() => setCreating(true)}><BarChart3 />Conciliar período</Button>
+          <Button disabled={!data.access.canManage || data.accounts.length === 0 || checkedPendingCount === 0} onClick={() => setCreating(true)}><BarChart3 />Conciliar selecionados</Button>
         </div>
       </header>
 
@@ -1202,12 +1236,23 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
         rows={rows}
         checkable
         checkedIds={checkedMovementIds}
-        onToggle={(paymentId) =>
-          setCheckedMovementIds((current) =>
-            current.includes(paymentId) ? current.filter((id) => id !== paymentId) : [...current, paymentId],
-          )
-        }
+        onToggle={toggleMovement}
       />
+
+      <section className="rounded-lg border bg-card p-4">
+        <div className="flex items-center justify-between gap-3 border-b pb-3">
+          <div><p className="font-medium">Importações bancárias</p><p className="text-sm text-muted-foreground">OFX/CSV com correspondência automática por conta, data, natureza e valor.</p></div>
+          <Button size="sm" variant="outline" disabled={!data.access.canManage} onClick={() => setImportingStatement(true)}><Upload />Nova importação</Button>
+        </div>
+        <div className="mt-3 grid gap-2">
+          {data.bankImports.length ? data.bankImports.slice(0, 8).map((item) => (
+            <article key={item.id} className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[1fr_auto] lg:items-center">
+              <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-medium">{item.file_name}</p><Badge className={item.status === "completed" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}>{item.status === "completed" ? "Revisado" : "Em revisão"}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{item.account?.name ?? "Conta"} | {item.total_rows} movimentos | {item.matched_rows} correspondências | {formatDate(item.period_start)} a {formatDate(item.period_end)}</p></div>
+              <Button size="sm" variant="outline" onClick={() => setReviewingImportId(item.id)}><Eye />Revisar</Button>
+            </article>
+          )) : <EmptyState title="Nenhum extrato importado" description="Importe OFX ou CSV para comparar o banco com os movimentos do sistema." />}
+        </div>
+      </section>
 
       <section className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between gap-3 border-b pb-3"><div><p className="font-medium">Histórico de conciliações</p><p className="text-sm text-muted-foreground">Fechamentos por período, conta, responsável e status.</p></div></div>
@@ -1222,9 +1267,11 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
       </section>
 
       <Modal open={filtersOpen} onOpenChange={setFiltersOpen} title="Filtros rápidos" className="max-w-2xl"><QuickReconciliationFilters accounts={data.accounts} range={range} selectedAccounts={selectedAccounts} onApply={(nextRange, nextAccounts) => { setRange(nextRange); setSelectedAccounts(nextAccounts); setFiltersOpen(false); }} /></Modal>
-      <Modal open={creating} onOpenChange={setCreating} title="Fechar conciliação bancária" className="max-w-4xl"><ReconciliationForm accounts={data.accounts} onCompleted={() => setCreating(false)} /></Modal>
+      <Modal open={creating} onOpenChange={setCreating} title="Fechar conciliação bancária" description="Somente os movimentos marcados serão travados neste fechamento." className="max-w-4xl"><ReconciliationForm accounts={selectedAccountId ? data.accounts.filter((item) => item.id === selectedAccountId) : data.accounts} paymentIds={checkedMovementIds} defaultAccountId={selectedAccountId} onCompleted={() => { setCreating(false); setCheckedMovementIds([]); }} /></Modal>
       <Modal open={reportOpen} onOpenChange={setReportOpen} title="Relatório de movimentos" className="max-w-4xl"><MovementReportForm accounts={data.accounts} onCompleted={() => setReportOpen(false)} /></Modal>
-      <Modal open={Boolean(statementAccountId)} onOpenChange={(open) => { if (!open) setStatementAccountId(null); }} title={statementAccount ? `Extrato - ${statementAccount.name}` : "Extrato da conta"} description="Movimentos do período filtrado, com status de conciliação." className="max-w-5xl"><MovementTable rows={statementRows} compact /></Modal>
+      <Modal open={importingStatement} onOpenChange={setImportingStatement} title="Importar extrato bancário" description="O arquivo é analisado no servidor e não fica armazenado; apenas os movimentos estruturados são registrados." className="max-w-2xl"><BankStatementImportForm accounts={data.accounts} onCompleted={() => setImportingStatement(false)} /></Modal>
+      <Modal open={Boolean(statementAccountId)} onOpenChange={(open) => { if (!open) setStatementAccountId(null); }} title={statementAccount ? `Extrato - ${statementAccount.name}` : "Extrato da conta"} description="Movimentos do período filtrado, com status de conciliação." className="max-w-[min(1180px,calc(100vw-3rem))]"><MovementTable rows={statementRows} compact scrollable /></Modal>
+      <Modal open={Boolean(reviewingImport)} onOpenChange={(open) => { if (!open) setReviewingImportId(null); }} title={reviewingImport ? `Revisão - ${reviewingImport.file_name}` : "Revisão do extrato"} description="Correspondências são sugestões automáticas; movimentos pendentes podem ser lançamentos ausentes ou divergências." className="max-w-[min(1100px,calc(100vw-3rem))]">{reviewingImport ? <BankImportReview data={reviewingImport} canApprove={data.access.canApprove} onCompleted={() => setReviewingImportId(null)} /> : null}</Modal>
       <Modal open={Boolean(detailing)} onOpenChange={(open) => { if (!open) setDetailing(null); }} title="Detalhes da conciliação" description="Resumo somente para consulta. Nenhum dado pode ser alterado aqui." className="max-w-5xl">{detailing ? <ReconciliationDetail reconciliation={detailing} rows={rows.filter(({ payment }) => payment.reconciliation_id === detailing.id)} /> : null}</Modal>
       <Modal open={Boolean(reversing)} onOpenChange={(open) => { if (!open) setReversing(null); }} title="Reabrir conciliação" description="Use somente para correção auditada de movimentos já conferidos." className="max-w-lg">{reversing ? <ReverseReconciliationForm reconciliation={reversing} onCompleted={() => setReversing(null)} /> : null}</Modal>
     </div>
@@ -1910,12 +1957,14 @@ function InfoBox({ label, value }: { label: string; value: string }) {
 function MovementTable({
   rows,
   compact,
+  scrollable,
   checkable,
   checkedIds = [],
   onToggle,
 }: {
   rows: MovementRow[];
   compact?: boolean;
+  scrollable?: boolean;
   checkable?: boolean;
   checkedIds?: string[];
   onToggle?: (paymentId: string) => void;
@@ -1933,20 +1982,20 @@ function MovementTable({
           </div>
         </div>
       ) : null}
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[980px] text-sm">
-          <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+      <div className={scrollable ? "max-h-[65vh] overflow-auto" : "overflow-x-auto"}>
+        <table className="w-full min-w-[920px] table-fixed text-[13px]">
+          <thead className="sticky top-0 z-10 bg-muted text-left text-[11px] uppercase text-muted-foreground shadow-sm">
             <tr>
-              {checkable ? <th className="px-4 py-3 font-medium">Conferido</th> : null}
-              <th className="px-4 py-3 font-medium">Data</th>
-              <th className="px-4 py-3 font-medium">Conta</th>
-              <th className="px-4 py-3 font-medium">Tipo</th>
-              <th className="px-4 py-3 font-medium">Lançamento</th>
-              <th className="px-4 py-3 text-right font-medium">Bruto</th>
-              <th className="px-4 py-3 text-right font-medium">Taxa</th>
-              <th className="px-4 py-3 text-right font-medium">Líquido</th>
-              <th className="px-4 py-3 font-medium">Conciliação</th>
-              <th className="px-4 py-3 font-medium">Responsável</th>
+              {checkable ? <th className="w-28 px-3 py-2.5 font-medium">Conferido</th> : null}
+              <th className="w-24 px-3 py-2.5 font-medium">Data</th>
+              <th className="w-32 px-3 py-2.5 font-medium">Conta</th>
+              <th className="w-24 px-3 py-2.5 font-medium">Tipo</th>
+              <th className="w-64 px-3 py-2.5 font-medium">Lançamento</th>
+              <th className="w-28 px-3 py-2.5 text-right font-medium">Bruto</th>
+              <th className="w-24 px-3 py-2.5 text-right font-medium">Taxa</th>
+              <th className="w-28 px-3 py-2.5 text-right font-medium">Líquido</th>
+              <th className="w-28 px-3 py-2.5 font-medium">Conciliação</th>
+              <th className="w-40 px-3 py-2.5 font-medium">Responsável</th>
             </tr>
           </thead>
           <tbody>
@@ -1954,7 +2003,7 @@ function MovementTable({
               rows.slice(0, 120).map(({ entry, payment, account, reconciliation }) => (
                 <tr key={payment.id} className="border-t">
                   {checkable ? (
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2.5">
                       {payment.reconciliation_id ? (
                         <Badge className="bg-emerald-500/10 text-emerald-700">Travado</Badge>
                       ) : (
@@ -1970,28 +2019,28 @@ function MovementTable({
                       )}
                     </td>
                   ) : null}
-                  <td className="px-4 py-3">{formatDate(payment.paid_at)}</td>
-                  <td className="px-4 py-3">{account?.name ?? "Sem conta"}</td>
-                  <td className="px-4 py-3">
+                  <td className="whitespace-nowrap px-3 py-2.5 tabular-nums">{formatDate(payment.paid_at)}</td>
+                  <td className="truncate px-3 py-2.5" title={account?.name ?? "Sem conta"}>{account?.name ?? "Sem conta"}</td>
+                  <td className="px-3 py-2.5">
                     <Badge className={payment.direction === "in" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}>
                       {payment.direction === "in" ? "Entrada" : "Saída"}
                     </Badge>
                   </td>
-                  <td className="px-4 py-3">
-                    <p className="font-medium">{entry.description}</p>
-                    <p className="text-xs text-muted-foreground">
+                  <td className="px-3 py-2.5">
+                    <p className="truncate font-medium" title={entry.description}>{entry.description}</p>
+                    <p className="truncate text-xs text-muted-foreground">
                       {entry.patient?.social_name || entry.patient?.full_name || entry.vendor?.name || "Sem vinculação"}
                     </p>
                   </td>
-                  <td className="px-4 py-3 text-right">{formatCurrencyBRL(payment.amount_cents)}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrencyBRL(payment.fee_cents)}</td>
-                  <td className="px-4 py-3 text-right font-medium">{formatCurrencyBRL(payment.net_amount_cents)}</td>
-                  <td className="px-4 py-3">
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(Number(payment.amount_cents) || 0)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(Number(payment.fee_cents) || 0)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(Number(payment.net_amount_cents) || 0)}</td>
+                  <td className="px-3 py-2.5">
                     <Badge className={payment.reconciliation_id ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground"}>
                       {payment.reconciliation_id ? "Conciliado" : "Pendente"}
                     </Badge>
                   </td>
-                  <td className="px-4 py-3">{reconciliation?.closed_by_profile?.full_name ?? "-"}</td>
+                  <td className="truncate px-3 py-2.5" title={reconciliation?.closed_by_profile?.full_name ?? ""}>{reconciliation?.closed_by_profile?.full_name ?? "-"}</td>
                 </tr>
               ))
             ) : (
@@ -2005,6 +2054,38 @@ function MovementTable({
         </table>
       </div>
     </section>
+  );
+}
+
+function BankImportReview({
+  data,
+  canApprove,
+  onCompleted,
+}: {
+  data: FinancialWorkspaceData["bankImports"][number];
+  canApprove: boolean;
+  onCompleted: () => void;
+}) {
+  const matched = data.items.filter((item) => item.status === "matched").length;
+  const pending = data.items.filter((item) => item.status === "pending").length;
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 lg:grid-cols-3">
+        <InfoBox label="Conta" value={data.account?.name ?? "Conta não identificada"} />
+        <InfoBox label="Correspondências" value={`${matched} de ${data.items.length}`} />
+        <InfoBox label="Divergências" value={String(pending)} />
+      </div>
+      <div className="max-h-[55vh] overflow-auto rounded-lg border">
+        <table className="w-full min-w-[760px] table-fixed text-[13px]">
+          <thead className="sticky top-0 z-10 bg-muted text-left text-[11px] uppercase text-muted-foreground shadow-sm">
+            <tr><th className="w-24 px-3 py-2.5">Data</th><th className="w-72 px-3 py-2.5">Descrição</th><th className="w-24 px-3 py-2.5">Natureza</th><th className="w-28 px-3 py-2.5 text-right">Valor</th><th className="w-32 px-3 py-2.5">Situação</th><th className="w-24 px-3 py-2.5">Confiança</th></tr>
+          </thead>
+          <tbody>{data.items.map((item) => <tr key={item.id} className="border-t"><td className="whitespace-nowrap px-3 py-2.5">{formatDate(item.transaction_date)}</td><td className="truncate px-3 py-2.5" title={item.description}>{item.description}</td><td className="px-3 py-2.5">{item.direction === "in" ? "Entrada" : "Saída"}</td><td className="whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(item.amount_cents)}</td><td className="px-3 py-2.5"><Badge className={item.status === "matched" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}>{item.status === "matched" ? "Correspondente" : "Sem par"}</Badge></td><td className="px-3 py-2.5">{item.match_confidence ? `${item.match_confidence}%` : "-"}</td></tr>)}</tbody>
+        </table>
+      </div>
+      {pending ? <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-900"><strong>{pending} divergência(s).</strong> Confira se são tarifas, lançamentos ausentes ou datas diferentes antes de fechar a conciliação.</div> : null}
+      {data.status === "ready" && canApprove ? <CompleteBankImportForm importId={data.id} onCompleted={onCompleted} /> : null}
+    </div>
   );
 }
 
@@ -2093,6 +2174,14 @@ function ReconciliationDetail({ reconciliation, rows }: { reconciliation: Financ
 }
 
 function CommissionsPanel({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
+  const [ruleOpen, setRuleOpen] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [statusTarget, setStatusTarget] = useState<{ id: string; action: "approve" | "cancel" } | null>(null);
+  const [settlementTargetId, setSettlementTargetId] = useState<string | null>(null);
+  const editingRule = editingRuleId ? data.commissionRules.find((item) => item.id === editingRuleId) ?? null : null;
+  const statusCommission = statusTarget ? data.commissions.find((item) => item.id === statusTarget.id) ?? null : null;
+  const settlementCommission = settlementTargetId ? data.commissions.find((item) => item.id === settlementTargetId) ?? null : null;
   const rows = useMemo(() => {
     const map = new Map<
       string,
@@ -2130,7 +2219,9 @@ function CommissionsPanel({ data, activeView }: { data: FinancialWorkspaceData; 
   }, [data.entries]);
 
   const totalReceived = rows.reduce((sum, row) => sum + row.receivedCents, 0);
-  const totalOpen = rows.reduce((sum, row) => sum + row.openCents, 0);
+  const pendingCommissionCents = data.commissions.filter((item) => item.status === "pending").reduce((sum, item) => sum + item.commission_cents, 0);
+  const approvedCommissionCents = data.commissions.filter((item) => item.status === "approved").reduce((sum, item) => sum + item.commission_cents, 0);
+  const paidCommissionCents = data.commissions.filter((item) => item.status === "paid").reduce((sum, item) => sum + item.commission_cents, 0);
 
   const table = (
     <section className="rounded-lg border bg-card">
@@ -2171,56 +2262,53 @@ function CommissionsPanel({ data, activeView }: { data: FinancialWorkspaceData; 
     </section>
   );
 
+  const visibleCommissions = data.commissions.filter((item) => {
+    if (activeView === "commissions-due") return item.status === "pending" || item.status === "approved";
+    if (activeView === "settlements" || activeView === "receipts") return item.status === "paid";
+    return true;
+  });
+  const commissionTable = (
+    <section className="rounded-lg border bg-card">
+      <div className="border-b p-4"><p className="font-medium">Repasses por profissional</p><p className="mt-1 text-sm text-muted-foreground">Histórico rastreável da origem ao acerto financeiro.</p></div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[880px] table-fixed text-[13px]"><thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground"><tr><th className="w-52 px-3 py-2.5">Profissional</th><th className="w-56 px-3 py-2.5">Origem</th><th className="w-28 px-3 py-2.5 text-right">Base</th><th className="w-28 px-3 py-2.5 text-right">Comissão</th><th className="w-28 px-3 py-2.5">Status</th><th className="w-48 px-3 py-2.5 text-right">Ações</th></tr></thead><tbody>{visibleCommissions.length ? visibleCommissions.map((item) => <tr key={item.id} className="border-t"><td className="truncate px-3 py-2.5 font-medium" title={item.professional?.profile?.full_name ?? "Profissional"}>{item.professional?.profile?.full_name ?? "Profissional"}</td><td className="truncate px-3 py-2.5" title={item.entry?.description ?? "Lançamento"}>{item.entry?.description ?? "Lançamento financeiro"}</td><td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(item.base_amount_cents)}</td><td className="whitespace-nowrap px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(item.commission_cents)}</td><td className="px-3 py-2.5"><Badge className={item.status === "paid" ? "bg-emerald-500/10 text-emerald-700" : item.status === "approved" ? "bg-sky-500/10 text-sky-700" : item.status === "cancelled" ? "bg-rose-500/10 text-rose-700" : "bg-amber-500/10 text-amber-700"}>{item.status === "paid" ? "Pago" : item.status === "approved" ? "Aprovado" : item.status === "cancelled" ? "Cancelado" : "Pendente"}</Badge></td><td className="px-3 py-2.5"><div className="flex justify-end gap-1">{item.status === "pending" && data.access.canApprove ? <Button size="sm" variant="outline" onClick={() => setStatusTarget({ id: item.id, action: "approve" })}><CheckCircle2 />Aprovar</Button> : null}{item.status === "approved" && data.access.canManage ? <Button size="sm" onClick={() => setSettlementTargetId(item.id)}><Banknote />Pagar</Button> : null}{item.status !== "paid" && item.status !== "cancelled" && data.access.canApprove ? <Button size="icon" variant="ghost" title="Cancelar" onClick={() => setStatusTarget({ id: item.id, action: "cancel" })}><XCircle /></Button> : null}{item.status === "paid" ? <span className="text-xs text-muted-foreground">{formatDate(item.paid_at)}</span> : null}</div></td></tr>) : <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Nenhuma comissão nesta etapa.</td></tr>}</tbody></table></div>
+    </section>
+  );
+
   return (
     <div className="grid gap-5">
-      <header className="border-b pb-4">
-        <h2 className="font-semibold">Comissões e repasses</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Produção por profissional, bases de cálculo e preparação para regras de repasse.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
+        <div><h2 className="font-semibold">Comissões e repasses</h2><p className="mt-1 text-sm text-muted-foreground">Regras, cálculo, aprovação, pagamento e histórico por profissional.</p></div>
+        <div className="flex gap-2"><Button variant="outline" disabled={!data.access.canManage} onClick={() => setGenerating(true)}><Calculator />Calcular</Button><Button disabled={!data.access.canManage} onClick={() => { setEditingRuleId(null); setRuleOpen(true); }}><Plus />Nova regra</Button></div>
       </header>
-      <div className="grid gap-3 lg:grid-cols-3">
-        <MetricCard label="Base recebida" value={formatCurrencyBRL(totalReceived)} description="Recebimentos vinculados a profissionais" />
-        <MetricCard label="Em aberto" value={formatCurrencyBRL(totalOpen)} description="Valores ainda não recebidos" tone="warning" />
-        <MetricCard label="Profissionais" value={String(rows.length)} description="Com produção financeira no período carregado" />
+      <div className="grid gap-3 lg:grid-cols-4">
+        <MetricCard label="A calcular" value={formatCurrencyBRL(pendingCommissionCents)} description="Aguardando aprovação" tone="warning" />
+        <MetricCard label="A pagar" value={formatCurrencyBRL(approvedCommissionCents)} description="Repasses aprovados" />
+        <MetricCard label="Pago" value={formatCurrencyBRL(paidCommissionCents)} description="Acertos concluídos" tone="success" />
+        <MetricCard label="Produção recebida" value={formatCurrencyBRL(totalReceived)} description={`${rows.length} profissional(is)`} />
       </div>
 
       {activeView === "rules" ? (
-        <section className="rounded-lg border bg-card p-4">
-          <p className="font-medium">Regras de comissão</p>
-          <div className="mt-3 grid gap-3 text-sm text-muted-foreground lg:grid-cols-3">
-            <InfoBox label="Por profissional" value="Percentual ou valor fixo individual" />
-            <InfoBox label="Por serviço" value="Regra específica quando o serviço exigir repasse diferente" />
-            <InfoBox label="Base de cálculo" value="Recebido ou faturado, conforme política da clínica" />
-          </div>
-          <p className="mt-3 text-sm text-muted-foreground">
-            A estrutura de banco já está preparada para regras persistentes; o próximo passo é ligar cadastro, aprovação e geração automática dos repasses.
-          </p>
+        <section className="rounded-lg border bg-card">
+          <div className="border-b p-4"><p className="font-medium">Regras de comissão</p><p className="mt-1 text-sm text-muted-foreground">A regra mais específica por profissional e serviço tem prioridade.</p></div>
+          <div className="overflow-x-auto"><table className="w-full min-w-[780px] table-fixed text-[13px]"><thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground"><tr><th className="w-48 px-3 py-2.5">Profissional</th><th className="w-48 px-3 py-2.5">Serviço</th><th className="w-28 px-3 py-2.5">Regra</th><th className="w-28 px-3 py-2.5">Base</th><th className="w-24 px-3 py-2.5">Status</th><th className="w-24 px-3 py-2.5 text-right">Ações</th></tr></thead><tbody>{data.commissionRules.length ? data.commissionRules.map((rule) => <tr key={rule.id} className="border-t"><td className="truncate px-3 py-2.5" title={rule.professional?.profile?.full_name ?? "Todos"}>{rule.professional?.profile?.full_name ?? "Todos"}</td><td className="truncate px-3 py-2.5" title={rule.service?.name ?? "Todos"}>{rule.service?.name ?? "Todos"}</td><td className="px-3 py-2.5 font-medium">{rule.rule_type === "percent" ? `${(rule.value_bps / 100).toLocaleString("pt-BR")}%` : formatCurrencyBRL(rule.value_cents)}</td><td className="px-3 py-2.5">{rule.calculate_on === "received" ? "Recebido" : "Faturado"}</td><td className="px-3 py-2.5"><Badge className={rule.active ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground"}>{rule.active ? "Ativa" : "Inativa"}</Badge></td><td className="px-3 py-2.5 text-right"><Button size="sm" variant="outline" onClick={() => { setEditingRuleId(rule.id); setRuleOpen(true); }}><Eye />Editar</Button></td></tr>) : <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Nenhuma regra cadastrada.</td></tr>}</tbody></table></div>
         </section>
       ) : null}
 
       {activeView === "production" || activeView === "reports" ? table : null}
 
       {activeView === "commissions-due" ? (
-        <section className="rounded-lg border bg-card p-4">
-          <p className="font-medium">Comissões a pagar</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Esta visão depende das regras ativas de comissão. Enquanto as regras não forem cadastradas, usamos a produção por profissional como base de conferência.
-          </p>
-          <div className="mt-4">{table}</div>
-        </section>
+        commissionTable
       ) : null}
 
       {activeView === "settlements" || activeView === "receipts" ? (
-        <section className="rounded-lg border bg-card p-4">
-          <p className="font-medium">{activeView === "settlements" ? "Acertos de comissão" : "Recibos de repasse"}</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            A tela já está separada para o fluxo financeiro correto: calcular, aprovar, pagar e emitir recibo de repasse com auditoria.
-          </p>
-        </section>
+        commissionTable
       ) : null}
 
-      {activeView !== "production" && activeView !== "reports" && activeView !== "commissions-due" ? table : null}
+      {activeView === "rules" ? null : activeView !== "production" && activeView !== "reports" && activeView !== "commissions-due" && activeView !== "settlements" && activeView !== "receipts" ? table : null}
+      <Modal open={ruleOpen} onOpenChange={(open) => { setRuleOpen(open); if (!open) setEditingRuleId(null); }} title={editingRule ? "Editar regra de comissão" : "Nova regra de comissão"} description="Regras específicas substituem regras gerais no cálculo." className="max-w-3xl"><CommissionRuleForm rule={editingRule} professionals={data.professionals} services={data.services} onCompleted={() => { setRuleOpen(false); setEditingRuleId(null); }} /></Modal>
+      <Modal open={generating} onOpenChange={setGenerating} title="Calcular comissões" description="O cálculo usa produção financeira confirmada e evita duplicidades." className="max-w-lg"><GenerateCommissionsForm onCompleted={() => setGenerating(false)} /></Modal>
+      <Modal open={Boolean(statusCommission)} onOpenChange={(open) => { if (!open) setStatusTarget(null); }} title={statusTarget?.action === "approve" ? "Aprovar comissão" : "Cancelar comissão"} className="max-w-lg">{statusCommission && statusTarget ? <CommissionStatusForm commission={statusCommission} actionType={statusTarget.action} onCompleted={() => setStatusTarget(null)} /> : null}</Modal>
+      <Modal open={Boolean(settlementCommission)} onOpenChange={(open) => { if (!open) setSettlementTargetId(null); }} title="Pagar comissão" description="O acerto será lançado em contas a pagar e no livro-caixa." className="max-w-2xl">{settlementCommission ? <CommissionSettlementForm commission={settlementCommission} accounts={data.accounts} paymentMethods={data.paymentMethods} onCompleted={() => setSettlementTargetId(null)} /> : null}</Modal>
     </div>
   );
 }
