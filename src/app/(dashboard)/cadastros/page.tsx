@@ -8,10 +8,6 @@ import {
 import { PatientsPanel } from "@/features/registrations/components/patients-panel";
 import { ProfessionalsPanel } from "@/features/registrations/components/professionals-panel";
 import {
-  RegistrationSectionNav,
-  type RegistrationSection,
-} from "@/features/registrations/components/registration-section-nav";
-import {
   getRegistrationAccess,
   getRegistrationCounts,
   getRegistrationPreferences,
@@ -26,6 +22,8 @@ import { listScheduleProfessionals, listScheduleSettings } from "@/repositories/
 import type { RegistrationPreferences } from "@/types/domain";
 import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+type RegistrationSection = "patients" | "professionals" | "services" | "rooms" | "preferences";
 
 const defaultPreferences: RegistrationPreferences = {
   clinic_id: "",
@@ -124,8 +122,6 @@ export default async function CadastrosPage({
         </Card>
       ) : (
         <div className="grid gap-6">
-          <RegistrationSectionNav activeSection={section} />
-
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Card>
               <CardHeader className="pb-3">

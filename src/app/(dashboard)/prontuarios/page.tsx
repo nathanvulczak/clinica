@@ -10,10 +10,6 @@ import { ClinicalQueue } from "@/features/clinical-workflow/components/clinical-
 import { MedicalLgpdAckCard } from "@/features/medical-records/components/medical-lgpd-ack-card";
 import { medicalRecordStatusLabel } from "@/features/medical-records/labels";
 import { MedicalRecordPreferencesForm } from "@/features/medical-records/components/medical-record-preferences-form";
-import {
-  MedicalRecordSectionNav,
-  type MedicalRecordSection,
-} from "@/features/medical-records/components/medical-record-section-nav";
 import { PatientMedicalOverviewPanel } from "@/features/medical-records/components/patient-medical-overview-panel";
 import {
   getClinicalWorkflowAccess,
@@ -26,6 +22,8 @@ import {
   listMedicalRecords,
   listPatientMedicalOverviews,
 } from "@/repositories/medical-records";
+
+type MedicalRecordSection = "queue" | "records" | "patients" | "reports" | "preferences";
 
 function normalizeSection(value?: string): MedicalRecordSection {
   return ["queue", "records", "patients", "reports", "preferences"].includes(value ?? "")
@@ -110,8 +108,6 @@ export default async function ProntuariosPage({
       ) : (
         <div className="grid gap-5">
           <MedicalLgpdAckCard acceptedAt={lgpdAck?.accepted_at} />
-          <MedicalRecordSectionNav activeSection={section} />
-
           <div className="grid gap-3 lg:grid-cols-3">
             <div className="rounded-lg border bg-card p-4">
               <p className="text-sm font-medium">Liberados para consulta</p>

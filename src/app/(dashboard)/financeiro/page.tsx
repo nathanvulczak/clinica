@@ -2,9 +2,6 @@ import { LockKeyhole } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
-  FinancialSectionNav,
-} from "@/features/financial/components/financial-section-nav";
-import {
   getDefaultFinancialSubsection,
   isValidFinancialSubsection,
   type FinancialSection,
@@ -72,7 +69,6 @@ export default async function FinanceiroPage({
         </Card>
       ) : (
         <>
-          <FinancialSectionNav activeSection={section} activeView={activeView} clinicName={activeClinic.trade_name} />
           <FinancialWorkspace data={data} section={section} activeView={activeView} />
         </>
       )}

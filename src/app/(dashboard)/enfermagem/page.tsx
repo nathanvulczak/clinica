@@ -7,10 +7,6 @@ import { ClinicalQueue } from "@/features/clinical-workflow/components/clinical-
 import { NursingPreferencesForm } from "@/features/nursing/components/nursing-preferences-form";
 import { NursingRecordsPanel } from "@/features/nursing/components/nursing-records-panel";
 import {
-  NursingSectionNav,
-  type NursingSection,
-} from "@/features/nursing/components/nursing-section-nav";
-import {
   getClinicalWorkflowAccess,
   listClinicalEncounters,
 } from "@/repositories/clinical-workflow";
@@ -19,6 +15,8 @@ import {
   getNursingPreferences,
   listNursingAssessments,
 } from "@/repositories/nursing";
+
+type NursingSection = "queue" | "records" | "preferences";
 
 function normalizeSection(value?: string): NursingSection {
   return ["queue", "records", "preferences"].includes(value ?? "")
@@ -83,8 +81,6 @@ export default async function EnfermagemPage({
         </Card>
       ) : (
         <div className="grid gap-5">
-          <NursingSectionNav activeSection={section} />
-
           <div className="grid gap-3 lg:grid-cols-3">
             <div className="rounded-lg border bg-card p-4">
               <div className="flex items-center justify-between gap-3">
