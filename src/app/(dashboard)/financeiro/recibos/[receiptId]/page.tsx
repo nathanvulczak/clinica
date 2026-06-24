@@ -3,6 +3,7 @@ import { getActiveClinicContext } from "@/features/clinics/context";
 import { PrintButton } from "@/features/financial/components/print-button";
 import { getFinancialReceiptDetail } from "@/repositories/financial";
 import { formatCurrencyBRL } from "@/lib/utils";
+import { getClinicDocumentBranding } from "@/services/documents/clinic-document-branding";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "Não informado";
@@ -22,7 +23,10 @@ export default async function FinancialReceiptPage({
   const { activeClinic } = await getActiveClinicContext();
   if (!activeClinic) redirect("/dashboard?clinic=required");
 
-  const detail = await getFinancialReceiptDetail(activeClinic.id, receiptId);
+  const [detail, branding] = await Promise.all([
+    getFinancialReceiptDetail(activeClinic.id, receiptId),
+    getClinicDocumentBranding(activeClinic.id),
+  ]);
   if (!detail) notFound();
 
   const total =
@@ -42,9 +46,12 @@ export default async function FinancialReceiptPage({
         <PrintButton />
       </div>
       <section className="rounded-lg border bg-card p-8 print:border-0 print:p-0">
-        <header className="border-b pb-5">
-          <p className="text-sm text-muted-foreground">CliniCore Financeiro</p>
-          <h1 className="mt-2 text-2xl font-semibold">{detail.receipt.title}</h1>
+        <header className="border-b-2 pb-4" style={{ borderColor: branding.primary_color }}>
+          <div className="flex items-center justify-between gap-5">
+            <div className="flex items-center gap-3">{branding.logo_url ? <span className="h-12 w-40 bg-contain bg-left bg-no-repeat" style={{ backgroundImage: `url(${branding.logo_url})` }} /> : <strong style={{ color: branding.primary_color }}>{branding.trade_name}</strong>}<div className="grid text-xs text-muted-foreground"><strong className="text-foreground">{branding.trade_name}</strong>{branding.show_legal_name && branding.legal_name ? <span>{branding.legal_name}</span> : null}{branding.show_document && branding.document ? <span>CNPJ/CPF: {branding.document}</span> : null}</div></div>
+            <span className="text-xs text-muted-foreground">CliniCore Financeiro</span>
+          </div>
+          <h1 className="mt-4 text-xl font-semibold">{detail.receipt.title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Emitido em {formatDate(detail.receipt.issued_at)}
           </p>
@@ -79,8 +86,7 @@ export default async function FinancialReceiptPage({
           {detail.receipt.content}
         </article>
         <footer className="mt-10 border-t pt-5 text-xs text-muted-foreground">
-          Documento financeiro gerado pelo CliniCore com rastreabilidade em auditoria. Este documento deve ser
-          conferido pela clínica antes de entrega ao paciente.
+          {branding.footer_text ?? "Documento financeiro com rastreabilidade em auditoria. Confira as informações antes da entrega ao paciente."} | CliniCore
         </footer>
       </section>
     </main>

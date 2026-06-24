@@ -1,22 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Radio } from "lucide-react";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 
 export function RealtimeClinicSync({
   clinicId,
   tables,
-  visible = false,
 }: {
   clinicId: string;
   tables: string[];
-  visible?: boolean;
 }) {
   const router = useRouter();
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -40,7 +36,7 @@ export function RealtimeClinicSync({
         );
       }
       channel = nextChannel;
-      nextChannel.subscribe((status) => setConnected(status === "SUBSCRIBED"));
+      nextChannel.subscribe();
     }
     void connect();
 
@@ -51,11 +47,5 @@ export function RealtimeClinicSync({
     };
   }, [clinicId, router, tables]);
 
-  if (!visible) return null;
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-      <Radio className={connected ? "size-3.5 text-emerald-600" : "size-3.5"} />
-      {connected ? "Atualização ao vivo" : "Conectando"}
-    </span>
-  );
+  return null;
 }

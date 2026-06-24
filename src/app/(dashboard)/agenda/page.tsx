@@ -162,7 +162,7 @@ export default async function AgendaPage({
         </Card>
       ) : (
         <div className="grid gap-6">
-          <div className="flex justify-end"><RealtimeClinicSync clinicId={activeClinic.id} tables={["appointments"]} visible /></div>
+          <div className="flex justify-end"><RealtimeClinicSync clinicId={activeClinic.id} tables={["appointments"]} /></div>
           <Card>
             <CardHeader>
               <CardTitle>Filtros da agenda</CardTitle>

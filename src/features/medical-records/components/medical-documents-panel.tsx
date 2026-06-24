@@ -23,6 +23,7 @@ import type {
   MedicalPrescription,
   MedicalRecordEncounterDetail,
 } from "@/repositories/medical-records";
+import type { ClinicDocumentBranding } from "@/services/documents/clinic-document-branding";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "Nao informado";
@@ -208,8 +209,10 @@ function DeleteDocumentForm({
 
 export function MedicalDocumentsPanel({
   detail,
+  branding,
 }: {
   detail: MedicalRecordEncounterDetail;
+  branding: ClinicDocumentBranding;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<MedicalPrescription | null>(null);
@@ -278,7 +281,12 @@ export function MedicalDocumentsPanel({
       @page { size: A4; margin: 18mm; }
       * { box-sizing: border-box; }
       body { font-family: Arial, sans-serif; color: #111827; margin: 0; line-height: 1.55; }
-      header { border-bottom: 1px solid #d1d5db; padding-bottom: 14px; margin-bottom: 24px; }
+      header { border-bottom: 2px solid ${escapeHtml(branding.primary_color)}; padding-bottom: 12px; margin-bottom: 24px; }
+      .brand { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:14px; }
+      .brand-main { display:flex; align-items:center; gap:12px; }
+      .brand img { display:block; max-width:170px; height:48px; object-fit:contain; object-position:left center; }
+      .brand-name { color:${escapeHtml(branding.primary_color)}; font-size:17px; font-weight:700; }
+      .brand-meta { display:grid; gap:1px; font-size:9px; color:#64748b; }
       h1 { font-size: 18px; margin: 0 0 8px; }
       .meta { font-size: 12px; color: #4b5563; }
       pre { white-space: pre-wrap; font-family: Arial, sans-serif; font-size: 13px; margin: 0; }
@@ -289,6 +297,12 @@ export function MedicalDocumentsPanel({
   </head>
   <body>
     <header>
+      <div class="brand">
+        <div class="brand-main">
+          ${branding.logo_url ? `<img src="${escapeHtml(branding.logo_url)}" alt="" />` : `<div class="brand-name">${escapeHtml(branding.trade_name)}</div>`}
+          <div class="brand-meta"><strong>${escapeHtml(branding.trade_name)}</strong>${branding.show_legal_name && branding.legal_name ? `<span>${escapeHtml(branding.legal_name)}</span>` : ""}${branding.show_document && branding.document ? `<span>CNPJ/CPF: ${escapeHtml(branding.document)}</span>` : ""}${branding.show_contact && branding.contact ? `<span>${escapeHtml(branding.contact)}</span>` : ""}</div>
+        </div>
+      </div>
       <h1>${escapeHtml(document.title)}</h1>
       <div class="meta">Paciente: ${escapeHtml(patientName)}</div>
       <div class="meta">Data: ${escapeHtml(formatDate(document.updated_at))}</div>
@@ -301,9 +315,7 @@ export function MedicalDocumentsPanel({
         ${escapeHtml(registry)}
       </div>
     </main>
-    <footer>
-      Documento emitido pelo CliniCore com rastreabilidade no prontuario do paciente.
-    </footer>
+    <footer>${escapeHtml(branding.footer_text ?? "Documento emitido com rastreabilidade no prontuário do paciente.")} | CliniCore</footer>
     <script>
       window.onload = function () {
         window.focus();

@@ -4,15 +4,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatCurrencyBRL } from "@/lib/utils";
 import { getFinancialAccess, listFinancialEntries } from "@/repositories/financial";
 import { logAuditEvent } from "@/services/audit/audit-service";
-
-function escapeHtml(value: string | number | null | undefined) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
+import { clinicDocumentCss, escapeDocumentHtml as escapeHtml, getClinicDocumentBranding, renderClinicDocumentFooter, renderClinicDocumentHeader } from "@/services/documents/clinic-document-branding";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "Não informado";
@@ -42,6 +34,7 @@ export async function GET(request: Request) {
 
   const access = await getFinancialAccess(activeClinic.id);
   if (!access.canView) return new NextResponse("Acesso financeiro não autorizado.", { status: 403 });
+  const branding = await getClinicDocumentBranding(activeClinic.id, { embedLogo: true });
 
   const url = new URL(request.url);
   const dateFrom = url.searchParams.get("date_from");
@@ -119,6 +112,7 @@ export async function GET(request: Request) {
     <title>Relatório de movimentos financeiros</title>
     <style>
       @page { size: A4 landscape; margin: 12mm; }
+      ${clinicDocumentCss}
       * { box-sizing: border-box; }
       body { margin: 0; background: #f8fafc; color: #111827; font-family: Arial, sans-serif; }
       .toolbar { position: sticky; top: 0; display: flex; justify-content: space-between; gap: 12px; padding: 14px 22px; border-bottom: 1px solid #e5e7eb; background: rgba(255,255,255,.96); }
@@ -140,8 +134,8 @@ export async function GET(request: Request) {
   <body>
     <div class="toolbar"><div><strong>Relatório financeiro para PDF</strong><div class="muted">Revise os filtros antes de imprimir ou salvar como PDF.</div></div><button onclick="window.print()">Imprimir / salvar PDF</button></div>
     <main>
-      <h1>Movimentos financeiros</h1>
-      <div class="muted">Clínica: ${escapeHtml(activeClinic.trade_name || activeClinic.legal_name)} | Período: ${escapeHtml(dateFrom ?? "início")} até ${escapeHtml(dateTo ?? "hoje")}</div>
+      ${renderClinicDocumentHeader(branding, "Movimentos financeiros")}
+      <div class="muted" style="margin-top:8px">Período: ${escapeHtml(dateFrom ?? "início")} até ${escapeHtml(dateTo ?? "hoje")}</div>
       <section class="summary">
         <div class="box">Entradas<strong>${escapeHtml(formatCurrencyBRL(totalIn))}</strong></div>
         <div class="box">Saídas<strong>${escapeHtml(formatCurrencyBRL(totalOut))}</strong></div>
@@ -152,7 +146,7 @@ export async function GET(request: Request) {
         <thead><tr><th>Data</th><th>Conta</th><th>Tipo</th><th>Lançamento</th><th class="right">Bruto</th><th class="right">Taxa</th><th class="right">Líquido</th><th>Conciliação</th></tr></thead>
         <tbody>${tableRows || '<tr><td colspan="8">Nenhum movimento encontrado.</td></tr>'}</tbody>
       </table>
-      <footer>Relatório gerado pelo CliniCore. A visualização foi registrada em auditoria.</footer>
+      ${renderClinicDocumentFooter(branding, "Relatório financeiro. A visualização foi registrada em auditoria.")}
     </main>
   </body>
 </html>`;

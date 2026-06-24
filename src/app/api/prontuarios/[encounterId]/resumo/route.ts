@@ -8,15 +8,13 @@ import {
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getMedicalRecordEncounterDetail } from "@/repositories/medical-records";
 import { logAuditEvent } from "@/services/audit/audit-service";
-
-function escapeHtml(value: string | number | null | undefined) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
+import {
+  clinicDocumentCss,
+  escapeDocumentHtml as escapeHtml,
+  getClinicDocumentBranding,
+  renderClinicDocumentFooter,
+  renderClinicDocumentHeader,
+} from "@/services/documents/clinic-document-branding";
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "Nao informado";
@@ -67,6 +65,7 @@ export async function GET(
   if (!detail) {
     return new NextResponse("Prontuario nao encontrado ou sem permissao de acesso.", { status: 404 });
   }
+  const branding = await getClinicDocumentBranding(activeClinic.id, { embedLogo: true });
 
   await logAuditEvent({
     clinicId: activeClinic.id,
@@ -173,6 +172,7 @@ export async function GET(
     <title>Resumo clinico - ${escapeHtml(patientName)}</title>
     <style>
       @page { size: A4; margin: 14mm; }
+      ${clinicDocumentCss}
       * { box-sizing: border-box; }
       body {
         margin: 0;
@@ -210,15 +210,15 @@ export async function GET(
         background: white;
         padding: 28px;
       }
-      h1 { margin: 0; font-size: 24px; }
-      h2 { margin: 28px 0 10px; font-size: 16px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+      h1 { margin: 0; font-size: 20px; }
+      h2 { margin: 20px 0 8px; font-size: 13px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
       h3 { margin: 18px 0 8px; font-size: 14px; }
       .muted { color: #6b7280; font-size: 12px; }
       .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .box, .item {
         border: 1px solid #e5e7eb;
         border-radius: 8px;
-        padding: 12px;
+        padding: 9px;
         background: #f9fafb;
       }
       .box span, .item span { display: block; color: #6b7280; font-size: 12px; margin-top: 2px; }
@@ -226,7 +226,7 @@ export async function GET(
       pre { margin: 8px 0 0; white-space: pre-wrap; font-family: Arial, sans-serif; font-size: 12px; }
       ul { margin: 8px 0 0; padding-left: 18px; }
       li { margin-bottom: 8px; }
-      footer { margin-top: 28px; color: #6b7280; font-size: 11px; }
+      .clinical-section { break-inside: avoid; }
       @media print {
         body { background: white; }
         .toolbar { display: none; }
@@ -244,10 +244,8 @@ export async function GET(
       <button type="button" onclick="window.print()">Imprimir / salvar PDF</button>
     </div>
     <main>
-      <header>
-        <h1>Resumo clinico do atendimento</h1>
-        <div class="muted">Gerado em ${escapeHtml(formatDateTime(new Date().toISOString()))} pelo CliniCore.</div>
-      </header>
+      ${renderClinicDocumentHeader(branding, "Resumo clínico do atendimento")}
+      <div class="muted" style="margin-top:8px">Gerado em ${escapeHtml(formatDateTime(new Date().toISOString()))}. Código de verificação: ${escapeHtml(detail.id.slice(0, 8).toUpperCase())}</div>
 
       <h2>Identificacao</h2>
       <div class="grid">
@@ -264,7 +262,7 @@ export async function GET(
       <h2>Alertas e contexto</h2>
       ${paragraph(detail.patient?.clinical_alerts, "Sem alertas clinicos cadastrados.")}
 
-      <h2>Pre-consulta / Enfermagem</h2>
+      <section class="clinical-section"><h2>Pré-consulta / Enfermagem</h2>
       <div class="grid">
         <div class="box"><strong>Conclusao</strong><span>${escapeHtml(formatDateTime(assessment?.completed_at))}</span></div>
         <div class="box"><strong>Risco</strong><span>${escapeHtml(assessment?.risk_level ?? "Nao informado")}</span></div>
@@ -276,20 +274,19 @@ export async function GET(
       <h3>Observacoes da enfermagem</h3>
       ${paragraph(assessment?.nursing_notes)}
       <h3>Recomendacoes da enfermagem</h3>
-      ${paragraph(assessment?.recommendations, "Sem recomendacoes registradas.")}
+      ${paragraph(assessment?.recommendations, "Sem recomendações registradas.")}</section>
 
-      <h2>Evolucao medica</h2>
-      <h3>Queixa principal</h3>${paragraph(record?.chief_complaint)}
-      <h3>Historia clinica</h3>${paragraph(record?.history)}
-      <h3>Exame fisico</h3>${paragraph(record?.physical_exam)}
-      <h3>Avaliacao / hipotese</h3>${paragraph(record?.assessment)}
+      <section class="clinical-section"><h2>Evolução clínica estruturada (SOAP)</h2>
+      <h3>S - Subjetivo: queixa e história clínica</h3>${paragraph(clinicalList([record?.chief_complaint, record?.history]))}
+      <h3>O - Objetivo: exame físico e achados</h3>${paragraph(record?.physical_exam)}
+      <h3>A - Avaliação / hipótese</h3>${paragraph(record?.assessment)}
       <div class="grid">
         <div class="box"><strong>Diagnostico</strong><span>${escapeHtml(record?.diagnosis ?? "Nao informado")}</span></div>
         <div class="box"><strong>CID-10</strong><span>${escapeHtml(record?.cid10 ?? "Nao informado")}</span></div>
       </div>
-      <h3>Plano terapeutico / conduta</h3>${paragraph(record?.plan)}
-      <h3>Orientacoes ao paciente</h3>${paragraph(record?.patient_guidance)}
-      <h3>Retorno</h3>${paragraph(record?.follow_up_required ? record.follow_up_notes ?? "Retorno solicitado." : "Retorno nao solicitado.")}
+      <h3>P - Plano terapêutico / conduta</h3>${paragraph(record?.plan)}
+      <h3>Orientações ao paciente</h3>${paragraph(record?.patient_guidance)}
+      <h3>Retorno</h3>${paragraph(record?.follow_up_required ? record.follow_up_notes ?? "Retorno solicitado." : "Retorno não solicitado.")}</section>
 
       <h2>Documentos e receitas</h2>
       ${documents || '<p class="muted">Nenhum documento registrado.</p>'}
@@ -303,9 +300,7 @@ export async function GET(
       <h2>Linha do tempo resumida</h2>
       ${timeline ? `<ul>${timeline}</ul>` : '<p class="muted">Nenhum evento registrado.</p>'}
 
-      <footer>
-        Documento gerado para apoio clinico. O acesso ao prontuario foi registrado em auditoria com data, usuario e contexto da clinica.
-      </footer>
+      ${renderClinicDocumentFooter(branding, "Documento clínico. O acesso foi registrado em auditoria com usuário, data e contexto da clínica.")}
     </main>
   </body>
 </html>`;

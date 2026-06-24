@@ -9,6 +9,7 @@ import type {
   FinancialCategory,
   FinancialCommission,
   FinancialCommissionRule,
+  FinancialCommissionSettlement,
   FinancialCostCenter,
   FinancialEntry,
   FinancialEntryEvent,
@@ -75,6 +76,11 @@ export type FinancialCommissionWithRelations = FinancialCommission & {
   entry: { id: string; description: string; due_date: string } | null;
 };
 
+export type FinancialCommissionSettlementWithRelations = FinancialCommissionSettlement & {
+  professional: { id: string; profile: { full_name: string } | null } | null;
+  payable_entry: { id: string; description: string; status: string; paid_cents: number } | null;
+};
+
 export type FinancialBankImportWithItems = FinancialBankImport & {
   account: Pick<FinancialAccount, "id" | "name"> | null;
   items: FinancialBankImportItem[];
@@ -104,6 +110,7 @@ export type FinancialWorkspace = {
   reconciliations: FinancialReconciliationWithRelations[];
   commissionRules: FinancialCommissionRuleWithRelations[];
   commissions: FinancialCommissionWithRelations[];
+  commissionSettlements: FinancialCommissionSettlementWithRelations[];
   bankImports: FinancialBankImportWithItems[];
   monthlyClosings: FinancialMonthlyClosingWithRelations[];
   professionals: FinancialProfessionalOption[];
@@ -216,6 +223,7 @@ export async function getFinancialWorkspace(
     reconciliations: [],
     commissionRules: [],
     commissions: [],
+    commissionSettlements: [],
     bankImports: [],
     monthlyClosings: [],
     professionals: [],
@@ -310,7 +318,9 @@ export async function getFinancialWorkspace(
     access.canView && needsEntries ? listFinancialEntries(clinicId) : Promise.resolve([]),
     access.canView && needsRecurring ? listFinancialRecurringEntries(clinicId) : Promise.resolve([]),
     access.canView && needsReconciliations ? listFinancialReconciliations(clinicId) : Promise.resolve([]),
-    access.canView && needsCommissions ? listFinancialCommissions(clinicId) : Promise.resolve({ rules: [], commissions: [] }),
+    access.canView && needsCommissions
+      ? listFinancialCommissions(clinicId)
+      : Promise.resolve({ rules: [], commissions: [], settlements: [] }),
     access.canView && needsBankImports ? listFinancialBankImports(clinicId) : Promise.resolve([]),
     access.canView && needsMonthlyClosings ? listFinancialMonthlyClosings(clinicId) : Promise.resolve([]),
     access.canView && needsCommissions ? listFinancialProfessionals(clinicId) : Promise.resolve([]),
@@ -336,6 +346,7 @@ export async function getFinancialWorkspace(
     reconciliations,
     commissionRules: commissionData.rules,
     commissions: commissionData.commissions,
+    commissionSettlements: commissionData.settlements,
     bankImports,
     monthlyClosings,
     professionals,
@@ -573,9 +584,10 @@ export async function listFinancialServices(clinicId: string): Promise<Financial
 export async function listFinancialCommissions(clinicId: string): Promise<{
   rules: FinancialCommissionRuleWithRelations[];
   commissions: FinancialCommissionWithRelations[];
+  settlements: FinancialCommissionSettlementWithRelations[];
 }> {
   const admin = createSupabaseAdminClient();
-  const [{ data: ruleRows }, { data: commissionRows }] = await Promise.all([
+  const [{ data: ruleRows }, { data: commissionRows }, { data: settlementRows }] = await Promise.all([
     admin
       .from("financial_commission_rules")
       .select("*")
@@ -589,14 +601,23 @@ export async function listFinancialCommissions(clinicId: string): Promise<{
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(250),
+    admin
+      .from("financial_commission_settlements")
+      .select("*")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .order("due_date", { ascending: false })
+      .limit(120),
   ]);
 
   const rules = (ruleRows ?? []) as FinancialCommissionRule[];
   const commissions = (commissionRows ?? []) as FinancialCommission[];
-  const professionalIds = [...new Set([...rules, ...commissions].map((item) => item.professional_member_id).filter(Boolean))] as string[];
+  const settlements = (settlementRows ?? []) as FinancialCommissionSettlement[];
+  const professionalIds = [...new Set([...rules, ...commissions, ...settlements].map((item) => item.professional_member_id).filter(Boolean))] as string[];
   const serviceIds = [...new Set(rules.map((item) => item.service_id).filter(Boolean))] as string[];
   const entryIds = [...new Set(commissions.map((item) => item.entry_id).filter(Boolean))] as string[];
-  const [{ data: professionals }, { data: services }, { data: entries }] = await Promise.all([
+  const payableEntryIds = [...new Set(settlements.map((item) => item.payable_entry_id).filter(Boolean))] as string[];
+  const [{ data: professionals }, { data: services }, { data: entries }, { data: payableEntries }] = await Promise.all([
     professionalIds.length
       ? admin.from("clinic_members").select("id, profile:profiles!clinic_members_user_id_fkey(full_name)").in("id", professionalIds)
       : Promise.resolve({ data: [] }),
@@ -606,10 +627,14 @@ export async function listFinancialCommissions(clinicId: string): Promise<{
     entryIds.length
       ? admin.from("financial_entries").select("id, description, due_date").in("id", entryIds)
       : Promise.resolve({ data: [] }),
+    payableEntryIds.length
+      ? admin.from("financial_entries").select("id, description, status, paid_cents").in("id", payableEntryIds)
+      : Promise.resolve({ data: [] }),
   ]);
   const professionalMap = new Map((professionals ?? []).map((item) => [item.id, normalizeProfessional(item)]));
   const serviceMap = new Map((services ?? []).map((item) => [item.id, item]));
   const entryMap = new Map((entries ?? []).map((item) => [item.id, item]));
+  const payableEntryMap = new Map((payableEntries ?? []).map((item) => [item.id, item]));
 
   return {
     rules: rules.map((rule) => ({
@@ -621,6 +646,13 @@ export async function listFinancialCommissions(clinicId: string): Promise<{
       ...commission,
       professional: professionalMap.get(commission.professional_member_id) ?? null,
       entry: commission.entry_id ? entryMap.get(commission.entry_id) ?? null : null,
+    })),
+    settlements: settlements.map((settlement) => ({
+      ...settlement,
+      professional: professionalMap.get(settlement.professional_member_id) ?? null,
+      payable_entry: settlement.payable_entry_id
+        ? payableEntryMap.get(settlement.payable_entry_id) ?? null
+        : null,
     })),
   };
 }

@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { MedicalRecordForm } from "@/features/medical-records/components/medical-record-form";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
+import { getClinicDocumentBranding } from "@/services/documents/clinic-document-branding";
 import {
   getMedicalRecordEncounterDetail,
   getMedicalRecordPreferences,
@@ -44,9 +45,10 @@ export default async function MedicalRecordPage({
     );
   }
 
-  const [detail, preferences] = await Promise.all([
+  const [detail, preferences, documentBranding] = await Promise.all([
     getMedicalRecordEncounterDetail(activeClinic.id, encounterId),
     getMedicalRecordPreferences(activeClinic.id),
+    getClinicDocumentBranding(activeClinic.id),
   ]);
 
   if (!detail) notFound();
@@ -87,14 +89,14 @@ export default async function MedicalRecordPage({
               seguirá para os próximos fluxos administrativos e financeiros.
             </p>
           </div>
-          <div className="grid justify-items-end gap-1.5"><div className="flex items-center gap-2 text-sm text-muted-foreground"><ClipboardCheck className="size-4 text-primary" />Auditoria ativa</div><RealtimeClinicSync clinicId={activeClinic.id} tables={["clinical_encounters"]} visible /></div>
+          <div className="grid justify-items-end gap-1.5"><div className="flex items-center gap-2 text-sm text-muted-foreground"><ClipboardCheck className="size-4 text-primary" />Auditoria ativa</div><RealtimeClinicSync clinicId={activeClinic.id} tables={["clinical_encounters"]} /></div>
         </div>
 
         {detail.status === "consultation_completed" ? (
           <section className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-4 py-3"><p className="text-sm font-medium text-emerald-900">Consulta concluída</p><p className="mt-1 text-sm text-emerald-800">Correções permanecem disponíveis conforme permissão, sempre com motivo e auditoria.</p></section>
         ) : null}
 
-        <MedicalRecordForm detail={detail} preferences={preferences} />
+        <MedicalRecordForm detail={detail} preferences={preferences} documentBranding={documentBranding} />
       </div>
     </>
   );

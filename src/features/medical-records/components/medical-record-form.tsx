@@ -20,6 +20,7 @@ import {
   type MedicalRecordActionState,
 } from "@/features/medical-records/actions";
 import type { MedicalRecordEncounterDetail, MedicalRecordPreferences } from "@/repositories/medical-records";
+import type { ClinicDocumentBranding } from "@/services/documents/clinic-document-branding";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "Data nao informada";
@@ -68,7 +69,7 @@ function TextArea({
   name,
   defaultValue,
   required,
-  minHeight = "min-h-28",
+  minHeight = "min-h-24",
   disabled,
 }: {
   label: string;
@@ -164,9 +165,11 @@ function NursingSummary({ detail }: { detail: MedicalRecordEncounterDetail }) {
 export function MedicalRecordForm({
   detail,
   preferences,
+  documentBranding,
 }: {
   detail: MedicalRecordEncounterDetail;
   preferences: MedicalRecordPreferences;
+  documentBranding: ClinicDocumentBranding;
 }) {
   const record = detail.medical_record;
   const requiredFields = new Set<MedicalRecordFieldKey>(preferences.required_fields);
@@ -285,13 +288,13 @@ export function MedicalRecordForm({
 
       {preferences.show_nursing_summary ? <NursingSummary detail={detail} /> : null}
 
-      <section className="grid gap-3 rounded-lg border bg-card p-3.5">
+      <section className="grid gap-4 rounded-lg border bg-card p-3.5">
         <div className="flex items-center gap-3">
           <Stethoscope className="size-5 text-primary" />
           <div className="min-w-0 flex-1">
-            <p className="font-medium">Evolução clínica</p>
+            <p className="font-medium">Evolução clínica estruturada</p>
             <p className="text-sm text-muted-foreground">
-              Registre avaliação, exame, hipótese diagnóstica e conduta.
+              Formato SOAP para leitura rápida, continuidade assistencial e rastreabilidade.
             </p>
           </div>
           <Button type="button" variant="outline" size="sm" disabled={locked} onClick={() => setTemplatesOpen(true)}>
@@ -299,44 +302,50 @@ export function MedicalRecordForm({
             Modelos
           </Button>
         </div>
+        <div className="grid gap-2 text-xs sm:grid-cols-4">
+          <div className="rounded-md border bg-muted/20 px-3 py-2"><strong className="text-primary">S</strong><span className="ml-2 text-muted-foreground">Subjetivo</span></div>
+          <div className="rounded-md border bg-muted/20 px-3 py-2"><strong className="text-primary">O</strong><span className="ml-2 text-muted-foreground">Objetivo</span></div>
+          <div className="rounded-md border bg-muted/20 px-3 py-2"><strong className="text-primary">A</strong><span className="ml-2 text-muted-foreground">Avaliação</span></div>
+          <div className="rounded-md border bg-muted/20 px-3 py-2"><strong className="text-primary">P</strong><span className="ml-2 text-muted-foreground">Plano</span></div>
+        </div>
         <div className="grid gap-4 lg:grid-cols-2">
           <TextArea
-            label="Queixa principal"
+            label="S - Queixa principal"
             name="chief_complaint"
             defaultValue={record?.chief_complaint ?? detail.nursing_assessment?.chief_complaint}
             required={requiredFields.has("chief_complaint")}
             disabled={locked}
           />
           <TextArea
-            label="História clínica"
+            label="S - História clínica e contexto"
             name="history"
             defaultValue={record?.history}
             required={requiredFields.has("history")}
             disabled={locked}
           />
           <TextArea
-            label="Exame físico"
+            label="O - Exame físico e achados"
             name="physical_exam"
             defaultValue={record?.physical_exam}
             required={requiredFields.has("physical_exam")}
             disabled={locked}
           />
           <TextArea
-            label="Avaliação / hipótese"
+            label="A - Avaliação / hipótese"
             name="assessment"
             defaultValue={record?.assessment}
             required={requiredFields.has("assessment")}
             disabled={locked}
           />
           <Field
-            label="Diagnóstico"
+            label="Diagnóstico principal"
             name="diagnosis"
             defaultValue={record?.diagnosis}
             required={requiredFields.has("diagnosis")}
             disabled={locked}
           />
           <Field
-            label="CID-10"
+            label="CID-10 principal"
             name="cid10"
             defaultValue={record?.cid10}
             required={requiredFields.has("cid10")}
@@ -344,20 +353,10 @@ export function MedicalRecordForm({
             disabled={locked}
           />
         </div>
-        <TextArea
-          label="Plano terapêutico / conduta"
-          name="plan"
-          defaultValue={record?.plan}
-          required={requiredFields.has("plan")}
-          disabled={locked}
-        />
-        <TextArea
-          label="Orientações ao paciente"
-          name="patient_guidance"
-          defaultValue={record?.patient_guidance}
-          required={requiredFields.has("patient_guidance")}
-          disabled={locked}
-        />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <TextArea label="P - Plano terapêutico / conduta" name="plan" defaultValue={record?.plan} required={requiredFields.has("plan")} disabled={locked} />
+          <TextArea label="P - Orientações ao paciente" name="patient_guidance" defaultValue={record?.patient_guidance} required={requiredFields.has("patient_guidance")} disabled={locked} />
+        </div>
         <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
           <label className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm font-medium">
             <input
@@ -379,7 +378,7 @@ export function MedicalRecordForm({
         </div>
       </section>
 
-      <MedicalDocumentsPanel detail={detail} />
+      <MedicalDocumentsPanel detail={detail} branding={documentBranding} />
       <MedicalAttachmentsPanel detail={detail} />
       <MedicalTimelinePanel events={detail.timeline} />
 

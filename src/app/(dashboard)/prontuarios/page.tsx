@@ -112,7 +112,7 @@ export default async function ProntuariosPage({
         <div className="grid gap-5">
           <section className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
             <div className="flex items-center gap-2 text-sm"><Activity className="size-4 text-primary" /><span className="font-medium">Operação clínica</span><span className="text-muted-foreground">dados restritos à clínica ativa</span></div>
-            <RealtimeClinicSync clinicId={activeClinic.id} tables={["clinical_encounters"]} visible />
+            <RealtimeClinicSync clinicId={activeClinic.id} tables={["clinical_encounters"]} />
           </section>
           <MedicalLgpdAckCard acceptedAt={lgpdAck?.accepted_at} />
           <div className="grid gap-3 lg:grid-cols-3">

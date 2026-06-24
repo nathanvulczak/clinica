@@ -390,6 +390,13 @@ export type FinancialEntryStatus = "pending" | "partial" | "paid" | "overdue" | 
 export type FinancialPaymentStatus = "confirmed" | "reversed";
 export type FinancialReconciliationStatus = "closed" | "reversed";
 export type FinancialCommissionStatus = "pending" | "approved" | "paid" | "cancelled";
+export type FinancialCommissionSettlementStatus =
+  | "draft"
+  | "approved"
+  | "scheduled"
+  | "paid"
+  | "reversed"
+  | "cancelled";
 export type FinancialBankImportStatus = "processing" | "ready" | "completed" | "cancelled" | "failed";
 export type FinancialBankImportItemStatus = "pending" | "matched" | "ignored" | "reconciled";
 export type FinancialDocumentType = "nfe" | "nfse" | "receipt" | "contract" | "other";
@@ -635,10 +642,57 @@ export type FinancialCommission = {
   paid_at: string | null;
   settled_by: string | null;
   settlement_entry_id: string | null;
+  settlement_id: string | null;
   cancelled_at: string | null;
   cancelled_by: string | null;
   cancellation_reason: string | null;
   notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FinancialCommissionSettlement = {
+  id: string;
+  clinic_id: string;
+  professional_member_id: string;
+  period_start: string;
+  period_end: string;
+  competence_date: string;
+  due_date: string;
+  status: FinancialCommissionSettlementStatus;
+  commission_count: number;
+  base_amount_cents: number;
+  amount_cents: number;
+  payable_entry_id: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
+  scheduled_at: string | null;
+  scheduled_by: string | null;
+  paid_at: string | null;
+  paid_by: string | null;
+  reversed_at: string | null;
+  reversed_by: string | null;
+  reversal_reason: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancellation_reason: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ClinicBrandingSettings = {
+  id: string;
+  clinic_id: string;
+  primary_color: string;
+  document_header: string | null;
+  document_footer: string | null;
+  horizontal_logo_path: string | null;
+  compact_logo_path: string | null;
+  vertical_logo_path: string | null;
+  show_legal_name: boolean;
+  show_document: boolean;
+  show_contact: boolean;
   created_at: string;
   updated_at: string;
 };

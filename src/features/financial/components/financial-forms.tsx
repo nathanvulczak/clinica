@@ -10,6 +10,7 @@ import {
   completeFinancialBankImportAction,
   closeFinancialMonthAction,
   createEncounterChargeAction,
+  createFinancialCommissionSettlementAction,
   createFinancialReconciliationAction,
   generateFinancialCommissionsAction,
   deleteFinancialBankImportAction,
@@ -31,7 +32,6 @@ import {
   savePaymentMethodAction,
   saveVendorAction,
   settleFinancialEntryAction,
-  settleFinancialCommissionAction,
   updateFinancialCommissionStatusAction,
   type FinancialActionState,
 } from "@/features/financial/actions";
@@ -1231,10 +1231,13 @@ export function CommissionStatusForm({ commission, actionType, onCompleted }: { 
   return <form action={action} className="grid gap-4"><input type="hidden" name="commission_id" value={commission.id} /><input type="hidden" name="action" value={actionType} /><div className="rounded-md border bg-muted/20 p-3 text-sm">Valor do repasse: <strong>{formatCurrencyBRL(commission.commission_cents)}</strong></div>{actionType === "cancel" ? <TextArea name="reason" label="Motivo do cancelamento" /> : null}<div className="flex justify-end"><Button variant={actionType === "cancel" ? "destructive" : "default"} disabled={pending}>{pending ? "Confirmando..." : actionType === "approve" ? "Aprovar comissão" : "Cancelar comissão"}</Button></div></form>;
 }
 
-export function CommissionSettlementForm({ commission, accounts, paymentMethods, onCompleted }: { commission: FinancialCommission; accounts: FinancialAccount[]; paymentMethods: FinancialPaymentMethod[]; onCompleted?: () => void }) {
-  const [state, action, pending] = useActionState(settleFinancialCommissionAction, {});
+export function CommissionSettlementForm({ commission, professionals, onCompleted }: { commission?: FinancialCommission | null; professionals: Array<{ id: string; profile: { full_name: string } | null }>; onCompleted?: () => void }) {
+  const [state, action, pending] = useActionState(createFinancialCommissionSettlementAction, {});
   useActionToast(state, onCompleted);
-  return <form action={action} className="grid gap-4"><input type="hidden" name="commission_id" value={commission.id} /><div className="rounded-md border bg-muted/20 p-3 text-sm">Repasse aprovado: <strong>{formatCurrencyBRL(commission.commission_cents)}</strong>. O pagamento criará uma conta paga e um movimento no livro-caixa.</div><div className="grid gap-4 lg:grid-cols-2"><label className="grid gap-2 text-sm font-medium">Conta de saída<Select name="account_id" required defaultValue=""><option value="" disabled>Selecione</option>{accounts.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label><label className="grid gap-2 text-sm font-medium">Forma de pagamento<Select name="payment_method_id" defaultValue="none"><option value="none">Não informada</option>{paymentMethods.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label><Field name="paid_at" label="Data e hora do pagamento" type="datetime-local" defaultValue={new Date().toISOString().slice(0, 16)} required /></div><TextArea name="notes" label="Observações do acerto" /><div className="flex justify-end"><Button disabled={pending || !accounts.length}><ReceiptText />{pending ? "Registrando..." : "Confirmar pagamento"}</Button></div></form>;
+  const now = new Date();
+  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+  return <form action={action} className="grid gap-4"><div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">O sistema agrupa as comissões aprovadas do período e cria uma <strong className="text-foreground">conta a pagar em aberto</strong>. Baixa, estorno e conciliação seguem o fluxo financeiro normal.</div><label className="grid gap-2 text-sm font-medium">Profissional<Select name="professional_member_id" required defaultValue={commission?.professional_member_id ?? ""}><option value="" disabled>Selecione o profissional</option>{professionals.map((item) => <option key={item.id} value={item.id}>{item.profile?.full_name ?? "Profissional"}</option>)}</Select></label><div className="grid gap-4 lg:grid-cols-2"><Field name="period_start" label="Início da apuração" type="date" defaultValue={periodStart} required /><Field name="period_end" label="Fim da apuração" type="date" defaultValue={periodEnd} required /><Field name="competence_date" label="Competência" type="date" defaultValue={periodStart} required /><Field name="due_date" label="Vencimento do repasse" type="date" defaultValue={periodEnd} required /></div><TextArea name="notes" label="Observações do acerto" /><div className="flex justify-end"><Button disabled={pending || !professionals.length}><ReceiptText />{pending ? "Programando..." : "Programar acerto"}</Button></div></form>;
 }
 
 export function BankStatementImportForm({ accounts, onCompleted }: { accounts: FinancialAccount[]; onCompleted?: () => void }) {

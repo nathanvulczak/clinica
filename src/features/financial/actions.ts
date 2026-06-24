@@ -8,6 +8,7 @@ import {
   cancelFinancialEntrySchema,
   cardMachineSchema,
   commissionRuleSchema,
+  commissionSettlementSchema,
   commissionStatusSchema,
   costCenterSchema,
   encounterChargeSchema,
@@ -1101,6 +1102,33 @@ export async function cancelFinancialEntryAction(
   const { error } = await admin.from("financial_entries").update(payload).eq("id", entry.id);
   if (error) return { error: financialError(error, "Não foi possível cancelar o lançamento.") };
 
+  if (entry.origin === "commission") {
+    const { data: settlement } = await admin
+      .from("financial_commission_settlements")
+      .select("id")
+      .eq("payable_entry_id", entry.id)
+      .eq("clinic_id", context.activeClinic.id)
+      .is("deleted_at", null)
+      .maybeSingle<{ id: string }>();
+    if (settlement) {
+      await Promise.all([
+        admin.from("financial_commission_settlements").update({
+          status: "cancelled",
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: context.user.id,
+          cancellation_reason: parsed.data.reason,
+          updated_by: context.user.id,
+        }).eq("id", settlement.id),
+        admin.from("financial_commissions").update({
+          status: "approved",
+          settlement_id: null,
+          settlement_entry_id: null,
+          updated_by: context.user.id,
+        }).eq("settlement_id", settlement.id).neq("status", "cancelled"),
+      ]);
+    }
+  }
+
   await logAuditEvent({
     clinicId: context.activeClinic.id,
     userId: context.user.id,
@@ -1352,6 +1380,31 @@ export async function settleFinancialEntryAction(
       .eq("id", entry.encounter_id);
   }
 
+  if (entry.origin === "commission" && nextStatus === "paid") {
+    const { data: settlement } = await admin
+      .from("financial_commission_settlements")
+      .select("id")
+      .eq("payable_entry_id", entry.id)
+      .eq("clinic_id", context.activeClinic.id)
+      .is("deleted_at", null)
+      .maybeSingle<{ id: string }>();
+
+    if (settlement) {
+      const paidAt = new Date(parsed.data.paid_at).toISOString();
+      await Promise.all([
+        admin
+          .from("financial_commission_settlements")
+          .update({ status: "paid", paid_at: paidAt, paid_by: context.user.id, updated_by: context.user.id })
+          .eq("id", settlement.id),
+        admin
+          .from("financial_commissions")
+          .update({ status: "paid", paid_at: paidAt, settled_by: context.user.id, updated_by: context.user.id })
+          .eq("settlement_id", settlement.id)
+          .neq("status", "cancelled"),
+      ]);
+    }
+  }
+
   const receiptId =
     entry.entry_type === "receivable"
       ? await createReceipt({
@@ -1447,6 +1500,38 @@ export async function reverseFinancialPaymentAction(
     .from("financial_entries")
     .update({ paid_cents: nextPaid, status: nextStatus, updated_by: context.user.id })
     .eq("id", entry.id);
+
+  if (entry.origin === "commission") {
+    const { data: settlement } = await admin
+      .from("financial_commission_settlements")
+      .select("id")
+      .eq("payable_entry_id", entry.id)
+      .eq("clinic_id", context.activeClinic.id)
+      .is("deleted_at", null)
+      .maybeSingle<{ id: string }>();
+
+    if (settlement) {
+      await Promise.all([
+        admin
+          .from("financial_commission_settlements")
+          .update({
+            status: "reversed",
+            paid_at: null,
+            paid_by: null,
+            reversed_at: new Date().toISOString(),
+            reversed_by: context.user.id,
+            reversal_reason: parsed.data.reason,
+            updated_by: context.user.id,
+          })
+          .eq("id", settlement.id),
+        admin
+          .from("financial_commissions")
+          .update({ status: "approved", paid_at: null, settled_by: null, updated_by: context.user.id })
+          .eq("settlement_id", settlement.id)
+          .eq("status", "paid"),
+      ]);
+    }
+  }
 
   if (payment.account_id) {
     await admin.rpc("increment_financial_account_balance", {
@@ -2031,7 +2116,7 @@ export async function updateFinancialCommissionStatusAction(
   const parsed = commissionStatusSchema.safeParse({
     commission_id: formData.get("commission_id"),
     action: formData.get("action"),
-    reason: formData.get("reason"),
+    reason: formData.get("reason") || undefined,
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Ação inválida." };
   const context = await getFinancialContext();
@@ -2049,6 +2134,76 @@ export async function updateFinancialCommissionStatusAction(
   await logAuditEvent({ clinicId: context.activeClinic.id, userId: context.user.id, actionType: parsed.data.action === "approve" ? "financial_commission_approved" : "financial_commission_cancelled", module: "financial", recordTable: "financial_commissions", recordId: parsed.data.commission_id, oldValues: previous, newValues: payload, level: parsed.data.action === "cancel" ? "critical" : "info", notes: parsed.data.reason });
   revalidateFinancial();
   return { success: parsed.data.action === "approve" ? "Comissão aprovada para pagamento." : "Comissão cancelada com auditoria." };
+}
+
+export async function createFinancialCommissionSettlementAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = commissionSettlementSchema.safeParse({
+    professional_member_id: formData.get("professional_member_id"),
+    period_start: formData.get("period_start"),
+    period_end: formData.get("period_end"),
+    competence_date: formData.get("competence_date"),
+    due_date: formData.get("due_date"),
+    notes: formData.get("notes") || undefined,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados do acerto inválidos." };
+  }
+
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canApprove && !context.access.canManage) {
+    return { error: "Você não possui permissão para programar acertos de comissão." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin.rpc("create_financial_commission_settlement", {
+    clinic_uuid: context.activeClinic.id,
+    professional_uuid: parsed.data.professional_member_id,
+    period_start_value: parsed.data.period_start,
+    period_end_value: parsed.data.period_end,
+    competence_value: parsed.data.competence_date,
+    due_value: parsed.data.due_date,
+    notes_value: parsed.data.notes,
+    actor_uuid: context.user.id,
+  });
+
+  if (error) {
+    const message = error.message.toLowerCase();
+    if (message.includes("commission_items_not_found")) {
+      return { error: "Não há comissões aprovadas e livres para este profissional no período informado." };
+    }
+    if (message.includes("commission_professional_not_found")) {
+      return { error: "O profissional selecionado não está ativo nesta clínica." };
+    }
+    return { error: financialError(error, "Não foi possível programar o acerto de comissão.") };
+  }
+
+  const result = Array.isArray(data) ? data[0] : data;
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "financial_commission_settlement_scheduled",
+    module: "financial",
+    recordTable: "financial_commission_settlements",
+    recordId: result?.settlement_id,
+    newValues: {
+      ...parsed.data,
+      payable_entry_id: result?.payable_entry_id,
+      commission_count: result?.commission_count,
+      amount_cents: result?.amount_cents,
+      status: "scheduled",
+    },
+    level: "security",
+    notes: "Acerto programado e lançado em Contas a pagar.",
+  });
+
+  revalidateFinancial();
+  return {
+    success: `Acerto programado com ${result?.commission_count ?? 0} comissão(ões). A conta já está disponível em Pagamentos.`,
+  };
 }
 
 export async function settleFinancialCommissionAction(

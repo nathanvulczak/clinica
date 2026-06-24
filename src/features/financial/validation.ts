@@ -253,6 +253,25 @@ export const settleCommissionSchema = z.object({
   notes: optionalText,
 });
 
+export const commissionSettlementSchema = z
+  .object({
+    professional_member_id: z.string().uuid(),
+    period_start: z.string().date(),
+    period_end: z.string().date(),
+    competence_date: z.string().date(),
+    due_date: z.string().date(),
+    notes: optionalText,
+  })
+  .superRefine((value, context) => {
+    if (value.period_end < value.period_start) {
+      context.addIssue({
+        code: "custom",
+        path: ["period_end"],
+        message: "A data final deve ser igual ou posterior à data inicial.",
+      });
+    }
+  });
+
 export const reverseReconciliationSchema = z.object({
   reconciliation_id: z.string().uuid(),
   reason: z.string().trim().min(8, "Informe o motivo para reabrir a conciliação.").max(700),
