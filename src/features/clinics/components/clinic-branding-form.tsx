@@ -1,12 +1,13 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { FileImage, Save, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
-import { saveClinicBrandingAction } from "@/features/clinics/branding-actions";
+import { saveClinicBrandingAction, uploadClinicBrandingLogoAction } from "@/features/clinics/branding-actions";
 import type { ClinicBrandingView } from "@/repositories/clinic-branding";
 
 type LogoFieldProps = {
@@ -16,9 +17,10 @@ type LogoFieldProps = {
   hint: string;
   currentUrl: string | null;
   previewClass: string;
+  onValidationError: (message: string) => void;
 };
 
-function LogoField({ id, name, label, hint, currentUrl, previewClass }: LogoFieldProps) {
+function LogoField({ id, name, label, hint, currentUrl, previewClass, onValidationError }: LogoFieldProps) {
   const [preview, setPreview] = useState<string | null>(currentUrl);
   const localUrl = useRef<string | null>(null);
 
@@ -45,6 +47,16 @@ function LogoField({ id, name, label, hint, currentUrl, previewClass }: LogoFiel
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (!file) return;
+          if (file.size > 2 * 1024 * 1024) {
+            event.currentTarget.value = "";
+            onValidationError("Cada imagem deve ter no máximo 2 MB.");
+            return;
+          }
+          if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+            event.currentTarget.value = "";
+            onValidationError("Use somente imagens JPG, PNG ou WEBP.");
+            return;
+          }
           if (localUrl.current) URL.revokeObjectURL(localUrl.current);
           localUrl.current = URL.createObjectURL(file);
           setPreview(localUrl.current);
@@ -55,32 +67,76 @@ function LogoField({ id, name, label, hint, currentUrl, previewClass }: LogoFiel
 }
 
 export function ClinicBrandingForm({ branding }: { branding: ClinicBrandingView }) {
-  const [state, action, pending] = useActionState(saveClinicBrandingAction, {});
+  const [pending, setPending] = useState(false);
+  const [progress, setProgress] = useState("");
   const { toast } = useToast();
-  const notified = useRef<string | null>(null);
+  const router = useRouter();
 
-  useEffect(() => {
-    const message = state.error ?? state.success;
-    if (!message || notified.current === message) return;
-    notified.current = message;
-    toast({
-      title: state.error ? "Não foi possível salvar" : "Identidade atualizada",
-      description: message,
-      variant: state.error ? "destructive" : "default",
-    });
-  }, [state.error, state.success, toast]);
+  function showError(message: string) {
+    toast({ title: "Não foi possível salvar", description: message, variant: "destructive" });
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+    setPending(true);
+    const source = new FormData(event.currentTarget);
+    const uploads = [
+      { variant: "horizontal", field: "horizontal_logo_file", label: "marca horizontal" },
+      { variant: "compact", field: "compact_logo_file", label: "marca compacta" },
+      { variant: "vertical", field: "vertical_logo_file", label: "marca vertical" },
+    ];
+
+    try {
+      for (const upload of uploads) {
+        const file = source.get(upload.field);
+        if (!(file instanceof File) || file.size === 0) continue;
+        setProgress(`Processando ${upload.label}...`);
+        const logoData = new FormData();
+        logoData.set("variant", upload.variant);
+        logoData.set("logo_file", file);
+        const result = await uploadClinicBrandingLogoAction(logoData);
+        if (result.error) {
+          showError(result.error);
+          return;
+        }
+      }
+
+      setProgress("Salvando padrão institucional...");
+      const settings = new FormData();
+      for (const field of ["primary_color", "document_header", "document_footer"]) {
+        const value = source.get(field);
+        if (typeof value === "string") settings.set(field, value);
+      }
+      for (const field of ["show_legal_name", "show_document", "show_contact"]) {
+        if (source.has(field)) settings.set(field, "on");
+      }
+      const result = await saveClinicBrandingAction({}, settings);
+      if (result.error) {
+        showError(result.error);
+        return;
+      }
+      toast({ title: "Identidade atualizada", description: result.success ?? "Marcas e preferências salvas." });
+      router.refresh();
+    } catch {
+      showError("A conexão foi interrompida durante o envio. Tente novamente.");
+    } finally {
+      setProgress("");
+      setPending(false);
+    }
+  }
 
   return (
-    <form action={action} className="grid gap-5">
+    <form onSubmit={handleSubmit} className="grid gap-5">
       <section className="rounded-lg border bg-card">
         <div className="border-b px-4 py-3">
           <h2 className="text-sm font-semibold">Marcas para documentos</h2>
           <p className="mt-1 text-xs text-muted-foreground">O sistema otimiza as imagens e escolhe a versão adequada em cada documento.</p>
         </div>
         <div className="grid gap-3 p-4 xl:grid-cols-3">
-          <LogoField id="horizontal_logo_file" name="horizontal_logo_file" label="Marca principal horizontal" hint="Cabeçalhos de prontuários, relatórios e recibos. Mínimo 400 x 100 px." currentUrl={branding.horizontal_logo_url} previewClass="h-16 w-36" />
-          <LogoField id="compact_logo_file" name="compact_logo_file" label="Marca compacta" hint="Espaços reduzidos e identificação rápida. Preferencialmente quadrada, mínimo 200 x 200 px." currentUrl={branding.compact_logo_url} previewClass="size-16" />
-          <LogoField id="vertical_logo_file" name="vertical_logo_file" label="Marca vertical" hint="Capas e documentos com composição vertical. Mínimo 220 x 360 px." currentUrl={branding.vertical_logo_url} previewClass="h-20 w-14" />
+          <LogoField id="horizontal_logo_file" name="horizontal_logo_file" label="Marca principal horizontal" hint="Cabeçalhos de prontuários, relatórios e recibos. Mínimo 400 x 100 px, máximo 2 MB." currentUrl={branding.horizontal_logo_url} previewClass="h-16 w-36" onValidationError={showError} />
+          <LogoField id="compact_logo_file" name="compact_logo_file" label="Marca compacta" hint="Espaços reduzidos e identificação rápida. Preferencialmente quadrada, mínimo 200 x 200 px, máximo 2 MB." currentUrl={branding.compact_logo_url} previewClass="size-16" onValidationError={showError} />
+          <LogoField id="vertical_logo_file" name="vertical_logo_file" label="Marca vertical" hint="Capas e documentos com composição vertical. Mínimo 220 x 360 px, máximo 2 MB." currentUrl={branding.vertical_logo_url} previewClass="h-20 w-14" onValidationError={showError} />
         </div>
       </section>
 
@@ -105,7 +161,7 @@ export function ClinicBrandingForm({ branding }: { branding: ClinicBrandingView 
       </section>
 
       <div className="sticky bottom-3 z-10 flex justify-end rounded-lg border bg-card/95 p-3 shadow-sm backdrop-blur">
-        <Button disabled={pending}><Upload className={pending ? "animate-pulse" : "hidden"} />{pending ? "Processando imagens..." : <><Save />Salvar identidade</>}</Button>
+        <Button type="submit" disabled={pending}><Upload className={pending ? "animate-pulse" : "hidden"} />{pending ? progress || "Processando..." : <><Save />Salvar identidade</>}</Button>
       </div>
     </form>
   );

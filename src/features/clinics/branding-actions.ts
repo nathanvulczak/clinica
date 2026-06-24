@@ -37,6 +37,79 @@ async function prepareLogo(file: File, variant: keyof typeof VARIANTS) {
   return image.rotate().resize(config.width, config.height, { fit: "inside", withoutEnlargement: true }).webp({ quality: 88, effort: 4 }).toBuffer();
 }
 
+async function getBrandingContext() {
+  const [{ activeClinic }, supabase] = await Promise.all([getActiveClinicContext(), createSupabaseServerClient()]);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user || !activeClinic) return { error: "Sessão ou clínica ativa não identificada." } as const;
+  const authorization = await getClinicAuthorization(activeClinic.id);
+  if (!authorization.can("clinics", "edit")) return { error: "Você não possui permissão para alterar a identidade da clínica." } as const;
+  return { activeClinic, user, admin: createSupabaseAdminClient() };
+}
+
+export async function uploadClinicBrandingLogoAction(formData: FormData): Promise<ClinicBrandingActionState> {
+  const variantValue = String(formData.get("variant") ?? "");
+  if (!(variantValue in VARIANTS)) return { error: "Tipo de marca não identificado." };
+  const variant = variantValue as keyof typeof VARIANTS;
+  const file = formData.get("logo_file");
+  if (!(file instanceof File) || file.size === 0) return { error: "Selecione uma imagem para enviar." };
+
+  const context = await getBrandingContext();
+  if ("error" in context) return { error: context.error };
+  const { activeClinic, user, admin } = context;
+  const config = VARIANTS[variant];
+  const { data: previous } = await admin
+    .from("clinic_branding_settings")
+    .select("*")
+    .eq("clinic_id", activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle<ClinicBrandingSettings>();
+
+  let optimized: Buffer;
+  try {
+    optimized = await prepareLogo(file, variant);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Não foi possível processar a imagem." };
+  }
+
+  const path = `${activeClinic.id}/${variant}-${crypto.randomUUID()}.webp`;
+  const { error: uploadError } = await admin.storage.from(BUCKET).upload(path, optimized, {
+    contentType: "image/webp",
+    cacheControl: "31536000",
+    upsert: false,
+  });
+  if (uploadError) return { error: "Não foi possível armazenar a imagem. Tente novamente." };
+
+  const payload = {
+    clinic_id: activeClinic.id,
+    [config.column]: path,
+    deleted_at: null,
+    updated_by: user.id,
+    ...(previous ? {} : { created_by: user.id }),
+  };
+  const { error } = await admin.from("clinic_branding_settings").upsert(payload, { onConflict: "clinic_id" });
+  if (error) {
+    await admin.storage.from(BUCKET).remove([path]);
+    return { error: "A imagem foi processada, mas não foi possível vinculá-la à clínica." };
+  }
+
+  const oldPath = previous?.[config.column];
+  if (oldPath) await admin.storage.from(BUCKET).remove([oldPath]);
+  await logAuditEvent({
+    clinicId: activeClinic.id,
+    userId: user.id,
+    actionType: "clinic_branding_logo_uploaded",
+    module: "clinics",
+    recordTable: "clinic_branding_settings",
+    recordId: previous?.id,
+    oldValues: oldPath ? { [config.column]: oldPath } : null,
+    newValues: { variant, [config.column]: path },
+    level: "security",
+    notes: `Marca ${variant} atualizada e otimizada.`,
+  });
+  revalidatePath("/clinicas/identidade");
+  return { success: `Marca ${variant === "compact" ? "compacta" : variant} enviada.` };
+}
+
 export async function saveClinicBrandingAction(
   _state: ClinicBrandingActionState,
   formData: FormData,
@@ -51,55 +124,26 @@ export async function saveClinicBrandingAction(
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados de identidade inválidos." };
 
-  const [{ activeClinic }, supabase] = await Promise.all([getActiveClinicContext(), createSupabaseServerClient()]);
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user || !activeClinic) return { error: "Sessão ou clínica ativa não identificada." };
-  const authorization = await getClinicAuthorization(activeClinic.id);
-  if (!authorization.can("clinics", "edit")) return { error: "Você não possui permissão para alterar a identidade da clínica." };
-
-  const admin = createSupabaseAdminClient();
+  const context = await getBrandingContext();
+  if ("error" in context) return { error: context.error };
+  const { activeClinic, user, admin } = context;
   const { data: previous } = await admin
     .from("clinic_branding_settings")
     .select("*")
     .eq("clinic_id", activeClinic.id)
     .is("deleted_at", null)
     .maybeSingle<ClinicBrandingSettings>();
-  const logoPaths: Record<string, string | null> = {
-    horizontal_logo_path: previous?.horizontal_logo_path ?? null,
-    compact_logo_path: previous?.compact_logo_path ?? null,
-    vertical_logo_path: previous?.vertical_logo_path ?? null,
-  };
-  const oldPaths: string[] = [];
-
-  try {
-    for (const [variant, config] of Object.entries(VARIANTS) as Array<[keyof typeof VARIANTS, (typeof VARIANTS)[keyof typeof VARIANTS]]>) {
-      const file = formData.get(config.field);
-      if (!(file instanceof File) || file.size === 0) continue;
-      const optimized = await prepareLogo(file, variant);
-      const path = `${activeClinic.id}/${variant}-${crypto.randomUUID()}.webp`;
-      const { error } = await admin.storage.from(BUCKET).upload(path, optimized, { contentType: "image/webp", cacheControl: "31536000", upsert: false });
-      if (error) throw new Error("Não foi possível armazenar uma das imagens. Tente novamente.");
-      const oldPath = logoPaths[config.column];
-      if (oldPath) oldPaths.push(oldPath);
-      logoPaths[config.column] = path;
-    }
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : "Não foi possível processar as imagens." };
-  }
-
   const payload = {
     clinic_id: activeClinic.id,
     ...parsed.data,
     document_header: parsed.data.document_header || null,
     document_footer: parsed.data.document_footer || null,
-    ...logoPaths,
     deleted_at: null,
     updated_by: user.id,
     ...(previous ? {} : { created_by: user.id }),
   };
   const { error } = await admin.from("clinic_branding_settings").upsert(payload, { onConflict: "clinic_id" });
   if (error) return { error: "Não foi possível salvar a identidade documental da clínica." };
-  if (oldPaths.length) await admin.storage.from(BUCKET).remove(oldPaths);
 
   await logAuditEvent({
     clinicId: activeClinic.id,
