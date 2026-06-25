@@ -125,6 +125,7 @@ export type NavigationKey =
   | "members"
   | "billing"
   | "audit"
+  | "backup"
   | "profile"
   | "schedule"
   | "encounters"
@@ -152,6 +153,9 @@ export function getAllowedNavigation(
   }
   if (authorization.can("billing", "view")) allowed.add("billing");
   if (authorization.can("audit", "view")) allowed.add("audit");
+  if (authorization.can("audit", "export") || authorization.can("clinics", "edit")) {
+    allowed.add("backup");
+  }
   if (authorization.can("schedule", "view")) allowed.add("schedule");
   if (
     authorization.can("schedule", "manage") ||

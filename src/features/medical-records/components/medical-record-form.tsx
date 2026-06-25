@@ -96,6 +96,15 @@ function TextArea({
   );
 }
 
+function ClinicalFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border bg-muted/20 px-3 py-2">
+      <p className="text-[11px] font-medium uppercase text-muted-foreground">{label}</p>
+      <p className="mt-1 truncate text-sm font-medium">{value}</p>
+    </div>
+  );
+}
+
 function NursingSummary({ detail }: { detail: MedicalRecordEncounterDetail }) {
   const assessment = detail.nursing_assessment;
 
@@ -214,6 +223,17 @@ export function MedicalRecordForm({
 
   const canComplete = ["ready_for_consultation", "consultation_in_progress"].includes(detail.status);
   const patientName = detail.patient?.social_name || detail.patient?.full_name || "Paciente";
+  const professionalName = detail.professional?.profile?.full_name || "Profissional não informado";
+  const professionalRegistration = detail.professional_profile?.council_number
+    ? [
+        detail.professional_profile.council_type,
+        detail.professional_profile.council_number,
+        detail.professional_profile.council_state,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : "Registro profissional não informado";
+  const appointmentTime = formatDate(detail.appointment?.starts_at);
   const isCompleted = record?.status === "completed";
   const locked = isCompleted && !correctionMode;
   const templateTargets = ["history", "physical_exam", "assessment", "plan", "patient_guidance"] as const;
@@ -257,6 +277,12 @@ export function MedicalRecordForm({
               {formatDate(detail.appointment?.starts_at)}
             </p>
           </div>
+        </div>
+        <div className="grid gap-2 lg:grid-cols-4">
+          <ClinicalFact label="Paciente" value={patientName} />
+          <ClinicalFact label="Profissional" value={professionalName} />
+          <ClinicalFact label="Registro" value={professionalRegistration} />
+          <ClinicalFact label="Atendimento" value={appointmentTime} />
         </div>
         {detail.patient?.clinical_alerts ? (
           <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">

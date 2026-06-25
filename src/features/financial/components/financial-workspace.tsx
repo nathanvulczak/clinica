@@ -40,6 +40,17 @@ import { FinancialOverview } from "@/features/financial/components/financial-ove
 import { EmptyState, FinancialPanelHeader, MetricCard } from "@/features/financial/components/financial-ui";
 import { PendingEncounterChargesPanel } from "@/features/financial/components/pending-encounter-charges-panel";
 import {
+  financialDocumentTypeLabel as documentTypeLabel,
+  financialEntryEventLabels as entryEventLabels,
+  financialFrequencyLabel as frequencyLabel,
+  financialStatusLabels as statusLabels,
+  formatFinancialDate as formatDate,
+  formatFinancialDateTime as formatDateTime,
+  openEntryCents,
+  totalEntryCents,
+} from "@/features/financial/financial-formatters";
+import { normalizeFinancialWorkspaceData } from "@/features/financial/financial-normalize";
+import {
   CancelFinancialEntryForm,
   BankStatementImportForm,
   CardMachineForm,
@@ -72,75 +83,6 @@ import { formatCurrencyBRL } from "@/lib/utils";
 import type { FinancialPayment, FinancialPreferences } from "@/types/domain";
 import type { FinancialEntryWithRelations, FinancialWorkspace as FinancialWorkspaceData } from "@/repositories/financial";
 
-const statusLabels: Record<string, string> = {
-  pending: "Em aberto",
-  partial: "Parcial",
-  paid: "Pago",
-  overdue: "Vencido",
-  cancelled: "Cancelado",
-  refunded: "Estornado",
-};
-
-const entryEventLabels: Record<string, string> = {
-  created: "Lançamento criado",
-  updated: "Lançamento atualizado",
-  settled: "Baixa registrada",
-  payment_reversed: "Pagamento estornado",
-  cancelled: "Lançamento cancelado",
-  receipt_issued: "Documento emitido",
-  reconciliation_closed: "Conciliação fechada",
-  reconciliation_reopened: "Conciliação reaberta",
-  ledger_posted: "Livro-caixa atualizado",
-};
-
-const documentTypeLabels: Record<string, string> = {
-  nfe: "NF-e",
-  nfse: "NFS-e",
-  receipt: "Recibo",
-  contract: "Contrato",
-  other: "Outro",
-};
-
-function documentTypeLabel(value: string | null | undefined) {
-  return documentTypeLabels[value ?? "other"] ?? "Outro";
-}
-
-function frequencyLabel(value: string) {
-  if (value === "weekly") return "Semanal";
-  if (value === "quarterly") return "Trimestral";
-  if (value === "yearly") return "Anual";
-  return "Mensal";
-}
-
-function totalEntryCents(entry: FinancialEntryWithRelations) {
-  return entry.amount_cents - entry.discount_cents + (entry.freight_cents ?? 0) + entry.addition_cents;
-}
-
-function openEntryCents(entry: FinancialEntryWithRelations) {
-  return Math.max(totalEntryCents(entry) - entry.paid_cents, 0);
-}
-
-function formatDate(value: string | null | undefined) {
-  if (!value) return "Não informado";
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date(value);
-  if (Number.isNaN(date.getTime())) return "Data inválida";
-  return new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "short",
-    timeZone: "America/Sao_Paulo",
-  }).format(date);
-}
-
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return "Não informado";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Data inválida";
-  return new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "short",
-    timeStyle: "short",
-    timeZone: "America/Sao_Paulo",
-  }).format(date);
-}
-
 export function FinancialWorkspace({
   data,
   section,
@@ -150,43 +92,7 @@ export function FinancialWorkspace({
   section: FinancialSection;
   activeView: FinancialSubsection;
 }) {
-  const safeData: FinancialWorkspaceData = {
-    ...data,
-    accounts: data.accounts ?? [],
-    paymentMethods: data.paymentMethods ?? [],
-    cardMachines: data.cardMachines ?? [],
-    categories: data.categories ?? [],
-    costCenters: data.costCenters ?? [],
-    healthPlans: data.healthPlans ?? [],
-    vendors: data.vendors ?? [],
-    entries: (data.entries ?? []).map((entry) => ({
-      ...entry,
-      payments: entry.payments ?? [],
-      receipts: entry.receipts ?? [],
-      items: entry.items ?? [],
-      events: entry.events ?? [],
-      ledgerEntries: entry.ledgerEntries ?? [],
-    })),
-    payments: data.payments ?? [],
-    recurringEntries: data.recurringEntries ?? [],
-    reconciliations: data.reconciliations ?? [],
-    commissionRules: data.commissionRules ?? [],
-    commissions: data.commissions ?? [],
-    commissionSettlements: data.commissionSettlements ?? [],
-    bankImports: (data.bankImports ?? []).map((item) => ({ ...item, items: item.items ?? [] })),
-    monthlyClosings: data.monthlyClosings ?? [],
-    professionals: data.professionals ?? [],
-    services: data.services ?? [],
-    pendingEncounterCharges: data.pendingEncounterCharges ?? [],
-    metrics: data.metrics ?? {
-      receivableOpenCents: 0,
-      receivablePaidCents: 0,
-      payableOpenCents: 0,
-      payablePaidCents: 0,
-      overdueCents: 0,
-      netCashCents: 0,
-    },
-  };
+  const safeData = normalizeFinancialWorkspaceData(data);
 
   if (section === "overview") return <FinancialOverview data={safeData} />;
   if (section === "receivables") return <ReceivablesWorkspace data={safeData} activeView={activeView} />;
@@ -1251,6 +1157,8 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
         <MetricCard label="Saldo líquido" value={formatCurrencyBRL(totalIn - totalOut)} description="Entradas menos saídas do período" />
       </div> : null}
 
+      {activeView === "close-period" ? <ReconciliationFlowGuide /> : null}
+
       {activeView === "statements" ? <div className="grid gap-3 lg:grid-cols-3">
         {data.accounts.filter((account) => activeAccountIds.includes(account.id)).map((account) => {
           const accountRows = rows.filter(({ payment }) => payment.account_id === account.id);
@@ -1337,6 +1245,38 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
       <Modal open={Boolean(detailing)} onOpenChange={(open) => { if (!open) setDetailing(null); }} title="Detalhes da conciliação" description="Resumo somente para consulta. Nenhum dado pode ser alterado aqui." className="max-w-5xl">{detailing ? <ReconciliationDetail reconciliation={detailing} rows={rows.filter(({ payment }) => payment.reconciliation_id === detailing.id)} /> : null}</Modal>
       <Modal open={Boolean(reversing)} onOpenChange={(open) => { if (!open) setReversing(null); }} title="Reabrir conciliação" description="Use somente para correção auditada de movimentos já conferidos." className="max-w-lg">{reversing ? <ReverseReconciliationForm reconciliation={reversing} onCompleted={() => setReversing(null)} /> : null}</Modal>
     </div>
+  );
+}
+
+function ReconciliationFlowGuide() {
+  const steps = [
+    {
+      title: "1. Conferir o extrato",
+      description: "Filtre período e conta, depois compare os movimentos do sistema com o extrato bancário.",
+    },
+    {
+      title: "2. Marcar movimentos",
+      description: "Selecione somente itens da mesma conta que realmente apareceram no banco.",
+    },
+    {
+      title: "3. Fechar conciliação",
+      description: "Informe saldo inicial/final. O sistema trava os movimentos conciliados para proteger o fechamento.",
+    },
+    {
+      title: "4. Corrigir com permissão",
+      description: "Se houver erro, reabra com motivo. A reabertura e novas alterações ficam auditadas.",
+    },
+  ];
+
+  return (
+    <section className="grid gap-2 rounded-lg border bg-card p-3.5 lg:grid-cols-4">
+      {steps.map((step) => (
+        <div key={step.title} className="rounded-md bg-muted/20 p-3">
+          <p className="text-sm font-medium">{step.title}</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{step.description}</p>
+        </div>
+      ))}
+    </section>
   );
 }
 

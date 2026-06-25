@@ -109,6 +109,7 @@ export const APP_NAVIGATION_MODULES: AppNavigationModule[] = [
       { label: "Clínicas", href: "/clinicas", navigationKey: "clinics" },
       { label: "Identidade e documentos", href: "/clinicas/identidade", navigationKey: "clinics" },
       { label: "Usuários e permissões", href: "/usuarios", navigationKey: "members" },
+      { label: "Backup", href: "/administracao/backup", navigationKey: "backup" },
       { label: "Assinatura", href: "/assinatura", navigationKey: "billing", separatorBefore: true },
       { label: "Auditoria", href: "/auditoria", navigationKey: "audit" },
     ],

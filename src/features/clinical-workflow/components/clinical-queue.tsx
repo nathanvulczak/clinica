@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -173,6 +173,14 @@ function ConfirmedWorkflowAction({
   const [state, formAction, pending] = useActionState(action, {});
 
   useWorkflowFeedback(state, () => setOpen(false));
+  const submitAction = () => {
+    const form = formRef.current;
+    if (!form) return;
+
+    startTransition(() => {
+      formAction(new FormData(form));
+    });
+  };
 
   return (
     <form ref={formRef} action={formAction}>
@@ -201,7 +209,7 @@ function ConfirmedWorkflowAction({
         title={title}
         description={description}
         confirmLabel={label}
-        onConfirm={() => formRef.current?.requestSubmit()}
+        onConfirm={submitAction}
       />
     </form>
   );
