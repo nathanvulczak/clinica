@@ -153,6 +153,16 @@ export const financialEntryItemInputSchema = z.object({
   description: z.string().trim().min(2, "Informe a descricao do item.").max(180),
   quantity: z.coerce.number().positive("Informe a quantidade do item.").max(999999),
   unit_amount: currencyString,
+  generate_stock: z.boolean().optional().default(false),
+  inventory_item_id: optionalUuid,
+  inventory_location_id: optionalUuid,
+  batch_number: optionalText,
+  expires_at: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Informe a validade no formato correto.")
+    .optional()
+    .or(z.literal(""))
+    .transform((value) => value || null),
 });
 
 export const cancelFinancialEntrySchema = z.object({

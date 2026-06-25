@@ -56,6 +56,8 @@ import type {
   FinancialReconciliation,
   FinancialRecurringEntry,
   FinancialVendor,
+  InventoryItem,
+  InventoryLocation,
 } from "@/types/domain";
 
 function useActionToast(state: FinancialActionState, onCompleted?: (state: FinancialActionState) => void) {
@@ -296,6 +298,11 @@ type PayableItemDraft = {
   description: string;
   quantity: string;
   unit_amount: string;
+  generate_stock: boolean;
+  inventory_item_id: string;
+  inventory_location_id: string;
+  batch_number: string;
+  expires_at: string;
 };
 
 function createPayableItemDraft(item?: FinancialEntryItem, index = 0): PayableItemDraft {
@@ -304,6 +311,11 @@ function createPayableItemDraft(item?: FinancialEntryItem, index = 0): PayableIt
     description: item?.description ?? "",
     quantity: item ? String(item.quantity).replace(".", ",") : "1",
     unit_amount: centsToInput(item?.unit_amount_cents),
+    generate_stock: item?.generate_stock ?? false,
+    inventory_item_id: item?.inventory_item_id ?? "none",
+    inventory_location_id: item?.inventory_location_id ?? "none",
+    batch_number: item?.batch_number ?? "",
+    expires_at: item?.expires_at ?? "",
   };
 }
 
@@ -594,6 +606,8 @@ export function FinancialEntryForm({
   costCenters,
   healthPlans,
   vendors,
+  inventoryItems = [],
+  inventoryLocations = [],
   onCompleted,
 }: {
   entry?: (FinancialEntry & { items?: FinancialEntryItem[] }) | null;
@@ -602,6 +616,8 @@ export function FinancialEntryForm({
   costCenters: FinancialCostCenter[];
   healthPlans: FinancialHealthPlan[];
   vendors: FinancialVendor[];
+  inventoryItems?: InventoryItem[];
+  inventoryLocations?: InventoryLocation[];
   onCompleted?: () => void;
 }) {
   const [state, action, pending] = useActionState(saveFinancialEntryAction, {});
@@ -618,6 +634,11 @@ export function FinancialEntryForm({
           description: item.description.trim(),
           quantity: Number(item.quantity.replace(",", ".")),
           unit_amount: item.unit_amount,
+          generate_stock: item.generate_stock,
+          inventory_item_id: item.generate_stock && item.inventory_item_id !== "none" ? item.inventory_item_id : null,
+          inventory_location_id: item.generate_stock && item.inventory_location_id !== "none" ? item.inventory_location_id : null,
+          batch_number: item.generate_stock ? item.batch_number.trim() || null : null,
+          expires_at: item.generate_stock ? item.expires_at || null : null,
         }))
         .filter((item) => item.description || inputToCents(item.unit_amount) > 0),
     [items],
@@ -628,7 +649,7 @@ export function FinancialEntryForm({
   );
   const hasPayableItems = effectiveType === "payable" && normalizedItems.length > 0;
 
-  function updateItem(id: string, key: keyof Omit<PayableItemDraft, "id">, value: string) {
+  function updateItem(id: string, key: keyof Omit<PayableItemDraft, "id">, value: string | boolean) {
     setItems((current) => current.map((item) => (item.id === id ? { ...item, [key]: value } : item)));
   }
 
@@ -717,11 +738,11 @@ export function FinancialEntryForm({
         <MoneyInput name="addition" label="Acréscimos" defaultValue={centsToInput(entry?.addition_cents)} />
       </div>
       {effectiveType === "payable" ? (
-        <section className="grid gap-3 rounded-lg border bg-muted/20 p-4">
+        <section className="grid gap-3 rounded-lg border bg-muted/15 p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-medium">Itens do documento</p>
-              <p className="text-xs text-muted-foreground">Use os itens da nota fiscal, recibo ou contrato para compor relatórios mais completos.</p>
+              <p className="text-xs text-muted-foreground">Itens da nota, contrato ou recibo. Marque estoque somente para materiais físicos.</p>
             </div>
             <Button
               type="button"
@@ -736,31 +757,93 @@ export function FinancialEntryForm({
             {items.map((item) => {
               const lineTotal = Math.round(Number(item.quantity.replace(",", ".")) * inputToCents(item.unit_amount));
               return (
-                <div key={item.id} className="grid gap-2 rounded-md border bg-background p-3 lg:grid-cols-[1fr_120px_150px_150px_auto] lg:items-end">
-                  <label className="grid gap-2 text-sm font-medium">
-                    Item
-                    <input
-                      value={item.description}
-                      onChange={(event) => updateItem(item.id, "description", event.target.value)}
-                      placeholder="Descrição do item"
-                      className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                  </label>
-                  <QuantityInput value={item.quantity} onChange={(value) => updateItem(item.id, "quantity", value)} />
-                  <CurrencyInput value={item.unit_amount} onChange={(value) => updateItem(item.id, "unit_amount", value)} label="Unitário" />
-                  <div className="rounded-md border bg-muted/20 p-2 text-sm">
-                    <span className="text-xs text-muted-foreground">Total do item</span>
-                    <p className="font-medium">{formatCurrencyBRL(Number.isFinite(lineTotal) ? lineTotal : 0)}</p>
+                <div key={item.id} className="grid gap-3 rounded-md border bg-background p-3">
+                  <div className="grid gap-2 lg:grid-cols-[minmax(240px,1fr)_110px_130px_130px_auto] lg:items-end">
+                    <label className="grid gap-1.5 text-[13px] font-medium">
+                      Item
+                      <input
+                        value={item.description}
+                        onChange={(event) => updateItem(item.id, "description", event.target.value)}
+                        placeholder="Descrição do item"
+                        className="h-9 rounded-md border bg-background px-3 text-[13px] font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    </label>
+                    <QuantityInput value={item.quantity} onChange={(value) => updateItem(item.id, "quantity", value)} />
+                    <CurrencyInput value={item.unit_amount} onChange={(value) => updateItem(item.id, "unit_amount", value)} label="Unitário" />
+                    <div className="rounded-md border bg-muted/20 px-2.5 py-2 text-[13px]">
+                      <span className="text-[11px] text-muted-foreground">Total</span>
+                      <p className="font-medium tabular-nums">{formatCurrencyBRL(Number.isFinite(lineTotal) ? lineTotal : 0)}</p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={items.length === 1}
+                      onClick={() => setItems((current) => current.filter((row) => row.id !== item.id))}
+                    >
+                      Remover
+                    </Button>
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={items.length === 1}
-                    onClick={() => setItems((current) => current.filter((row) => row.id !== item.id))}
-                  >
-                    Remover
-                  </Button>
+                  <div className="grid gap-2 rounded-md border bg-muted/15 p-2.5 lg:grid-cols-[170px_minmax(220px,1fr)_minmax(180px,0.7fr)_120px_140px] lg:items-end">
+                    <label className="flex items-center gap-2 text-xs font-medium">
+                      <input
+                        type="checkbox"
+                        className="size-3.5"
+                        checked={item.generate_stock}
+                        onChange={(event) => updateItem(item.id, "generate_stock", event.target.checked)}
+                      />
+                      Gerar estoque
+                    </label>
+                    <label className="grid gap-1.5 text-xs font-medium">
+                      Material
+                      <Select
+                        value={item.inventory_item_id}
+                        onChange={(event) => updateItem(item.id, "inventory_item_id", event.target.value)}
+                        disabled={!item.generate_stock}
+                      >
+                        <option value="none">Selecione</option>
+                        {inventoryItems.map((inventoryItem) => (
+                          <option key={inventoryItem.id} value={inventoryItem.id}>
+                            {inventoryItem.name} ({inventoryItem.unit})
+                          </option>
+                        ))}
+                      </Select>
+                    </label>
+                    <label className="grid gap-1.5 text-xs font-medium">
+                      Local
+                      <Select
+                        value={item.inventory_location_id}
+                        onChange={(event) => updateItem(item.id, "inventory_location_id", event.target.value)}
+                        disabled={!item.generate_stock}
+                      >
+                        <option value="none">Padrão</option>
+                        {inventoryLocations.map((location) => (
+                          <option key={location.id} value={location.id}>
+                            {location.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </label>
+                    <label className="grid gap-1.5 text-xs font-medium">
+                      Lote
+                      <input
+                        value={item.batch_number}
+                        onChange={(event) => updateItem(item.id, "batch_number", event.target.value)}
+                        disabled={!item.generate_stock}
+                        className="h-9 rounded-md border bg-background px-2 text-xs font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                      />
+                    </label>
+                    <label className="grid gap-1.5 text-xs font-medium">
+                      Validade
+                      <input
+                        type="date"
+                        value={item.expires_at}
+                        onChange={(event) => updateItem(item.id, "expires_at", event.target.value)}
+                        disabled={!item.generate_stock}
+                        className="h-9 rounded-md border bg-background px-2 text-xs font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                      />
+                    </label>
+                  </div>
                 </div>
               );
             })}

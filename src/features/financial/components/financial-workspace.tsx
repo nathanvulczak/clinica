@@ -138,6 +138,8 @@ function ReceivableOpenPanel({ data, activeView }: { data: FinancialWorkspaceDat
           costCenters={data.costCenters}
           healthPlans={data.healthPlans}
           vendors={data.vendors}
+          inventoryItems={data.inventoryItems}
+          inventoryLocations={data.inventoryLocations}
           onCompleted={() => setCreating(false)}
         />
       </Modal>
@@ -288,6 +290,8 @@ function PayableOpenPanel({ data, activeView }: { data: FinancialWorkspaceData; 
           costCenters={data.costCenters}
           healthPlans={data.healthPlans}
           vendors={data.vendors}
+          inventoryItems={data.inventoryItems}
+          inventoryLocations={data.inventoryLocations}
           onCompleted={() => setCreating(false)}
         />
       </Modal>
@@ -1707,7 +1711,7 @@ function EntryTableRow({
         <Modal open={detailing} onOpenChange={setDetailing} title="Detalhes do lançamento" description={entry.description} className="max-w-5xl">
           <FinancialEntryDetail entry={entry} />
         </Modal>
-        <Modal open={editing} onOpenChange={setEditing} title="Editar lançamento" description={locked ? "Movimento conciliado não pode ser alterado." : entry.description} className="max-w-4xl">
+        <Modal open={editing} onOpenChange={setEditing} title="Editar lançamento" description={locked ? "Movimento conciliado não pode ser alterado." : entry.description} className={entry.entry_type === "payable" ? "max-w-6xl" : "max-w-4xl"}>
           <FinancialEntryForm
             entry={entry}
             entryType={entry.entry_type}
@@ -1715,6 +1719,8 @@ function EntryTableRow({
             costCenters={data.costCenters}
             healthPlans={data.healthPlans}
             vendors={data.vendors}
+            inventoryItems={data.inventoryItems}
+            inventoryLocations={data.inventoryLocations}
             onCompleted={() => setEditing(false)}
           />
         </Modal>

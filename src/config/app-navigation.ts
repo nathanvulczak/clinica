@@ -102,6 +102,33 @@ export const APP_NAVIGATION_MODULES: AppNavigationModule[] = [
     items: financialItems,
   },
   {
+    id: "documents",
+    label: "Documentos",
+    navigationKey: "documents",
+    pathPrefix: "/documentos",
+    items: [
+      { label: "Modelos", href: "/documentos?section=templates" },
+      { label: "Contratos", href: "/documentos?section=contracts" },
+      { label: "Consentimentos", href: "/documentos?section=consents" },
+      { label: "Histórico", href: "/documentos?section=history", separatorBefore: true },
+      { label: "Preferências", href: "/documentos?section=preferences" },
+    ],
+  },
+  {
+    id: "inventory",
+    label: "Estoque",
+    navigationKey: "inventory",
+    pathPrefix: "/estoque",
+    items: [
+      { label: "Visão geral", href: "/estoque?section=overview" },
+      { label: "Itens e materiais", href: "/estoque?section=items" },
+      { label: "Lotes e validade", href: "/estoque?section=batches" },
+      { label: "Movimentos", href: "/estoque?section=movements" },
+      { label: "Consumo por atendimento", href: "/estoque?section=care" },
+      { label: "Preferências", href: "/estoque?section=settings", separatorBefore: true },
+    ],
+  },
+  {
     id: "administration",
     label: "Administração",
     pathPrefix: "/administracao",

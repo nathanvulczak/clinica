@@ -7,6 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { NursingAssessmentForm } from "@/features/nursing/components/nursing-assessment-form";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
+import { InventoryConsumptionPanel } from "@/features/inventory/components/inventory-consumption-panel";
+import { getInventoryCareConsumption } from "@/repositories/inventory";
 import { getNursingEncounterDetail, getNursingPreferences } from "@/repositories/nursing";
 
 export default async function NursingAssessmentPage({
@@ -43,9 +45,10 @@ export default async function NursingAssessmentPage({
     );
   }
 
-  const [detail, preferences] = await Promise.all([
+  const [detail, preferences, inventoryCare] = await Promise.all([
     getNursingEncounterDetail(activeClinic.id, encounterId),
     getNursingPreferences(activeClinic.id),
+    getInventoryCareConsumption(activeClinic.id, encounterId),
   ]);
   if (!detail) notFound();
 
@@ -96,6 +99,14 @@ export default async function NursingAssessmentPage({
         ) : null}
 
         <NursingAssessmentForm detail={detail} preferences={preferences} />
+        <InventoryConsumptionPanel
+          items={inventoryCare.items}
+          locations={inventoryCare.locations}
+          batches={inventoryCare.batches}
+          movements={inventoryCare.movements}
+          encounterId={detail.id}
+          nursingAssessmentId={detail.assessment?.id}
+        />
       </div>
     </>
   );

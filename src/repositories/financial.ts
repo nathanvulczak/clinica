@@ -24,6 +24,8 @@ import type {
   FinancialReceipt,
   FinancialRecurringEntry,
   FinancialVendor,
+  InventoryItem,
+  InventoryLocation,
   PatientSummary,
 } from "@/types/domain";
 
@@ -115,6 +117,8 @@ export type FinancialWorkspace = {
   monthlyClosings: FinancialMonthlyClosingWithRelations[];
   professionals: FinancialProfessionalOption[];
   services: FinancialServiceOption[];
+  inventoryItems: InventoryItem[];
+  inventoryLocations: InventoryLocation[];
   pendingEncounterCharges: PendingEncounterCharge[];
   metrics: FinancialMetrics;
 };
@@ -228,6 +232,8 @@ export async function getFinancialWorkspace(
     monthlyClosings: [],
     professionals: [],
     services: [],
+    inventoryItems: [],
+    inventoryLocations: [],
     pendingEncounterCharges: [],
     metrics: emptyMetrics(),
   };
@@ -253,6 +259,7 @@ export async function getFinancialWorkspace(
   const needsBankImports = isScope("reconciliation");
   const needsMonthlyClosings = isScope("reconciliation");
   const needsPendingCharges = isScope("overview", "receivables", "encounter-charge");
+  const needsInventoryOptions = isScope("payables");
   const [
     preferences,
     { data: accounts },
@@ -270,6 +277,8 @@ export async function getFinancialWorkspace(
     monthlyClosings,
     professionals,
     services,
+    { data: inventoryItems },
+    { data: inventoryLocations },
     pendingEncounterCharges,
   ] = await Promise.all([
     needsPreferences ? getFinancialPreferences(clinicId) : Promise.resolve(defaultPreferences(clinicId)),
@@ -325,6 +334,20 @@ export async function getFinancialWorkspace(
     access.canView && needsMonthlyClosings ? listFinancialMonthlyClosings(clinicId) : Promise.resolve([]),
     access.canView && needsCommissions ? listFinancialProfessionals(clinicId) : Promise.resolve([]),
     access.canView && needsCommissions ? listFinancialServices(clinicId) : Promise.resolve([]),
+    needsInventoryOptions ? admin
+      .from("inventory_items")
+      .select("id, clinic_id, name, sku, category, unit, generate_stock, minimum_quantity, active, notes, created_at, updated_at")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .eq("active", true)
+      .order("name") : Promise.resolve({ data: [] }),
+    needsInventoryOptions ? admin
+      .from("inventory_locations")
+      .select("id, clinic_id, name, description, active, created_at, updated_at")
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .eq("active", true)
+      .order("name") : Promise.resolve({ data: [] }),
     needsPendingCharges ? listPendingEncounterCharges(clinicId, access) : Promise.resolve([]),
   ]);
 
@@ -351,6 +374,8 @@ export async function getFinancialWorkspace(
     monthlyClosings,
     professionals,
     services,
+    inventoryItems: (inventoryItems ?? []) as InventoryItem[],
+    inventoryLocations: (inventoryLocations ?? []) as InventoryLocation[],
     pendingEncounterCharges,
     metrics: calculateMetrics(entries),
   };
@@ -426,7 +451,7 @@ export async function listFinancialEntries(clinicId: string): Promise<FinancialE
         .order("issued_at", { ascending: false }),
       admin
         .from("financial_entry_items")
-        .select("id, clinic_id, entry_id, description, quantity, unit_amount_cents, total_amount_cents, sort_order, created_at, updated_at")
+        .select("id, clinic_id, entry_id, description, quantity, unit_amount_cents, total_amount_cents, sort_order, generate_stock, inventory_item_id, inventory_location_id, inventory_batch_id, batch_number, expires_at, created_at, updated_at")
         .in("entry_id", entryIds)
         .is("deleted_at", null)
         .order("sort_order", { ascending: true }),

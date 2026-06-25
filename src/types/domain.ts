@@ -28,6 +28,8 @@ export type PermissionModule =
   | "nursing"
   | "schedule"
   | "financial"
+  | "documents"
+  | "inventory"
   | "reports";
 
 export type PermissionAction =
@@ -546,8 +548,104 @@ export type FinancialEntryItem = {
   unit_amount_cents: number;
   total_amount_cents: number;
   sort_order: number;
+  generate_stock: boolean;
+  inventory_item_id: string | null;
+  inventory_location_id: string | null;
+  inventory_batch_id: string | null;
+  batch_number: string | null;
+  expires_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type DocumentTemplateType =
+  | "service_contract"
+  | "lgpd_consent"
+  | "procedure_consent"
+  | "payment_acknowledgement"
+  | "attendance_declaration"
+  | "receipt"
+  | "other";
+
+export type DocumentTemplate = {
+  id: string;
+  clinic_id: string;
+  template_type: DocumentTemplateType;
+  name: string;
+  description: string | null;
+  legal_basis: string | null;
+  content: string;
+  accepted_file_url: string | null;
+  accepted_file_name: string | null;
+  active: boolean;
+  version_number: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InventoryItem = {
+  id: string;
+  clinic_id: string;
+  name: string;
+  sku: string | null;
+  category: string | null;
+  unit: string;
+  generate_stock: boolean;
+  minimum_quantity: number;
+  active: boolean;
+  notes: string | null;
+  quantity_on_hand?: number;
+  stock_value_cents?: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InventoryLocation = {
+  id: string;
+  clinic_id: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InventoryBatch = {
+  id: string;
+  clinic_id: string;
+  item_id: string;
+  location_id: string | null;
+  batch_number: string | null;
+  expires_at: string | null;
+  quantity_on_hand: number;
+  unit_cost_cents: number;
+  source_financial_entry_id: string | null;
+  source_financial_entry_item_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InventoryMovement = {
+  id: string;
+  clinic_id: string;
+  item_id: string;
+  location_id: string | null;
+  batch_id: string | null;
+  movement_type: "purchase_entry" | "care_consumption" | "manual_adjustment" | "transfer" | "loss" | "return";
+  direction: "in" | "out";
+  quantity: number;
+  unit_cost_cents: number;
+  total_cost_cents: number;
+  financial_entry_id: string | null;
+  financial_entry_item_id: string | null;
+  appointment_id: string | null;
+  encounter_id: string | null;
+  nursing_assessment_id: string | null;
+  medical_record_id: string | null;
+  notes: string | null;
+  created_at: string;
+  item?: Pick<InventoryItem, "id" | "name" | "unit"> | null;
+  location?: Pick<InventoryLocation, "id" | "name"> | null;
 };
 
 export type FinancialRecurringEntry = {

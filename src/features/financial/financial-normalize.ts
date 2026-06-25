@@ -28,6 +28,8 @@ export function normalizeFinancialWorkspaceData(data: FinancialWorkspaceData): F
     monthlyClosings: data.monthlyClosings ?? [],
     professionals: data.professionals ?? [],
     services: data.services ?? [],
+    inventoryItems: data.inventoryItems ?? [],
+    inventoryLocations: data.inventoryLocations ?? [],
     pendingEncounterCharges: data.pendingEncounterCharges ?? [],
     metrics: data.metrics ?? {
       receivableOpenCents: 0,

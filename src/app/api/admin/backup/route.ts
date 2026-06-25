@@ -16,6 +16,9 @@ const administrativeTables = [
   "registration_preferences",
   "nursing_preferences",
   "medical_record_preferences",
+  "document_templates",
+  "document_template_versions",
+  "generated_documents",
   "audit_logs",
 ];
 
@@ -63,6 +66,11 @@ const financialTables = [
   "financial_bank_import_items",
   "financial_monthly_closings",
   "financial_ledger_entries",
+  "inventory_items",
+  "inventory_locations",
+  "inventory_batches",
+  "inventory_movements",
+  "inventory_service_materials",
 ];
 
 function normalizeScope(value: string | null): BackupScope {

@@ -131,6 +131,8 @@ export type NavigationKey =
   | "encounters"
   | "medicalRecords"
   | "nursing"
+  | "documents"
+  | "inventory"
   | "financial";
 
 export function getAllowedNavigation(
@@ -173,6 +175,8 @@ export function getAllowedNavigation(
     allowed.add("medicalRecords");
   }
   if (authorization.can("nursing", "view")) allowed.add("nursing");
+  if (authorization.can("documents", "view")) allowed.add("documents");
+  if (authorization.can("inventory", "view")) allowed.add("inventory");
   if (authorization.can("financial", "view")) allowed.add("financial");
 
   return [...allowed];

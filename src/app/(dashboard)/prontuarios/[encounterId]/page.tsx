@@ -6,8 +6,10 @@ import { RealtimeClinicSync } from "@/components/app/realtime-clinic-sync";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getActiveClinicContext } from "@/features/clinics/context";
+import { InventoryConsumptionPanel } from "@/features/inventory/components/inventory-consumption-panel";
 import { MedicalRecordForm } from "@/features/medical-records/components/medical-record-form";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
+import { getInventoryCareConsumption } from "@/repositories/inventory";
 import { getClinicDocumentBranding } from "@/services/documents/clinic-document-branding";
 import {
   getMedicalRecordEncounterDetail,
@@ -45,10 +47,11 @@ export default async function MedicalRecordPage({
     );
   }
 
-  const [detail, preferences, documentBranding] = await Promise.all([
+  const [detail, preferences, documentBranding, inventoryCare] = await Promise.all([
     getMedicalRecordEncounterDetail(activeClinic.id, encounterId),
     getMedicalRecordPreferences(activeClinic.id),
     getClinicDocumentBranding(activeClinic.id),
+    getInventoryCareConsumption(activeClinic.id, encounterId),
   ]);
 
   if (!detail) notFound();
@@ -97,6 +100,14 @@ export default async function MedicalRecordPage({
         ) : null}
 
         <MedicalRecordForm detail={detail} preferences={preferences} documentBranding={documentBranding} />
+        <InventoryConsumptionPanel
+          items={inventoryCare.items}
+          locations={inventoryCare.locations}
+          batches={inventoryCare.batches}
+          movements={inventoryCare.movements}
+          encounterId={detail.id}
+          medicalRecordId={detail.medical_record?.id}
+        />
       </div>
     </>
   );

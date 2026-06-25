@@ -42,6 +42,25 @@ export type FinancialActionState = {
   receiptId?: string;
 };
 
+type FinancialLineItemPayload = {
+  description: string;
+  quantity: number;
+  unit_amount_cents: number;
+  total_amount_cents: number;
+  sort_order: number;
+  generate_stock: boolean;
+  inventory_item_id: string | null;
+  inventory_location_id: string | null;
+  batch_number: string | null;
+  expires_at: string | null;
+};
+
+type SavedFinancialLineItem = FinancialLineItemPayload & {
+  id: string;
+  entry_id: string;
+  clinic_id: string;
+};
+
 function parseCurrencyToCents(value: string) {
   const normalized = value.includes(",")
     ? value.replace(/\./g, "").replace(",", ".")
@@ -68,7 +87,7 @@ function parseFinancialEntryItems(raw: string | undefined) {
   }
 
   return {
-    items: parsed.data.map((item, index) => {
+    items: parsed.data.map<FinancialLineItemPayload>((item, index) => {
       const unitAmountCents = parseCurrencyToCents(item.unit_amount);
       const totalAmountCents = Math.round(item.quantity * unitAmountCents);
       return {
@@ -77,6 +96,11 @@ function parseFinancialEntryItems(raw: string | undefined) {
         unit_amount_cents: unitAmountCents,
         total_amount_cents: totalAmountCents,
         sort_order: index,
+        generate_stock: item.generate_stock,
+        inventory_item_id: item.inventory_item_id,
+        inventory_location_id: item.inventory_location_id,
+        batch_number: item.batch_number,
+        expires_at: item.expires_at,
       };
     }),
   };
@@ -116,6 +140,111 @@ async function getFinancialContext() {
 
   const access = await getFinancialAccess(activeClinic.id);
   return { activeClinic, user, access };
+}
+
+async function rebuildPurchaseInventoryFromPayable({
+  admin,
+  clinicId,
+  userId,
+  entryId,
+  items,
+}: {
+  admin: ReturnType<typeof createSupabaseAdminClient>;
+  clinicId: string;
+  userId: string;
+  entryId: string;
+  items: SavedFinancialLineItem[];
+}) {
+  const { data: previousMovements } = await admin
+    .from("inventory_movements")
+    .select("id, batch_id, quantity")
+    .eq("clinic_id", clinicId)
+    .eq("financial_entry_id", entryId)
+    .eq("movement_type", "purchase_entry")
+    .is("deleted_at", null);
+
+  for (const movement of previousMovements ?? []) {
+    if (!movement.batch_id) continue;
+    const { data: batch } = await admin
+      .from("inventory_batches")
+      .select("id, quantity_on_hand")
+      .eq("id", movement.batch_id)
+      .eq("clinic_id", clinicId)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (batch) {
+      const currentQuantity = Number(batch.quantity_on_hand);
+      const movementQuantity = Number(movement.quantity);
+      if (currentQuantity < movementQuantity) {
+        return {
+          error:
+            "Este documento já gerou estoque com consumo posterior. Para alterar, faça um ajuste no módulo Estoque.",
+        };
+      }
+
+      await admin
+        .from("inventory_batches")
+        .update({ quantity_on_hand: currentQuantity - movementQuantity, updated_by: userId })
+        .eq("id", batch.id)
+        .eq("clinic_id", clinicId);
+    }
+
+    await admin
+      .from("inventory_movements")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", movement.id)
+      .eq("clinic_id", clinicId);
+  }
+
+  const stockItems = items.filter((item) => item.generate_stock && item.inventory_item_id);
+  for (const item of stockItems) {
+    const quantity = Number(item.quantity);
+    const unitCostCents = Number(item.unit_amount_cents);
+    const { data: batch, error: batchError } = await admin
+      .from("inventory_batches")
+      .insert({
+        clinic_id: clinicId,
+        item_id: item.inventory_item_id,
+        location_id: item.inventory_location_id,
+        batch_number: item.batch_number,
+        expires_at: item.expires_at,
+        quantity_on_hand: quantity,
+        unit_cost_cents: unitCostCents,
+        source_financial_entry_id: entryId,
+        source_financial_entry_item_id: item.id,
+        created_by: userId,
+        updated_by: userId,
+      })
+      .select("id")
+      .single();
+
+    if (batchError || !batch) {
+      return { error: "O lançamento foi salvo, mas não foi possível criar o lote de estoque." };
+    }
+
+    const { error: movementError } = await admin.from("inventory_movements").insert({
+      clinic_id: clinicId,
+      item_id: item.inventory_item_id,
+      location_id: item.inventory_location_id,
+      batch_id: batch.id,
+      movement_type: "purchase_entry",
+      direction: "in",
+      quantity,
+      unit_cost_cents: unitCostCents,
+      total_cost_cents: item.total_amount_cents,
+      financial_entry_id: entryId,
+      financial_entry_item_id: item.id,
+      notes: "Entrada gerada automaticamente por documento em contas a pagar.",
+      created_by: userId,
+    });
+
+    if (movementError) {
+      return { error: "O lote foi criado, mas o movimento de entrada não foi registrado." };
+    }
+  }
+
+  return { success: true as const };
 }
 
 function revalidateFinancial() {
@@ -941,6 +1070,9 @@ export async function saveFinancialEntryAction(
   if (parsed.data.entry_type === "payable" && !lineItems.length && manualAmountCents <= 0) {
     return { error: "Informe ao menos um item ou um valor para o documento a pagar." };
   }
+  if (lineItems.some((item) => item.generate_stock && !item.inventory_item_id)) {
+    return { error: "Todo item marcado para gerar estoque precisa estar vinculado a um material cadastrado." };
+  }
 
   const context = await getFinancialContext();
   if ("error" in context) return { error: context.error };
@@ -1004,6 +1136,7 @@ export async function saveFinancialEntryAction(
   }
 
   if (parsed.data.entry_type === "payable") {
+    let savedLineItems: SavedFinancialLineItem[] = [];
     await admin
       .from("financial_entry_items")
       .update({ deleted_at: new Date().toISOString(), updated_by: context.user.id })
@@ -1012,7 +1145,7 @@ export async function saveFinancialEntryAction(
       .is("deleted_at", null);
 
     if (lineItems.length) {
-      const { error: itemsError } = await admin.from("financial_entry_items").insert(
+      const { data: savedItems, error: itemsError } = await admin.from("financial_entry_items").insert(
         lineItems.map((item) => ({
           clinic_id: context.activeClinic.id,
           entry_id: result.data.id,
@@ -1020,11 +1153,21 @@ export async function saveFinancialEntryAction(
           created_by: context.user.id,
           updated_by: context.user.id,
         })),
-      );
+      ).select("id, clinic_id, entry_id, description, quantity, unit_amount_cents, total_amount_cents, sort_order, generate_stock, inventory_item_id, inventory_location_id, batch_number, expires_at");
       if (itemsError) {
         return { error: financialError(itemsError, "O lançamento foi salvo, mas os itens do documento não foram registrados.") };
       }
+      savedLineItems = (savedItems ?? []) as SavedFinancialLineItem[];
     }
+
+    const inventoryResult = await rebuildPurchaseInventoryFromPayable({
+      admin,
+      clinicId: context.activeClinic.id,
+      userId: context.user.id,
+      entryId: result.data.id,
+      items: savedLineItems,
+    });
+    if ("error" in inventoryResult) return { error: inventoryResult.error };
   }
 
   await logAuditEvent({
