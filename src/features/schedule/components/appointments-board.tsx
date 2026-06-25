@@ -89,15 +89,15 @@ export function AppointmentsBoard({
   }, [workflowEvents]);
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-4">
       <section className="grid gap-3">
         {appointments.length === 0 ? (
-          <div className="rounded-md border border-dashed bg-muted/20 px-6 py-10 text-center">
+          <div className="rounded-md border border-dashed bg-muted/20 px-6 py-8 text-center">
             <CalendarEmptyState />
           </div>
         ) : (
           <div className="overflow-hidden rounded-md border">
-            <div className="hidden grid-cols-[110px_minmax(220px,1.3fr)_minmax(190px,1fr)_minmax(170px,0.8fr)_150px_110px] gap-4 border-b bg-muted/60 px-4 py-2.5 text-xs font-medium uppercase text-muted-foreground xl:grid">
+            <div className="hidden grid-cols-[96px_minmax(220px,1.25fr)_minmax(180px,1fr)_minmax(180px,0.9fr)_145px_106px] gap-3 border-b bg-muted/60 px-3 py-2 text-[11px] font-medium uppercase text-muted-foreground xl:grid">
               <span>Horário</span>
               <span>Paciente</span>
               <span>Profissional</span>
@@ -109,10 +109,10 @@ export function AppointmentsBoard({
               {appointments.map((appointment) => (
                 <article
                   key={appointment.id}
-                  className="grid min-w-0 gap-4 bg-card px-4 py-4 transition-colors hover:bg-muted/20 xl:grid-cols-[110px_minmax(220px,1.3fr)_minmax(190px,1fr)_minmax(170px,0.8fr)_150px_110px] xl:items-center"
+                  className="grid min-w-0 gap-3 bg-card px-3 py-3 transition-colors hover:bg-muted/20 xl:grid-cols-[96px_minmax(220px,1.25fr)_minmax(180px,1fr)_minmax(180px,0.9fr)_145px_106px] xl:items-center"
                 >
                   <div>
-                    <p className="flex items-center gap-2 text-lg font-semibold">
+                    <p className="flex items-center gap-2 text-sm font-semibold tabular-nums">
                       <Clock className="size-4 text-primary" />
                       {formatTimeBr(appointment.starts_at)}
                     </p>
@@ -122,11 +122,11 @@ export function AppointmentsBoard({
                   </div>
 
                   <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
                       <UserRound className="size-4" />
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate font-medium">
+                      <p className="truncate text-sm font-medium">
                         {appointment.patient?.social_name ||
                           appointment.patient?.full_name ||
                           "Paciente não localizado"}
@@ -170,6 +170,7 @@ export function AppointmentsBoard({
                       type="button"
                       variant="outline"
                       size="sm"
+                      className="h-8 px-2.5"
                       onClick={() => setSelectedAppointmentId(appointment.id)}
                     >
                       <Pencil />
@@ -208,17 +209,17 @@ export function AppointmentsBoard({
 
       <section className="grid gap-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Bloqueios do dia</h2>
+          <h2 className="text-base font-semibold">Bloqueios do dia</h2>
           <Badge>{blocks.length}</Badge>
         </div>
         {blocks.length === 0 ? (
-          <div className="rounded-md border border-dashed bg-muted/20 p-5 text-sm text-muted-foreground">
+          <div className="rounded-md border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
             Nenhum bloqueio cadastrado para os filtros atuais.
           </div>
         ) : (
           <div className="grid gap-3 xl:grid-cols-2">
             {blocks.map((block) => (
-              <div key={block.id} className="rounded-md border bg-card p-4 text-sm">
+              <div key={block.id} className="rounded-md border bg-card p-3 text-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium">
@@ -230,7 +231,7 @@ export function AppointmentsBoard({
                   </div>
                   <Badge>{SCHEDULE_BLOCK_TYPE_LABELS[block.block_type]}</Badge>
                 </div>
-                {block.reason ? <p className="mt-3 text-muted-foreground">{block.reason}</p> : null}
+                {block.reason ? <p className="mt-2 text-muted-foreground">{block.reason}</p> : null}
               </div>
             ))}
           </div>
@@ -247,7 +248,7 @@ function CalendarEmptyState() {
         <Clock className="size-5" />
       </div>
       <p className="font-medium">Nenhum compromisso neste período</p>
-      <p className="text-sm leading-6 text-muted-foreground">
+      <p className="text-sm leading-5 text-muted-foreground">
         Ajuste os filtros ou utilize “Novo compromisso” para iniciar a agenda.
       </p>
     </div>

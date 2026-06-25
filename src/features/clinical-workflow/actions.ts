@@ -16,9 +16,14 @@ export type ClinicalWorkflowActionState = {
 };
 
 const routeSchema = z.object({
-  encounter_id: z.string().uuid(),
-  requires_preconsultation: z.enum(["true", "false"]).transform((value) => value === "true"),
+  encounter_id: z.string().uuid().optional(),
+  appointment_id: z.string().uuid().optional(),
+  requires_preconsultation: z
+    .enum(["true", "false", "on"])
+    .transform((value) => value === "true" || value === "on"),
   reason: z.string().trim().max(500).optional().transform((value) => value || null),
+}).refine((value) => value.encounter_id || value.appointment_id, {
+  message: "Informe o atendimento ou agendamento.",
 });
 
 const encounterSchema = z.object({
@@ -101,14 +106,30 @@ export async function routeClinicalEncounterAction(
   formData: FormData,
 ): Promise<ClinicalWorkflowActionState> {
   const parsed = routeSchema.safeParse({
-    encounter_id: formData.get("encounter_id"),
+    encounter_id: formData.get("encounter_id") || undefined,
+    appointment_id: formData.get("appointment_id") || undefined,
     requires_preconsultation: formData.get("requires_preconsultation"),
     reason: formData.get("reason"),
   });
-  if (!parsed.success) return { error: "Dados de encaminhamento inválidos." };
+  if (!parsed.success) return { error: "Não foi possível identificar o atendimento para encaminhar." };
 
   const context = await getContext();
   if (!context) return { error: "Selecione uma clínica e autentique-se novamente." };
+  const admin = createSupabaseAdminClient();
+  const encounterId = await resolveEncounterId(
+    admin,
+    context.activeClinic.id,
+    parsed.data.encounter_id,
+    parsed.data.appointment_id,
+  );
+
+  if (!encounterId) {
+    return {
+      error:
+        "Atendimento não encontrado para este agendamento. Registre a chegada do paciente na Agenda e atualize a fila.",
+    };
+  }
+
   if (!context.access.canRoute) {
     await logAuditEvent({
       clinicId: context.activeClinic.id,
@@ -116,18 +137,17 @@ export async function routeClinicalEncounterAction(
       actionType: "access_denied",
       module: "medical_records",
       recordTable: "clinical_encounters",
-      recordId: parsed.data.encounter_id,
+      recordId: encounterId,
       level: "security",
       notes: "Tentativa negada de definir encaminhamento assistencial.",
     });
     return { error: "Seu perfil não pode definir este fluxo." };
   }
 
-  const admin = createSupabaseAdminClient();
   const { data: previous } = await admin
     .from("clinical_encounters")
     .select("status, preconsultation_required, routing_source, routing_reason")
-    .eq("id", parsed.data.encounter_id)
+    .eq("id", encounterId)
     .eq("clinic_id", context.activeClinic.id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -135,7 +155,7 @@ export async function routeClinicalEncounterAction(
   if (!previous) return { error: "Atendimento não encontrado na clínica ativa." };
 
   const { data, error } = await context.supabase.rpc("route_clinical_encounter", {
-    encounter_uuid: parsed.data.encounter_id,
+    encounter_uuid: encounterId,
     requires_preconsultation: parsed.data.requires_preconsultation,
     route_reason: parsed.data.reason,
   });
@@ -147,7 +167,7 @@ export async function routeClinicalEncounterAction(
         actionType: "access_denied",
         module: "medical_records",
         recordTable: "clinical_encounters",
-        recordId: parsed.data.encounter_id,
+        recordId: encounterId,
         level: "security",
         notes: "Banco recusou a alteração do encaminhamento assistencial.",
       });
@@ -161,7 +181,7 @@ export async function routeClinicalEncounterAction(
     actionType: parsed.data.reason ? "clinical_route_corrected" : "clinical_route_decided",
     module: "medical_records",
     recordTable: "clinical_encounters",
-    recordId: parsed.data.encounter_id,
+    recordId: encounterId,
     oldValues: previous,
     newValues: {
       requires_preconsultation: parsed.data.requires_preconsultation,

@@ -1,5 +1,16 @@
 import Link from "next/link";
-import { CalendarDays, LockKeyhole } from "lucide-react";
+import {
+  CalendarCheck2,
+  CalendarClock,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  HeartPulse,
+  LockKeyhole,
+  Stethoscope,
+  UsersRound,
+  type LucideIcon,
+} from "lucide-react";
 import { APPOINTMENT_STATUS_LABELS, APPOINTMENT_STATUSES } from "@/config/schedule";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import {
@@ -10,6 +21,7 @@ import { AppointmentsBoard } from "@/features/schedule/components/appointments-b
 import { AppointmentModal } from "@/features/schedule/components/appointment-modal";
 import { ScheduleCalendar } from "@/features/schedule/components/schedule-calendar";
 import { getTodayInputDate } from "@/lib/dates";
+import { getAppUrl } from "@/lib/env";
 import {
   getRegistrationAccess,
   listClinicRooms,
@@ -25,8 +37,7 @@ import {
   listScheduleProfessionals,
   listScheduleSettings,
 } from "@/repositories/schedule";
-import { getAppUrl } from "@/lib/env";
-import type { AppointmentStatus } from "@/types/domain";
+import type { AppointmentStatus, AppointmentSummary } from "@/types/domain";
 import { PageHeader } from "@/components/app/page-header";
 import { RealtimeClinicSync } from "@/components/app/realtime-clinic-sync";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +57,67 @@ function normalizeStatus(value?: string): AppointmentStatus | "all" {
 
 function normalizeView(value?: string): CalendarViewMode {
   return value === "week" || value === "month" ? value : "day";
+}
+
+function metricTone(tone: "neutral" | "success" | "warning" | "care") {
+  const tones = {
+    neutral: "bg-muted text-muted-foreground",
+    success: "bg-emerald-500/10 text-emerald-700",
+    warning: "bg-amber-500/10 text-amber-700",
+    care: "bg-primary/10 text-primary",
+  };
+
+  return tones[tone];
+}
+
+function AgendaMetric({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone = "neutral",
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string | number;
+  detail: string;
+  tone?: "neutral" | "success" | "warning" | "care";
+}) {
+  return (
+    <div className="rounded-lg border bg-card px-3.5 py-3 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
+          <p className="mt-1 text-xl font-semibold tabular-nums">{value}</p>
+        </div>
+        <div className={`flex size-9 shrink-0 items-center justify-center rounded-md ${metricTone(tone)}`}>
+          <Icon className="size-4" />
+        </div>
+      </div>
+      <p className="mt-2 truncate text-xs text-muted-foreground">{detail}</p>
+    </div>
+  );
+}
+
+function formatTime(value?: string | null) {
+  if (!value) return "--:--";
+
+  return new Intl.DateTimeFormat("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Sao_Paulo",
+  }).format(new Date(value));
+}
+
+function nextOperationalAppointment(appointments: AppointmentSummary[]) {
+  const now = Date.now();
+
+  return appointments.find(
+    (appointment) =>
+      !["cancelled", "no_show", "rescheduled", "completed", "billing_pending", "billed"].includes(
+        appointment.status,
+      ) && new Date(appointment.starts_at).getTime() >= now,
+  );
 }
 
 export default async function AgendaPage({
@@ -113,15 +185,21 @@ export default async function AgendaPage({
   const confirmedCount = appointments.filter((appointment) =>
     ["confirmed", "checked_in", "in_triage", "in_progress"].includes(appointment.status),
   ).length;
+  const waitingCount = appointments.filter((appointment) => appointment.status === "checked_in").length;
+  const careFlowCount = appointments.filter((appointment) =>
+    ["in_triage", "in_progress"].includes(appointment.status),
+  ).length;
   const finishedCount = appointments.filter((appointment) =>
     ["completed", "billing_pending", "billed"].includes(appointment.status),
   ).length;
+  const nextAppointment = nextOperationalAppointment(appointments);
+  const professionalsInUse = new Set(appointments.map((appointment) => appointment.professional_member_id)).size;
 
   return (
     <>
       <PageHeader
         title="Agenda"
-        description="Gerencie compromissos, profissionais, bloqueios e fluxo operacional da clínica ativa com rastreabilidade."
+        description="Central operacional para compromissos, chegada do paciente e liberação do fluxo assistencial."
         action={
           activeClinic && scheduleAccess.canView ? (
             <AppointmentModal
@@ -161,110 +239,150 @@ export default async function AgendaPage({
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-6">
-          <div className="flex justify-end"><RealtimeClinicSync clinicId={activeClinic.id} tables={["appointments"]} /></div>
-          <Card>
-            <CardHeader>
-              <CardTitle>Filtros da agenda</CardTitle>
-              <CardDescription>Contexto atual: {activeClinic.trade_name}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form className="grid gap-3 lg:grid-cols-[160px_minmax(220px,1fr)_220px_auto] lg:items-end">
-                <input type="hidden" name="view" value={view} />
-                <div className="grid gap-2">
-                  <Label htmlFor="date">Data</Label>
-                  <Input id="date" name="date" type="date" defaultValue={date} />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="professional_id">Profissional</Label>
-                  <Select id="professional_id" name="professional_id" defaultValue={professionalId}>
-                    {scheduleAccess.canManage ? <option value="all">Todos</option> : null}
-                    {professionals.map((professional) => (
-                      <option key={professional.id} value={professional.id}>
-                        {professional.profile?.full_name ?? "Profissional sem nome"}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="status">Status</Label>
-                  <Select id="status" name="status" defaultValue={status}>
-                    <option value="all">Todos</option>
-                    {APPOINTMENT_STATUSES.map((item) => (
-                      <option key={item} value={item}>
-                        {APPOINTMENT_STATUS_LABELS[item]}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <Button>
-                  <CalendarDays />
-                  Filtrar
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
+        <div className="grid gap-4">
+          <RealtimeClinicSync clinicId={activeClinic.id} tables={["appointments", "clinical_encounters"]} />
+
+          <section className="rounded-lg border bg-card px-4 py-3 shadow-sm">
+            <form className="grid gap-3 xl:grid-cols-[150px_minmax(220px,1fr)_190px_auto] xl:items-end">
+              <input type="hidden" name="view" value={view} />
+              <div className="grid gap-1.5">
+                <Label htmlFor="date" className="text-xs">Data</Label>
+                <Input id="date" name="date" type="date" defaultValue={date} className="h-9" />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="professional_id" className="text-xs">Profissional</Label>
+                <Select id="professional_id" name="professional_id" defaultValue={professionalId} className="h-9">
+                  {scheduleAccess.canManage ? <option value="all">Todos os profissionais</option> : null}
+                  {professionals.map((professional) => (
+                    <option key={professional.id} value={professional.id}>
+                      {professional.profile?.full_name ?? "Profissional sem nome"}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="status" className="text-xs">Status</Label>
+                <Select id="status" name="status" defaultValue={status} className="h-9">
+                  <option value="all">Todos</option>
+                  {APPOINTMENT_STATUSES.map((item) => (
+                    <option key={item} value={item}>
+                      {APPOINTMENT_STATUS_LABELS[item]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <Button className="h-9">
+                <CalendarDays className="size-4" />
+                Filtrar
+              </Button>
+            </form>
+          </section>
+
+          <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <AgendaMetric
+              icon={CalendarClock}
+              label="Compromissos"
+              value={appointments.length}
+              detail={`${professionalsInUse || 0} profissional(is) no período`}
+              tone="care"
+            />
+            <AgendaMetric
+              icon={CheckCircle2}
+              label="Confirmados / em fluxo"
+              value={confirmedCount}
+              detail={`${waitingCount} paciente(s) aguardando decisão`}
+              tone="success"
+            />
+            <AgendaMetric
+              icon={HeartPulse}
+              label="Assistencial"
+              value={careFlowCount}
+              detail="pré-consulta ou atendimento em andamento"
+              tone="warning"
+            />
+            <AgendaMetric
+              icon={CalendarCheck2}
+              label="Finalizados"
+              value={finishedCount}
+              detail={`${blocks.length} bloqueio(s) no período`}
+              tone="neutral"
+            />
+          </section>
+
+          <section className="grid gap-3 rounded-lg border bg-card p-4 shadow-sm xl:grid-cols-[1fr_280px] xl:items-center">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="border bg-background text-foreground">{activeClinic.trade_name}</Badge>
+                <Badge className="bg-primary/10 text-primary">
+                  {scheduleAccess.canManage ? "Visão ampla da clínica" : "Minha agenda"}
+                </Badge>
+              </div>
+              <div className="mt-4 grid gap-2 md:grid-cols-4">
+                {[
+                  { label: "Agendar", icon: CalendarDays },
+                  { label: "Confirmar", icon: CheckCircle2 },
+                  { label: "Chegada", icon: UsersRound },
+                  { label: "Cuidado", icon: Stethoscope },
+                ].map((step, index) => (
+                  <div key={step.label} className="min-w-0 rounded-md border bg-background px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex size-6 items-center justify-center rounded-md bg-primary/10 text-[11px] font-semibold text-primary">
+                        {index + 1}
+                      </span>
+                      <step.icon className="size-3.5 text-muted-foreground" />
+                      <span className="truncate text-sm font-medium">{step.label}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-md border bg-muted/30 px-3 py-2.5">
+              <p className="text-xs font-medium text-muted-foreground">Próximo compromisso</p>
+              <p className="mt-1 truncate text-sm font-semibold">
+                {nextAppointment?.patient?.social_name ||
+                  nextAppointment?.patient?.full_name ||
+                  "Nenhum próximo compromisso"}
+              </p>
+              <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                <Clock3 className="size-3.5" />
+                {nextAppointment
+                  ? `${formatTime(nextAppointment.starts_at)} • ${
+                      nextAppointment.professional?.profile?.full_name ?? "Profissional"
+                    }`
+                  : "Agenda livre conforme filtros atuais"}
+              </p>
+            </div>
+          </section>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Calendário da clínica</CardTitle>
-              <CardDescription>
-                {scheduleAccess.canManage
-                  ? "Visão ampla conforme os filtros da clínica ativa."
-                  : "Sua visualização está restrita aos pacientes vinculados à sua agenda."}
-              </CardDescription>
+            <CardHeader className="px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">Calendário operacional</CardTitle>
+                  <CardDescription>
+                    {scheduleAccess.canManage
+                      ? "Visão por dia, semana ou mês com profissionais, consultórios e bloqueios."
+                      : "Sua visualização está restrita aos pacientes vinculados à sua agenda."}
+                  </CardDescription>
+                </div>
+                <Badge className="bg-muted text-muted-foreground">
+                  {view === "day" ? "Visão diária" : view === "week" ? "Visão semanal" : "Visão mensal"}
+                </Badge>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 pb-4">
               <ScheduleCalendar
                 date={date}
                 view={view}
                 days={range.days}
                 appointments={appointments}
                 blocks={blocks}
+                professionals={professionals}
                 professionalId={professionalId}
                 status={status}
               />
             </CardContent>
           </Card>
-
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">Compromissos</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-semibold">{appointments.length}</p>
-                <p className="text-xs text-muted-foreground">no período filtrado</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">Confirmados / em fluxo</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-semibold">{confirmedCount}</p>
-                <p className="text-xs text-muted-foreground">paciente confirmado, chegada ou atendimento</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">Finalizados</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-semibold">{finishedCount}</p>
-                <p className="text-xs text-muted-foreground">atendimento concluído ou financeiro liberado</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">Bloqueios</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-semibold">{blocks.length}</p>
-                <p className="text-xs text-muted-foreground">intervalos indisponíveis</p>
-              </CardContent>
-            </Card>
-          </div>
 
           {professionals.length === 0 ? (
             <Card>
@@ -277,14 +395,13 @@ export default async function AgendaPage({
             </Card>
           ) : null}
 
-          <div className="grid gap-6">
-            {view === "day" ? (
-              <Card>
-              <CardHeader>
+          {view === "day" ? (
+            <Card>
+              <CardHeader className="px-4 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <CardTitle>Eventos do dia</CardTitle>
-                    <CardDescription>Fluxo de confirmação, chegada, atendimento e cobrança.</CardDescription>
+                    <CardTitle className="text-base">Eventos do dia</CardTitle>
+                    <CardDescription>Detalhes, confirmação, chegada, remarcação e exclusão auditada.</CardDescription>
                   </div>
                   <Badge>
                     {scheduleAccess.canManage || scheduleAccess.canOperateOwn
@@ -293,7 +410,7 @@ export default async function AgendaPage({
                   </Badge>
                 </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="px-4 pb-4">
                 <AppointmentsBoard
                   appointments={appointments}
                   blocks={blocks}
@@ -310,36 +427,18 @@ export default async function AgendaPage({
                   confirmationUrlBase={confirmationUrlBase}
                 />
               </CardContent>
-              </Card>
-            ) : (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Resumo do período</CardTitle>
-                  <CardDescription>
-                    Selecione um dia no calendário para abrir os detalhes, contatos e fluxo operacional.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                    A visão {view === "week" ? "semanal" : "mensal"} mantém o calendário leve. Clique em um
-                    compromisso ou dia para operar a consulta.
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-          </div>
+            </Card>
+          ) : null}
 
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Configuração profissional</CardTitle>
+            <CardHeader className="px-4 py-3">
+              <CardTitle className="text-base">Configuração profissional</CardTitle>
               <CardDescription>
-                Expediente, disponibilidade, consultório padrão e bloqueios ficam centralizados no cadastro
-                do profissional.
+                Expediente, disponibilidade, consultório padrão e bloqueios continuam centralizados no cadastro do profissional.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <Button asChild variant="outline">
+            <CardContent className="px-4 pb-4">
+              <Button asChild variant="outline" size="sm">
                 <Link href="/cadastros?section=professionals">Abrir cadastros de profissionais</Link>
               </Button>
             </CardContent>
