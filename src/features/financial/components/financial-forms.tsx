@@ -837,7 +837,7 @@ export function FinancialEntryForm({
                             generate_stock: found.generate_stock,
                           });
                         }}
-                        placeholder="Descrição do item"
+                        placeholder="Código/SKU ou nome do item"
                         className="h-9 rounded-md border bg-background px-3 text-[13px] font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
                     </label>

@@ -4,7 +4,7 @@ import { isValidEmail } from "@/lib/validators";
 
 const optionalText = z
   .string()
-  .optional()
+  .nullish()
   .transform((value) => value?.trim() ?? "")
   .transform((value) => (value.length > 0 ? value : null));
 
@@ -50,7 +50,7 @@ export const optionalCurrencyString = z
 
 const optionalUuid = z
   .string()
-  .optional()
+  .nullish()
   .transform((value) => (value && value !== "none" ? value : null));
 
 export const financialAccountSchema = z.object({
@@ -158,10 +158,12 @@ export const financialEntryItemInputSchema = z.object({
   inventory_location_id: optionalUuid,
   batch_number: optionalText,
   expires_at: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Informe a validade no formato correto.")
+    .union([
+      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Informe a validade no formato correto."),
+      z.literal(""),
+      z.null(),
+    ])
     .optional()
-    .or(z.literal(""))
     .transform((value) => value || null),
 }).superRefine((item, ctx) => {
   if (!item.inventory_item_id) {
