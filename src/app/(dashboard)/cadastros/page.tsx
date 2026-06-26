@@ -7,6 +7,7 @@ import {
 } from "@/features/registrations/components/catalog-panels";
 import { PatientsPanel } from "@/features/registrations/components/patients-panel";
 import { ProfessionalsPanel } from "@/features/registrations/components/professionals-panel";
+import { InventoryWorkspace } from "@/features/inventory/components/inventory-workspace";
 import {
   getRegistrationAccess,
   getRegistrationCounts,
@@ -19,11 +20,12 @@ import {
   listProfessionalRegistrationBlocks,
 } from "@/repositories/registrations";
 import { listScheduleProfessionals, listScheduleSettings } from "@/repositories/schedule";
+import { getInventoryWorkspace } from "@/repositories/inventory";
 import type { RegistrationPreferences } from "@/types/domain";
 import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-type RegistrationSection = "patients" | "professionals" | "services" | "rooms" | "preferences";
+type RegistrationSection = "patients" | "professionals" | "services" | "rooms" | "items" | "preferences";
 
 const defaultPreferences: RegistrationPreferences = {
   clinic_id: "",
@@ -39,7 +41,7 @@ const defaultPreferences: RegistrationPreferences = {
 };
 
 function normalizeSection(value?: string): RegistrationSection {
-  return ["patients", "professionals", "services", "rooms", "preferences"].includes(value ?? "")
+  return ["patients", "professionals", "services", "rooms", "items", "preferences"].includes(value ?? "")
     ? (value as RegistrationSection)
     : "patients";
 }
@@ -92,6 +94,7 @@ export default async function CadastrosPage({
   const professionals = access.canManageSchedule
     ? allProfessionals
     : allProfessionals.filter((professional) => professional.id === access.currentMemberId);
+  const inventoryData = section === "items" && activeClinic ? await getInventoryWorkspace(activeClinic.id) : null;
 
   return (
     <>
@@ -222,6 +225,21 @@ export default async function CadastrosPage({
               canManageSchedule={access.canManageSchedule}
               canManageOwnAvailability={access.canManageOwnAvailability}
             />
+          ) : null}
+
+          {section === "items" && inventoryData ? (
+            <Card>
+              <CardContent className="pt-6">
+                {inventoryData.access.canView ? (
+                  <InventoryWorkspace data={inventoryData} section="items" />
+                ) : (
+                  <div className="flex items-center gap-3 rounded-lg border bg-background p-4 text-sm text-muted-foreground">
+                    <LockKeyhole className="size-5 text-primary" />
+                    Solicite permissão de estoque para gerenciar itens e materiais.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           ) : null}
 
           {section === "preferences" ? (

@@ -1070,8 +1070,8 @@ export async function saveFinancialEntryAction(
   if (parsed.data.entry_type === "payable" && !lineItems.length && manualAmountCents <= 0) {
     return { error: "Informe ao menos um item ou um valor para o documento a pagar." };
   }
-  if (lineItems.some((item) => item.generate_stock && !item.inventory_item_id)) {
-    return { error: "Todo item marcado para gerar estoque precisa estar vinculado a um material cadastrado." };
+  if (lineItems.some((item) => !item.inventory_item_id)) {
+    return { error: "Todo item do documento precisa estar vinculado a um item cadastrado." };
   }
 
   const context = await getFinancialContext();

@@ -163,6 +163,14 @@ export const financialEntryItemInputSchema = z.object({
     .optional()
     .or(z.literal(""))
     .transform((value) => value || null),
+}).superRefine((item, ctx) => {
+  if (!item.inventory_item_id) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["inventory_item_id"],
+      message: "Selecione um item cadastrado para cada linha do documento.",
+    });
+  }
 });
 
 export const cancelFinancialEntrySchema = z.object({

@@ -296,6 +296,7 @@ function inputToCents(value: string) {
 type PayableItemDraft = {
   id: string;
   description: string;
+  inventory_code: string;
   quantity: string;
   unit_amount: string;
   generate_stock: boolean;
@@ -309,6 +310,7 @@ function createPayableItemDraft(item?: FinancialEntryItem, index = 0): PayableIt
   return {
     id: item?.id ?? `item-${Date.now()}-${index}`,
     description: item?.description ?? "",
+    inventory_code: "",
     quantity: item ? String(item.quantity).replace(".", ",") : "1",
     unit_amount: centsToInput(item?.unit_amount_cents),
     generate_stock: item?.generate_stock ?? false,
@@ -627,21 +629,54 @@ export function FinancialEntryForm({
   const [items, setItems] = useState<PayableItemDraft[]>(() =>
     entry?.items?.length ? entry.items.map((item, index) => createPayableItemDraft(item, index)) : [createPayableItemDraft()],
   );
+  const inventoryDatalistId = "financial-payable-inventory-items";
+  const inventoryById = useMemo(() => new Map(inventoryItems.map((item) => [item.id, item])), [inventoryItems]);
+
+  function inventoryOptionLabel(item: InventoryItem) {
+    return item.sku ? `${item.sku} - ${item.name}` : item.name;
+  }
+
+  function findInventoryItem(value: string) {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+
+    return (
+      inventoryItems.find((item) => {
+        const candidates = [
+          item.id,
+          item.sku ?? "",
+          item.name,
+          inventoryOptionLabel(item),
+          item.sku ? `${item.sku} ${item.name}` : "",
+        ];
+        return candidates.some((candidate) => candidate.trim().toLowerCase() === normalized);
+      }) ?? null
+    );
+  }
+
+  function patchItem(id: string, patch: Partial<Omit<PayableItemDraft, "id">>) {
+    setItems((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }
+
   const normalizedItems = useMemo(
     () =>
       items
-        .map((item) => ({
-          description: item.description.trim(),
-          quantity: Number(item.quantity.replace(",", ".")),
-          unit_amount: item.unit_amount,
-          generate_stock: item.generate_stock,
-          inventory_item_id: item.generate_stock && item.inventory_item_id !== "none" ? item.inventory_item_id : null,
-          inventory_location_id: item.generate_stock && item.inventory_location_id !== "none" ? item.inventory_location_id : null,
-          batch_number: item.generate_stock ? item.batch_number.trim() || null : null,
-          expires_at: item.generate_stock ? item.expires_at || null : null,
-        }))
+        .map((item) => {
+          const registeredItem = item.inventory_item_id !== "none" ? inventoryById.get(item.inventory_item_id) : null;
+          const controlsStock = registeredItem?.generate_stock ?? item.generate_stock;
+          return {
+            description: (registeredItem?.name ?? item.description).trim(),
+            quantity: Number(item.quantity.replace(",", ".")),
+            unit_amount: item.unit_amount,
+            generate_stock: controlsStock,
+            inventory_item_id: registeredItem?.id ?? null,
+            inventory_location_id: controlsStock && item.inventory_location_id !== "none" ? item.inventory_location_id : null,
+            batch_number: controlsStock ? item.batch_number.trim() || null : null,
+            expires_at: controlsStock ? item.expires_at || null : null,
+          };
+        })
         .filter((item) => item.description || inputToCents(item.unit_amount) > 0),
-    [items],
+    [inventoryById, items],
   );
   const itemsSubtotalCents = normalizedItems.reduce(
     (sum, item) => sum + Math.round((Number.isFinite(item.quantity) ? item.quantity : 0) * inputToCents(item.unit_amount)),
@@ -753,17 +788,55 @@ export function FinancialEntryForm({
               Adicionar item
             </Button>
           </div>
+          <datalist id={inventoryDatalistId}>
+            {inventoryItems.map((inventoryItem) => (
+              <option key={inventoryItem.id} value={inventoryOptionLabel(inventoryItem)}>
+                {inventoryItem.category ? `${inventoryItem.category} · ${inventoryItem.unit}` : inventoryItem.unit}
+              </option>
+            ))}
+          </datalist>
+          {!inventoryItems.length ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+              Cadastre os itens em Cadastros &gt; Itens antes de lançar documentos a pagar.
+            </div>
+          ) : null}
           <div className="grid gap-2">
             {items.map((item) => {
+              const selectedInventoryItem = item.inventory_item_id !== "none" ? inventoryById.get(item.inventory_item_id) : null;
+              const inventoryValue = item.inventory_code || (selectedInventoryItem ? inventoryOptionLabel(selectedInventoryItem) : "");
+              const controlsStock = selectedInventoryItem?.generate_stock ?? item.generate_stock;
               const lineTotal = Math.round(Number(item.quantity.replace(",", ".")) * inputToCents(item.unit_amount));
               return (
                 <div key={item.id} className="grid gap-3 rounded-md border bg-background p-3">
                   <div className="grid gap-2 lg:grid-cols-[minmax(240px,1fr)_110px_130px_130px_auto] lg:items-end">
                     <label className="grid gap-1.5 text-[13px] font-medium">
-                      Item
+                      Item cadastrado
                       <input
-                        value={item.description}
-                        onChange={(event) => updateItem(item.id, "description", event.target.value)}
+                        list={inventoryDatalistId}
+                        value={inventoryValue}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          const found = findInventoryItem(value);
+                          patchItem(item.id, {
+                            inventory_code: value,
+                            description: found?.name ?? value,
+                            inventory_item_id: found?.id ?? "none",
+                            generate_stock: found?.generate_stock ?? false,
+                            inventory_location_id: found?.generate_stock ? item.inventory_location_id : "none",
+                            batch_number: found?.generate_stock ? item.batch_number : "",
+                            expires_at: found?.generate_stock ? item.expires_at : "",
+                          });
+                        }}
+                        onBlur={(event) => {
+                          const found = findInventoryItem(event.target.value);
+                          if (!found) return;
+                          patchItem(item.id, {
+                            inventory_code: inventoryOptionLabel(found),
+                            description: found.name,
+                            inventory_item_id: found.id,
+                            generate_stock: found.generate_stock,
+                          });
+                        }}
                         placeholder="Descrição do item"
                         className="h-9 rounded-md border bg-background px-3 text-[13px] font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
@@ -789,8 +862,9 @@ export function FinancialEntryForm({
                       <input
                         type="checkbox"
                         className="size-3.5"
-                        checked={item.generate_stock}
-                        onChange={(event) => updateItem(item.id, "generate_stock", event.target.checked)}
+                        checked={controlsStock}
+                        readOnly
+                        disabled
                       />
                       Gerar estoque
                     </label>
@@ -798,8 +872,15 @@ export function FinancialEntryForm({
                       Material
                       <Select
                         value={item.inventory_item_id}
-                        onChange={(event) => updateItem(item.id, "inventory_item_id", event.target.value)}
-                        disabled={!item.generate_stock}
+                        onChange={(event) => {
+                          const found = inventoryById.get(event.target.value);
+                          patchItem(item.id, {
+                            inventory_item_id: found?.id ?? "none",
+                            inventory_code: found ? inventoryOptionLabel(found) : "",
+                            description: found?.name ?? "",
+                            generate_stock: found?.generate_stock ?? false,
+                          });
+                        }}
                       >
                         <option value="none">Selecione</option>
                         {inventoryItems.map((inventoryItem) => (
@@ -814,7 +895,7 @@ export function FinancialEntryForm({
                       <Select
                         value={item.inventory_location_id}
                         onChange={(event) => updateItem(item.id, "inventory_location_id", event.target.value)}
-                        disabled={!item.generate_stock}
+                        disabled={!controlsStock}
                       >
                         <option value="none">Padrão</option>
                         {inventoryLocations.map((location) => (
@@ -829,7 +910,7 @@ export function FinancialEntryForm({
                       <input
                         value={item.batch_number}
                         onChange={(event) => updateItem(item.id, "batch_number", event.target.value)}
-                        disabled={!item.generate_stock}
+                        disabled={!controlsStock}
                         className="h-9 rounded-md border bg-background px-2 text-xs font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                       />
                     </label>
@@ -839,7 +920,7 @@ export function FinancialEntryForm({
                         type="date"
                         value={item.expires_at}
                         onChange={(event) => updateItem(item.id, "expires_at", event.target.value)}
-                        disabled={!item.generate_stock}
+                        disabled={!controlsStock}
                         className="h-9 rounded-md border bg-background px-2 text-xs font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                       />
                     </label>

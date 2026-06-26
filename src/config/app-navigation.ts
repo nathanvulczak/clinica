@@ -91,6 +91,7 @@ export const APP_NAVIGATION_MODULES: AppNavigationModule[] = [
       { label: "Profissionais", href: "/cadastros?section=professionals" },
       { label: "Serviços", href: "/cadastros?section=services" },
       { label: "Consultórios", href: "/cadastros?section=rooms" },
+      { label: "Itens", href: "/cadastros?section=items", navigationKey: "inventory" },
       { label: "Preferências", href: "/cadastros?section=preferences", separatorBefore: true },
     ],
   },

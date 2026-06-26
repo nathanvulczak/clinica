@@ -2,8 +2,8 @@
 
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
-import { Activity, Check, ChevronDown, LogOut, Settings, UserCircle } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Activity, Check, ChevronDown, ChevronLeft, ChevronRight, LogOut, Settings, UserCircle } from "lucide-react";
 import {
   APP_NAVIGATION_MODULES,
   type AppNavigationItem,
@@ -195,7 +195,9 @@ export function TopNavigation({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const navRef = useRef<HTMLElement | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [scrollState, setScrollState] = useState({ left: false, right: false });
   const [pending, startTransition] = useTransition();
   const allowed = useMemo(() => new Set(allowedNavigation), [allowedNavigation]);
   const modules = useMemo(
@@ -219,6 +221,34 @@ export function TopNavigation({
     });
   }
 
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+
+    const updateScrollState = () => {
+      const maxScroll = nav.scrollWidth - nav.clientWidth;
+      setScrollState({
+        left: nav.scrollLeft > 2,
+        right: nav.scrollLeft < maxScroll - 2,
+      });
+    };
+
+    updateScrollState();
+    nav.addEventListener("scroll", updateScrollState, { passive: true });
+    window.addEventListener("resize", updateScrollState);
+
+    return () => {
+      nav.removeEventListener("scroll", updateScrollState);
+      window.removeEventListener("resize", updateScrollState);
+    };
+  }, [modules]);
+
+  function scrollModules(direction: "left" | "right") {
+    const nav = navRef.current;
+    if (!nav) return;
+    nav.scrollBy({ left: direction === "left" ? -240 : 240, behavior: "smooth" });
+  }
+
   const firstName = profile?.full_name?.split(" ")[0] || "Perfil";
 
   return (
@@ -240,10 +270,22 @@ export function TopNavigation({
         <ClinicSwitcher clinics={clinics} activeClinicId={activeClinic?.id} />
         <span className="mx-1 h-5 w-px shrink-0 bg-black/10" aria-hidden="true" />
 
-        <nav
-          className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          aria-label="Módulos do sistema"
-        >
+        <div className="flex min-w-0 flex-1 items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => scrollModules("left")}
+            disabled={!scrollState.left}
+            className="flex size-7 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors duration-75 hover:bg-black/[0.055] hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+            aria-label="Ver módulos anteriores"
+            title="Ver módulos anteriores"
+          >
+            <ChevronLeft className="size-3.5" />
+          </button>
+          <nav
+            ref={navRef}
+            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            aria-label="Módulos do sistema"
+          >
           {modules.map((module) => (
             <ModuleMenu
               key={module.id}
@@ -255,7 +297,18 @@ export function TopNavigation({
               navigate={navigate}
             />
           ))}
-        </nav>
+          </nav>
+          <button
+            type="button"
+            onClick={() => scrollModules("right")}
+            disabled={!scrollState.right}
+            className="flex size-7 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors duration-75 hover:bg-black/[0.055] hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+            aria-label="Ver próximos módulos"
+            title="Ver próximos módulos"
+          >
+            <ChevronRight className="size-3.5" />
+          </button>
+        </div>
 
         <DropdownMenu modal={false} onOpenChange={(open) => open && setOpenMenu(null)}>
           <DropdownMenuTrigger asChild>
