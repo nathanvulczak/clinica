@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { reportServerError } from "@/lib/observability";
 import type { PermissionModule } from "@/types/domain";
 
 type AuditPayload = {
@@ -20,7 +21,7 @@ export async function logAuditEvent(payload: AuditPayload) {
   const headerStore = await headers();
   const forwardedFor = headerStore.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
 
-  await admin.from("audit_logs").insert({
+  const { error } = await admin.from("audit_logs").insert({
     clinic_id: payload.clinicId ?? null,
     user_id: payload.userId ?? null,
     action_type: payload.actionType,
@@ -36,4 +37,17 @@ export async function logAuditEvent(payload: AuditPayload) {
     created_by: payload.userId ?? null,
     updated_by: payload.userId ?? null,
   });
+
+  if (error) {
+    reportServerError("audit.log_event", error, {
+      actionType: payload.actionType,
+      clinicId: payload.clinicId,
+      userId: payload.userId,
+      recordTable: payload.recordTable,
+      recordId: payload.recordId,
+    });
+    return { ok: false as const };
+  }
+
+  return { ok: true as const };
 }

@@ -13,6 +13,8 @@ export const PERMISSION_MODULES: PermissionModule[] = [
   "nursing",
   "schedule",
   "financial",
+  "documents",
+  "inventory",
   "reports",
 ];
 

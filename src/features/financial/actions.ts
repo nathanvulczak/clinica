@@ -30,6 +30,7 @@ import {
   vendorSchema,
 } from "@/features/financial/validation";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { reportServerError } from "@/lib/observability";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatCurrencyBRL } from "@/lib/utils";
 import { getFinancialAccess, getFinancialPreferences } from "@/repositories/financial";
@@ -2755,54 +2756,48 @@ async function createPayment({
     created_by: userId,
     updated_by: userId,
   };
-  const { data, error } = await admin
-    .from("financial_payments")
-    .insert(payload)
-    .select("id")
-    .single<{ id: string }>();
-  if (error || !data) return { error: financialError(error, "Não foi possível registrar a baixa.") };
+  const direction = entryType === "receivable" ? "in" : "out";
+  const description =
+    entryType === "receivable" ? "Recebimento confirmado." : "Pagamento confirmado.";
+  const { data: paymentId, error } = await admin.rpc(
+    "create_financial_payment_transaction",
+    {
+      payment_payload: payload,
+      ledger_payload: {
+        account_id: accountId,
+        entry_id: entryId,
+        direction,
+        amount_cents: amountCents,
+        fee_cents: feeCents,
+        net_amount_cents: netAmount,
+        occurred_at: paidAt,
+        description,
+        source_type: "payment",
+        metadata: {
+          payment_method_id: paymentMethodId,
+          card_machine_id: cardMachineId,
+          expected_settlement_date: expectedSettlementDate,
+        },
+      },
+    },
+  );
 
-  if (accountId) {
-    const { data: account } = await admin
-      .from("financial_accounts")
-      .select("current_balance_cents")
-      .eq("id", accountId)
-      .maybeSingle<{ current_balance_cents: number }>();
-    if (account) {
-      await admin
-        .from("financial_accounts")
-        .update({
-          current_balance_cents:
-            account.current_balance_cents + (entryType === "receivable" ? netAmount : -netAmount),
-          updated_by: userId,
-        })
-        .eq("id", accountId);
-    }
+  if (error || typeof paymentId !== "string") {
+    reportServerError("financial.create_payment_transaction", error, {
+      clinicId,
+      entryId,
+      entryType,
+      accountId,
+    });
+    return {
+      error: financialError(
+        error,
+        "Não foi possível registrar a baixa de forma segura. Nenhum saldo foi alterado.",
+      ),
+    };
   }
 
-  await postLedgerEntry({
-    admin,
-    clinicId,
-    userId,
-    accountId,
-    entryId,
-    paymentId: data.id,
-    direction: entryType === "receivable" ? "in" : "out",
-    amountCents,
-    feeCents,
-    netAmountCents: netAmount,
-    occurredAt: paidAt,
-    description: entryType === "receivable" ? "Recebimento confirmado." : "Pagamento confirmado.",
-    sourceType: "payment",
-    sourceId: data.id,
-    metadata: {
-      payment_method_id: paymentMethodId,
-      card_machine_id: cardMachineId,
-      expected_settlement_date: expectedSettlementDate,
-    },
-  });
-
-  return { paymentId: data.id };
+  return { paymentId };
 }
 
 async function createReceipt({

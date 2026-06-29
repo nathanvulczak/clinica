@@ -10,6 +10,7 @@ import {
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { reportServerError } from "@/lib/observability";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
 import { logAuditEvent } from "@/services/audit/audit-service";
 
@@ -117,19 +118,6 @@ async function getPreferencesForAction(clinicId: string) {
     allowCompletedCorrections: data?.allow_completed_corrections ?? true,
     requireCorrectionReason: data?.require_correction_reason ?? true,
   };
-}
-
-async function transitionEncounter(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  encounterId: string,
-  targetStatus: "triage_in_progress" | "ready_for_consultation",
-  reason: string | null,
-) {
-  return supabase.rpc("transition_clinical_encounter", {
-    encounter_uuid: encounterId,
-    target_status: targetStatus,
-    transition_reason: reason,
-  });
 }
 
 export async function saveNursingAssessmentAction(
@@ -275,29 +263,29 @@ export async function saveNursingAssessmentAction(
     updated_by: context.user.id,
   };
 
-  if (encounter.status === "waiting_triage") {
-    const { error: startError } = await transitionEncounter(
-      context.supabase,
-      encounter.id,
-      "triage_in_progress",
-      "Pré-consulta iniciada pela ficha de enfermagem.",
-    );
+  const { data: savedId, error } = await context.supabase.rpc(
+    "save_nursing_assessment_transaction",
+    {
+      assessment_payload: payload,
+      complete_assessment: parsed.data.mode === "complete",
+      transition_reason: parsed.data.recommendations,
+    },
+  );
 
-    if (startError) {
-      return {
-        error:
-          "Não foi possível iniciar a pré-consulta deste paciente. Atualize a fila de Enfermagem e tente novamente.",
-      };
-    }
+  if (error || typeof savedId !== "string") {
+    reportServerError("nursing.save_assessment_transaction", error, {
+      clinicId: context.activeClinic.id,
+      encounterId: encounter.id,
+      mode: parsed.data.mode,
+    });
+    return {
+      error:
+        error?.message?.includes("INVALID_NURSING_STAGE") ||
+        error?.message?.includes("INVALID_NURSING_COMPLETION_STAGE")
+          ? "A etapa assistencial mudou. Atualize a fila de Enfermagem antes de continuar."
+          : "Não foi possível salvar a pré-consulta de forma segura. Atualize a página e tente novamente.",
+    };
   }
-
-  const { data: saved, error } = await admin
-    .from("nursing_assessments")
-    .upsert(payload, { onConflict: "encounter_id" })
-    .select("id")
-    .single<{ id: string }>();
-
-  if (error) return { error: "Não foi possível salvar a ficha de pré-consulta." };
 
   await logAuditEvent({
     clinicId: context.activeClinic.id,
@@ -310,28 +298,12 @@ export async function saveNursingAssessmentAction(
           : "nursing_assessment_created",
     module: "nursing",
     recordTable: "nursing_assessments",
-    recordId: saved.id,
+    recordId: savedId,
     oldValues: previous,
     newValues: payload,
     level: parsed.data.mode === "complete" ? "security" : "info",
     notes: "Ficha de pré-consulta registrada com rastreabilidade.",
   });
-
-  if (parsed.data.mode === "complete") {
-    const { error: transitionError } = await transitionEncounter(
-      context.supabase,
-      encounter.id,
-      "ready_for_consultation",
-      parsed.data.recommendations,
-    );
-
-    if (transitionError) {
-      return {
-        error:
-          "Ficha salva, mas não foi possível liberar o paciente para atendimento. Revise a fila de Enfermagem.",
-      };
-    }
-  }
 
   revalidatePath("/enfermagem");
   revalidatePath(`/enfermagem/${encounter.id}`);

@@ -43,6 +43,26 @@ export type AuditLogEntry = {
   } | null;
 };
 
+const technicalAuditActions = new Set(["record_created", "record_updated", "record_deleted"]);
+
+function deduplicateTechnicalAudit(logs: AuditLogEntry[]) {
+  const humanEvents = logs.filter((log) => !technicalAuditActions.has(log.action_type));
+
+  return logs.filter((log) => {
+    if (!technicalAuditActions.has(log.action_type)) return true;
+    if (!log.record_table || !log.record_id) return true;
+
+    const eventTime = new Date(log.created_at).getTime();
+    return !humanEvents.some(
+      (candidate) =>
+        candidate.user_id === log.user_id &&
+        candidate.record_table === log.record_table &&
+        candidate.record_id === log.record_id &&
+        Math.abs(new Date(candidate.created_at).getTime() - eventTime) <= 15_000,
+    );
+  });
+}
+
 export async function listCurrentUserAccessLogs(): Promise<AccessLog[]> {
   const supabase = await createSupabaseServerClient();
   const {
@@ -192,9 +212,13 @@ export async function listClinicAuditLogs(
     return [];
   }
 
-  const logs = [...((data ?? []) as unknown as AuditLogEntry[]), ...globalLogs]
+  const orderedLogs = [...((data ?? []) as unknown as AuditLogEntry[]), ...globalLogs]
     .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
     .slice(0, 200);
+  const logs =
+    filters.action_type && filters.action_type !== "all"
+      ? orderedLogs
+      : deduplicateTechnicalAudit(orderedLogs);
 
   if (filters.role && filters.role !== "all") {
     return logs.filter((log) => log.user?.platform_role === filters.role);

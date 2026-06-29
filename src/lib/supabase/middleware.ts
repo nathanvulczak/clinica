@@ -15,6 +15,9 @@ const protectedPrefixes = [
   "/atendimentos",
   "/prontuarios",
   "/financeiro",
+  "/documentos",
+  "/estoque",
+  "/administracao",
 ];
 const authPrefixes = ["/login", "/cadastro"];
 const subscriptionRequiredPrefixes = [
@@ -28,6 +31,9 @@ const subscriptionRequiredPrefixes = [
   "/atendimentos",
   "/prontuarios",
   "/financeiro",
+  "/documentos",
+  "/estoque",
+  "/administracao",
 ];
 
 function matchesRoute(pathname: string, route: string) {

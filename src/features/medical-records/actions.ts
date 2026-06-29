@@ -11,6 +11,7 @@ import {
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { reportServerError } from "@/lib/observability";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
 import { logAuditEvent } from "@/services/audit/audit-service";
 
@@ -157,19 +158,6 @@ async function getPreferencesForAction(clinicId: string) {
     allowCompletedCorrections: data?.allow_completed_corrections ?? true,
     requireCorrectionReason: data?.require_correction_reason ?? true,
   };
-}
-
-async function transitionEncounter(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  encounterId: string,
-  targetStatus: "consultation_in_progress" | "consultation_completed",
-  reason: string | null,
-) {
-  return supabase.rpc("transition_clinical_encounter", {
-    encounter_uuid: encounterId,
-    target_status: targetStatus,
-    transition_reason: reason,
-  });
 }
 
 function revalidateMedicalRecord(encounterId: string) {
@@ -357,16 +345,6 @@ export async function saveMedicalRecordAction(
     return { error: "Abra o fluxo formal de correcao e informe o motivo antes de alterar um prontuario concluido." };
   }
 
-  if (encounter.status === "ready_for_consultation") {
-    const { error } = await transitionEncounter(
-      context.supabase,
-      encounter.id,
-      "consultation_in_progress",
-      "Atendimento iniciado pelo prontuario.",
-    );
-    if (error) return { error: "Nao foi possivel iniciar o atendimento. Atualize a fila e tente novamente." };
-  }
-
   const payload = {
     clinic_id: encounter.clinic_id,
     encounter_id: encounter.id,
@@ -396,13 +374,29 @@ export async function saveMedicalRecordAction(
     updated_by: context.user.id,
   };
 
-  const { data: saved, error } = await admin
-    .from("medical_records")
-    .upsert(payload, { onConflict: "encounter_id" })
-    .select("id")
-    .single<{ id: string }>();
+  const { data: savedId, error } = await context.supabase.rpc(
+    "save_medical_record_transaction",
+    {
+      record_payload: payload,
+      complete_record: parsed.data.mode === "complete",
+      transition_reason: parsed.data.follow_up_notes,
+    },
+  );
 
-  if (error) return { error: "Nao foi possivel salvar o prontuario." };
+  if (error || typeof savedId !== "string") {
+    reportServerError("medical_records.save_transaction", error, {
+      clinicId: context.activeClinic.id,
+      encounterId: encounter.id,
+      mode: parsed.data.mode,
+    });
+    return {
+      error:
+        error?.message?.includes("INVALID_MEDICAL_RECORD_STAGE") ||
+        error?.message?.includes("INVALID_MEDICAL_COMPLETION_STAGE")
+          ? "A etapa assistencial mudou. Atualize a fila de Atendimentos antes de continuar."
+          : "Nao foi possivel salvar o prontuario de forma segura. Atualize a pagina e tente novamente.",
+    };
+  }
 
   await logAuditEvent({
     clinicId: context.activeClinic.id,
@@ -415,7 +409,7 @@ export async function saveMedicalRecordAction(
           : "medical_record_created",
     module: "medical_records",
     recordTable: "medical_records",
-    recordId: saved.id,
+    recordId: savedId,
     oldValues: previous,
     newValues: payload,
     level: parsed.data.mode === "complete" ? "security" : "info",
@@ -430,24 +424,8 @@ export async function saveMedicalRecordAction(
         applied_at: new Date().toISOString(),
         updated_by: context.user.id,
       })
-      .eq("medical_record_id", saved.id)
+      .eq("medical_record_id", savedId)
       .eq("status", "opened");
-  }
-
-  if (parsed.data.mode === "complete") {
-    const { error: transitionError } = await transitionEncounter(
-      context.supabase,
-      encounter.id,
-      "consultation_completed",
-      parsed.data.follow_up_notes,
-    );
-
-    if (transitionError) {
-      return {
-        error:
-          "Prontuario salvo, mas nao foi possivel concluir o atendimento. Revise a fila de Atendimentos.",
-      };
-    }
   }
 
   revalidateMedicalRecord(encounter.id);
