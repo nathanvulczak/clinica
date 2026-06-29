@@ -149,22 +149,22 @@ function NursingSummary({ detail }: { detail: MedicalRecordEncounterDetail }) {
       <div className="grid gap-3 text-sm lg:grid-cols-2">
         <div className="rounded-md border bg-muted/20 p-3">
           <p className="text-xs font-medium uppercase text-muted-foreground">Queixa</p>
-          <p className="mt-1">{assessment.chief_complaint ?? "Nao informada"}</p>
+          <p className="selectable mt-1">{assessment.chief_complaint ?? "Nao informada"}</p>
         </div>
         <div className="rounded-md border bg-muted/20 p-3">
           <p className="text-xs font-medium uppercase text-muted-foreground">Sinais vitais</p>
-          <p className="mt-1">{vitals.length ? vitals.join(" | ") : "Nao informados"}</p>
+          <p className="selectable mt-1">{vitals.length ? vitals.join(" | ") : "Nao informados"}</p>
         </div>
         <div className="rounded-md border bg-muted/20 p-3">
           <p className="text-xs font-medium uppercase text-muted-foreground">Alergias / medicacoes</p>
-          <p className="mt-1">
+          <p className="selectable mt-1">
             {[assessment.allergies, assessment.current_medications].filter(Boolean).join(" | ") ||
               "Nao informado"}
           </p>
         </div>
         <div className="rounded-md border bg-muted/20 p-3">
           <p className="text-xs font-medium uppercase text-muted-foreground">Recomendacoes</p>
-          <p className="mt-1">{assessment.recommendations ?? "Sem recomendacoes registradas"}</p>
+          <p className="selectable mt-1">{assessment.recommendations ?? "Sem recomendacoes registradas"}</p>
         </div>
       </div>
     </section>

@@ -1,12 +1,23 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { createDatabaseClient, readSqlFile } from "./database-utils.mjs";
 
-const migrationPath = process.argv[2];
+const requestedPath = process.argv.slice(2).find((argument) => argument !== "--apply");
+const migrationPath =
+  requestedPath ??
+  path.join(
+    "supabase/migrations",
+    fs
+      .readdirSync(path.resolve(process.cwd(), "supabase/migrations"))
+      .filter((file) => file.endsWith(".sql"))
+      .sort()
+      .at(-1) ?? "",
+  );
 const apply = process.argv.includes("--apply");
 
-if (!migrationPath) {
-  throw new Error("Uso: node scripts/run-migration.mjs <migration.sql> [--apply]");
+if (!requestedPath && !path.basename(migrationPath)) {
+  throw new Error("Nenhuma migration SQL foi encontrada.");
 }
 
 const sql = readSqlFile(migrationPath);

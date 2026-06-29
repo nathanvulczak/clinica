@@ -7,6 +7,7 @@ import type { AppRole, PermissionModule } from "@/types/domain";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CopyableText } from "@/components/ui/copy-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -454,7 +455,13 @@ export default async function AuditoriaPage({
                           {tableLabels[log.record_table ?? ""] ?? moduleLabels[log.module ?? ""] ?? "Registro do sistema"}
                         </p>
                         <p className="text-xs text-muted-foreground">{log.notes ?? "Evento auditado."}</p>
-                        {log.record_id ? <p className="text-xs text-muted-foreground">ID: {log.record_id}</p> : null}
+                        {log.record_id ? (
+                          <div className="text-xs text-muted-foreground">
+                            <CopyableText value={log.record_id} label="Copiar ID do registro">
+                              ID: {log.record_id}
+                            </CopyableText>
+                          </div>
+                        ) : null}
                         {log.ip_address ? <p className="text-xs text-muted-foreground">IP: {log.ip_address}</p> : null}
                       </div>
                       <details className="text-xs">

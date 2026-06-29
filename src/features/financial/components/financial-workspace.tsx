@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CopyableText } from "@/components/ui/copy-button";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
@@ -1650,10 +1651,15 @@ function EntryTableRow({
       </td>
       <td className="min-w-72 px-3 py-2.5">
         <p className="whitespace-normal break-words font-medium">{entry.description}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {entry.entry_type === "payable" ? documentTypeLabel(entry.document_type) : entry.origin}
-          {entry.document_number ? ` | ${entry.document_number}` : ""}
-        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          <span>{entry.entry_type === "payable" ? documentTypeLabel(entry.document_type) : entry.origin}</span>
+          {entry.document_number ? (
+            <>
+              <span aria-hidden="true">|</span>
+              <CopyableText value={entry.document_number} label="Copiar número do documento" />
+            </>
+          ) : null}
+        </div>
       </td>
       <td className="whitespace-nowrap px-3 py-2.5 tabular-nums">
         <span className={isOverdue(entry) ? "font-medium text-amber-700" : undefined}>{formatDate(entry.due_date)}</span>

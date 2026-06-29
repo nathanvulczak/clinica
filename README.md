@@ -73,6 +73,7 @@ npm run typecheck
 npm run build
 npm run db:migration:check
 npm run db:health
+npm run clinical:health
 npm run stripe:health
 ```
 

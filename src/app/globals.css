@@ -64,6 +64,47 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ERP-like interaction: interface chrome is not accidentally selectable. */
+.app-interface,
+.app-interface * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.app-interface :is(
+    input,
+    textarea,
+    [contenteditable="true"],
+    [contenteditable="plaintext-only"],
+    pre,
+    code,
+    .selectable,
+    .selectable *
+  ) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.app-interface :is(
+    button,
+    a,
+    nav,
+    [role="button"],
+    [role="menu"],
+    [role="menuitem"],
+    [role="tab"],
+    [role="navigation"],
+    input[type="button"],
+    input[type="submit"],
+    input[type="reset"],
+    input[type="checkbox"],
+    input[type="radio"],
+    .select-none
+  ) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 main table {
   width: 100%;
   font-size: 13px;

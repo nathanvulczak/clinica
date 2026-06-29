@@ -7,6 +7,7 @@ import { ClinicStatusToast } from "@/features/clinics/components/clinic-status-t
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CopyableText } from "@/components/ui/copy-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentSubscription } from "@/repositories/subscriptions";
 import type { PlanSlug } from "@/types/domain";
@@ -88,7 +89,13 @@ export default async function ClinicasPage({
             <CardContent className="grid gap-2 text-sm text-muted-foreground">
               <p>{clinic.legal_name}</p>
               <p>{[clinic.city, clinic.state].filter(Boolean).join(" / ") || "Endereço não informado"}</p>
-              <p>{clinic.email ?? "E-mail administrativo não informado"}</p>
+              <div>
+                {clinic.email ? (
+                  <CopyableText value={clinic.email} label="Copiar e-mail administrativo" />
+                ) : (
+                  <span>E-mail administrativo não informado</span>
+                )}
+              </div>
             </CardContent>
           </Card>
         ))}

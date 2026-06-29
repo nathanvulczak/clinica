@@ -38,6 +38,7 @@ Execute os arquivos uma única vez e na ordem numérica:
 32. `032_documents_inventory_enums.sql`
 33. `033_documents_inventory_operations.sql`
 34. `034_security_transactions_quality.sql`
+35. `035_clinical_encounter_routing_integrity.sql`
 
 As execuções são registradas em `app_migration_history`. Use os scripts do
 projeto para validar e aplicar uma migration com checksum, sem colar SQL

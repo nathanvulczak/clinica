@@ -1,10 +1,16 @@
+import fs from "node:fs";
+import path from "node:path";
 import { createDatabaseClient } from "./database-utils.mjs";
+
+const expectedMigrationCount = fs
+  .readdirSync(path.resolve(process.cwd(), "supabase/migrations"))
+  .filter((file) => file.endsWith(".sql")).length;
 
 const checks = [
   {
     name: "migrations registradas",
     sql: "select count(*)::integer as value from public.app_migration_history",
-    validate: (value) => value >= 34,
+    validate: (value) => value >= expectedMigrationCount,
   },
   {
     name: "tabelas publicas sem RLS",

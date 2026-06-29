@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { CopyableText } from "@/components/ui/copy-button";
 
 const PAGE_SIZE = 8;
 
@@ -117,13 +118,29 @@ export function PatientsPanel({
                   {patient.social_name ? (
                     <p className="mt-1 text-xs text-muted-foreground">Nome civil: {patient.full_name}</p>
                   ) : null}
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {patient.cpf ? formatCpf(patient.cpf) : "CPF não informado"} •{" "}
-                    {patient.phone ? formatPhone(patient.phone) : "telefone não informado"}
-                  </p>
-                  <p className="mt-1 break-all text-xs text-muted-foreground">
-                    {patient.email ?? "E-mail não informado"}
-                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                    {patient.cpf ? (
+                      <CopyableText value={patient.cpf} label="Copiar CPF">
+                        {formatCpf(patient.cpf)}
+                      </CopyableText>
+                    ) : (
+                      <span>CPF não informado</span>
+                    )}
+                    {patient.phone ? (
+                      <CopyableText value={patient.phone} label="Copiar telefone">
+                        {formatPhone(patient.phone)}
+                      </CopyableText>
+                    ) : (
+                      <span>Telefone não informado</span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {patient.email ? (
+                      <CopyableText value={patient.email} label="Copiar e-mail" />
+                    ) : (
+                      <span>E-mail não informado</span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button

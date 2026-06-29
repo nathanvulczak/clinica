@@ -7,6 +7,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
 import { logAuditEvent } from "@/services/audit/audit-service";
+import { ensureClinicalEncounterForAppointment } from "@/services/clinical-workflow/ensure-encounter";
 import type { ClinicalEncounterStatus } from "@/types/domain";
 
 export type ClinicalWorkflowActionState = {
@@ -15,21 +16,32 @@ export type ClinicalWorkflowActionState = {
   redirectTo?: string;
 };
 
+const optionalFormUuid = z.preprocess(
+  (value) => (value === null || value === "" ? undefined : value),
+  z.string().uuid().optional(),
+);
+
+const optionalFormText = (max: number) =>
+  z.preprocess(
+    (value) => (value === null || value === "" ? undefined : value),
+    z.string().trim().max(max).optional().transform((value) => value || null),
+  );
+
 const routeSchema = z.object({
-  encounter_id: z.string().uuid().optional(),
-  appointment_id: z.string().uuid().optional(),
+  encounter_id: optionalFormUuid,
+  appointment_id: optionalFormUuid,
   requires_preconsultation: z
     .enum(["true", "false", "on"])
     .transform((value) => value === "true" || value === "on"),
-  reason: z.string().trim().max(500).optional().transform((value) => value || null),
+  reason: optionalFormText(500),
 }).refine((value) => value.encounter_id || value.appointment_id, {
   message: "Informe o atendimento ou agendamento.",
 });
 
 const encounterSchema = z.object({
-  encounter_id: z.string().uuid().optional(),
-  appointment_id: z.string().uuid().optional(),
-  reason: z.string().trim().max(500).optional().transform((value) => value || null),
+  encounter_id: optionalFormUuid,
+  appointment_id: optionalFormUuid,
+  reason: optionalFormText(500),
 }).refine((value) => value.encounter_id || value.appointment_id, {
   message: "Informe o atendimento ou agendamento.",
 });
@@ -87,16 +99,18 @@ async function resolveEncounterId(
   encounterId?: string,
   appointmentId?: string,
 ) {
-  if (encounterId) return encounterId;
-  if (!appointmentId) return null;
+  if (!encounterId && !appointmentId) return null;
 
-  const { data } = await admin
+  let query = admin
     .from("clinical_encounters")
     .select("id")
-    .eq("appointment_id", appointmentId)
     .eq("clinic_id", clinicId)
-    .is("deleted_at", null)
-    .maybeSingle<{ id: string }>();
+    .is("deleted_at", null);
+
+  query = encounterId ? query.eq("id", encounterId) : query.eq("appointment_id", appointmentId!);
+  if (encounterId && appointmentId) query = query.eq("appointment_id", appointmentId);
+
+  const { data } = await query.maybeSingle<{ id: string }>();
 
   return data?.id ?? null;
 }
@@ -109,39 +123,54 @@ export async function routeClinicalEncounterAction(
     encounter_id: formData.get("encounter_id") || undefined,
     appointment_id: formData.get("appointment_id") || undefined,
     requires_preconsultation: formData.get("requires_preconsultation"),
-    reason: formData.get("reason"),
+    reason: formData.get("reason") || undefined,
   });
-  if (!parsed.success) return { error: "Não foi possível identificar o atendimento para encaminhar." };
-
-  const context = await getContext();
-  if (!context) return { error: "Selecione uma clínica e autentique-se novamente." };
-  const admin = createSupabaseAdminClient();
-  const encounterId = await resolveEncounterId(
-    admin,
-    context.activeClinic.id,
-    parsed.data.encounter_id,
-    parsed.data.appointment_id,
-  );
-
-  if (!encounterId) {
+  if (!parsed.success) {
     return {
       error:
-        "Atendimento não encontrado para este agendamento. Registre a chegada do paciente na Agenda e atualize a fila.",
+        "Os dados do encaminhamento estão incompletos. Atualize a fila assistencial e tente novamente.",
     };
   }
 
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clínica e autentique-se novamente." };
   if (!context.access.canRoute) {
     await logAuditEvent({
       clinicId: context.activeClinic.id,
       userId: context.user.id,
       actionType: "access_denied",
       module: "medical_records",
-      recordTable: "clinical_encounters",
-      recordId: encounterId,
+      recordTable: parsed.data.encounter_id ? "clinical_encounters" : "appointments",
+      recordId: parsed.data.encounter_id ?? parsed.data.appointment_id,
       level: "security",
       notes: "Tentativa negada de definir encaminhamento assistencial.",
     });
     return { error: "Seu perfil não pode definir este fluxo." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  let encounterId = await resolveEncounterId(
+    admin,
+    context.activeClinic.id,
+    parsed.data.encounter_id,
+    parsed.data.appointment_id,
+  );
+
+  if (!encounterId && parsed.data.appointment_id) {
+    const ensured = await ensureClinicalEncounterForAppointment({
+      appointmentId: parsed.data.appointment_id,
+      clinicId: context.activeClinic.id,
+      actorId: context.user.id,
+    });
+    if (!ensured.ok) return { error: ensured.error };
+    encounterId = ensured.encounterId;
+  }
+
+  if (!encounterId) {
+    return {
+      error:
+        "Atendimento não encontrado para este agendamento. Registre a chegada do paciente na Agenda e atualize a fila.",
+    };
   }
 
   const { data: previous } = await admin
@@ -215,7 +244,7 @@ async function transitionClinicalEncounter(
   const parsed = encounterSchema.safeParse({
     encounter_id: formData.get("encounter_id") || undefined,
     appointment_id: formData.get("appointment_id") || undefined,
-    reason: formData.get("reason"),
+    reason: formData.get("reason") || undefined,
   });
   if (!parsed.success) {
     return {
@@ -228,12 +257,22 @@ async function transitionClinicalEncounter(
   if (!context) return { error: "Selecione uma clínica e autentique-se novamente." };
 
   const admin = createSupabaseAdminClient();
-  const encounterId = await resolveEncounterId(
+  let encounterId = await resolveEncounterId(
     admin,
     context.activeClinic.id,
     parsed.data.encounter_id,
     parsed.data.appointment_id,
   );
+
+  if (!encounterId && parsed.data.appointment_id) {
+    const ensured = await ensureClinicalEncounterForAppointment({
+      appointmentId: parsed.data.appointment_id,
+      clinicId: context.activeClinic.id,
+      actorId: context.user.id,
+    });
+    if (!ensured.ok) return { error: ensured.error };
+    encounterId = ensured.encounterId;
+  }
 
   if (!encounterId) {
     return {

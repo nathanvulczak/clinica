@@ -22,6 +22,7 @@ import { useToast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { CopyableText } from "@/components/ui/copy-button";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
@@ -170,11 +171,17 @@ function MemberRow({
                 </Badge>
                 {isSelf ? <Badge>Você</Badge> : null}
               </div>
-              <p className="mt-1 break-all text-sm text-muted-foreground">
-                {member.profile?.email ?? "E-mail não informado"}
-              </p>
+              <div className="mt-1 text-sm text-muted-foreground">
+                {member.profile?.email ? (
+                  <CopyableText value={member.profile.email} label="Copiar e-mail" />
+                ) : (
+                  <span>E-mail não informado</span>
+                )}
+              </div>
               {member.profile?.phone ? (
-                <p className="mt-1 text-xs text-muted-foreground">{member.profile.phone}</p>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  <CopyableText value={member.profile.phone} label="Copiar telefone" />
+                </div>
               ) : null}
               <p className="mt-2 max-w-3xl text-xs leading-5 text-muted-foreground">
                 {ROLE_PRESET_DESCRIPTIONS[member.role]}

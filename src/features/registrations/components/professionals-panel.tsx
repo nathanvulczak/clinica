@@ -25,6 +25,7 @@ import {
 } from "@/features/schedule/components/schedule-forms";
 import { formatDateTimeBr, getTodayInputDate } from "@/lib/dates";
 import { formatPhone } from "@/lib/formatters";
+import { CopyableText } from "@/components/ui/copy-button";
 import type {
   ClinicRoom,
   ClinicService,
@@ -159,12 +160,20 @@ export function ProfessionalsPanel({
                   <p className="mt-1 text-sm text-muted-foreground">
                     {professionalProfile?.specialty ?? "Especialidade não informada"}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {professional.profile?.email ?? "E-mail não informado"} •{" "}
-                    {professional.profile?.phone
-                      ? formatPhone(professional.profile.phone)
-                      : "telefone não informado"}
-                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    {professional.profile?.email ? (
+                      <CopyableText value={professional.profile.email} label="Copiar e-mail" />
+                    ) : (
+                      <span>E-mail não informado</span>
+                    )}
+                    {professional.profile?.phone ? (
+                      <CopyableText value={professional.profile.phone} label="Copiar telefone">
+                        {formatPhone(professional.profile.phone)}
+                      </CopyableText>
+                    ) : (
+                      <span>Telefone não informado</span>
+                    )}
+                  </div>
                 </div>
               </div>
 

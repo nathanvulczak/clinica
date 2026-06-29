@@ -34,7 +34,7 @@ export default async function FinancialReceiptPage({
   const open = Math.max(total - detail.entry.paid_cents, 0);
 
   return (
-    <main className="mx-auto grid max-w-4xl gap-6 bg-background p-8 print:max-w-none print:p-0">
+    <main className="report-content selectable mx-auto grid max-w-4xl gap-6 bg-background p-8 print:max-w-none print:p-0">
       <style>{`
         @page { size: A4; margin: 16mm; }
         @media print {

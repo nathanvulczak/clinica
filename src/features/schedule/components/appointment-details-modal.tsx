@@ -43,6 +43,7 @@ import type {
 } from "@/types/domain";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CopyableText } from "@/components/ui/copy-button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -263,10 +264,18 @@ function AppointmentSummaryView({
             {appointment.room?.name ?? "A definir"}
           </Detail>
           <Detail icon={MessageCircle} label="Telefone">
-            {appointment.patient?.phone ?? "Não informado"}
+            {appointment.patient?.phone ? (
+              <CopyableText value={appointment.patient.phone} label="Copiar telefone" />
+            ) : (
+              "Não informado"
+            )}
           </Detail>
           <Detail icon={Mail} label="E-mail">
-            {appointment.patient?.email ?? "Não informado"}
+            {appointment.patient?.email ? (
+              <CopyableText value={appointment.patient.email} label="Copiar e-mail" />
+            ) : (
+              "Não informado"
+            )}
           </Detail>
         </div>
 
@@ -813,7 +822,11 @@ function AppointmentNotifications({
         <Bell className="size-4 text-primary" />
         <p className="text-sm font-medium">Confirmação do paciente</p>
       </div>
-      <p className="break-all text-xs leading-5 text-muted-foreground">{confirmationUrl}</p>
+      <CopyableText
+        value={confirmationUrl}
+        label="Copiar link de confirmação"
+        className="text-xs leading-5 text-muted-foreground"
+      />
       <div className="grid grid-cols-2 gap-2">
         <form action={emailAction}>
           <input type="hidden" name="appointment_id" value={appointment.id} />

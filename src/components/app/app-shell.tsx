@@ -64,7 +64,7 @@ export function AppShell({
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="app-interface min-h-screen bg-background" data-app-interface>
       <TopNavigation
         profile={profile}
         clinics={clinics}
