@@ -69,6 +69,12 @@ O banco inclui:
 
 ```bash
 npm run lint
-npx tsc --noEmit
+npm run typecheck
 npm run build
+npm run db:migration:check
+npm run db:health
+npm run stripe:health
 ```
+
+O processo de migrations, testes transacionais, segurança e recuperação está
+documentado em [`docs/quality-security.md`](docs/quality-security.md).

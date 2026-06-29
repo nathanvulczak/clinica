@@ -23,10 +23,25 @@ Execute os arquivos uma única vez e na ordem numérica:
 17. `017_repair_missing_clinical_encounters.sql`
 18. `018_nursing_assessments.sql`
 19. `019_nursing_module_preferences.sql`
+20. `020_medical_records_module.sql`
+21. `021_medical_records_documents_lgpd.sql`
+22. `022_medical_records_polish.sql`
+23. `023_financial_module.sql`
+24. `024_financial_reconciliation.sql`
+25. `025_financial_enterprise_foundation.sql`
+26. `026_financial_payables_documents.sql`
+27. `027_financial_commissions_bank_imports.sql`
+28. `028_financial_monthly_close_realtime.sql`
+29. `029_commission_settlements_clinic_branding.sql`
+30. `030_permission_backup_dashboard_alignment.sql`
+31. `031_role_permissions_unique_active.sql`
+32. `032_documents_inventory_enums.sql`
+33. `033_documents_inventory_operations.sql`
+34. `034_security_transactions_quality.sql`
 
-Não execute novamente migrations já aplicadas. Para conferir o controle do
-ambiente hospedado, registre a execução em uma planilha de implantação ou adote
-o Supabase CLI antes da próxima entrega de produção.
+As execuções são registradas em `app_migration_history`. Use os scripts do
+projeto para validar e aplicar uma migration com checksum, sem colar SQL
+manualmente em produção.
 
 ## Migration 012
 
@@ -68,8 +83,8 @@ Estas migrations:
 
 ## Testes de banco
 
-O arquivo `tests/001_schedule_rls.test.sql` usa pgTAP e executa tudo dentro de
-uma transação com `rollback`. Ele valida:
+Os arquivos em `tests/*.test.sql` usam pgTAP e executam tudo dentro de
+transações com `rollback`. Eles validam:
 
 - visão ampla do proprietário;
 - leitura e edição permitidas ao médico;
@@ -80,11 +95,21 @@ uma transação com `rollback`. Ele valida:
 - consulta de assinatura, sem gestão, para o financeiro;
 - bloqueio de transições inválidas;
 - bloqueio total para usuário sem vínculo.
+- privilégios de funções administrativas e policies de anexos clínicos;
+- integridade entre pagamentos confirmados e ledger;
+- transações completas de pré-consulta, prontuário e baixa financeira.
 
 Com Supabase CLI:
 
 ```bash
 supabase test db
+```
+
+Com a conexão de banco configurada localmente:
+
+```bash
+$env:ALLOW_DATABASE_TESTS="true"
+npm run test:database
 ```
 
 No SQL Editor, o teste também pode ser executado manualmente em um projeto de
