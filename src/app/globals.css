@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "react-grid-layout/css/styles.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -176,6 +177,97 @@ main :is(button, a, input, select, textarea):focus-visible {
 .financial-density table td {
   padding-top: 0.625rem;
   padding-bottom: 0.625rem;
+}
+
+.dashboard-grid .react-grid-item {
+  transition: transform 160ms ease, width 160ms ease, height 160ms ease;
+}
+
+.dashboard-grid .react-grid-item.react-draggable-dragging,
+.dashboard-grid .react-grid-item.resizing {
+  z-index: 30;
+  transition: none;
+}
+
+.dashboard-grid .react-grid-placeholder {
+  border: 1px dashed color-mix(in srgb, var(--primary) 58%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  opacity: 1;
+}
+
+.dashboard-grid .react-resizable-handle::after {
+  border-color: color-mix(in srgb, var(--primary) 70%, transparent);
+}
+
+.schedule-fullcalendar {
+  --fc-border-color: var(--border);
+  --fc-page-bg-color: var(--card);
+  --fc-neutral-bg-color: color-mix(in srgb, var(--muted) 62%, transparent);
+  --fc-today-bg-color: color-mix(in srgb, var(--primary) 5%, transparent);
+  --fc-now-indicator-color: #dc2626;
+  --fc-small-font-size: 0.72rem;
+}
+
+.schedule-fullcalendar .fc {
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.schedule-fullcalendar .fc-scrollgrid,
+.schedule-fullcalendar .fc-theme-standard td,
+.schedule-fullcalendar .fc-theme-standard th {
+  border-color: var(--border);
+}
+
+.schedule-fullcalendar .fc-col-header-cell-cushion,
+.schedule-fullcalendar .fc-daygrid-day-number {
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 8px;
+}
+
+.schedule-fullcalendar .fc-timegrid-slot-label-cushion {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-fullcalendar .fc-timegrid-slot {
+  height: 1.45rem;
+}
+
+.schedule-fullcalendar .fc-event {
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 10%);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.schedule-fullcalendar .fc-event-dragging,
+.schedule-fullcalendar .fc-event-resizing {
+  box-shadow: 0 8px 20px rgb(15 23 42 / 18%);
+  opacity: 0.92;
+}
+
+.schedule-fullcalendar .fc-list-event:hover td {
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+}
+
+.schedule-fullcalendar .fc-list-day-cushion {
+  background: color-mix(in srgb, var(--muted) 72%, var(--card));
+  font-size: 12px;
+}
+
+.schedule-fullcalendar .fc-bg-event {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 6px,
+    rgb(100 116 139 / 8%) 6px,
+    rgb(100 116 139 / 8%) 12px
+  );
 }
 
 .financial-density table td {

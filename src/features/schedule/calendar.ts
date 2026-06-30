@@ -1,4 +1,4 @@
-export type CalendarViewMode = "day" | "week" | "month";
+export type CalendarViewMode = "day" | "week" | "month" | "list" | "clinic";
 
 function parseInputDate(value: string) {
   return new Date(`${value}T12:00:00`);
@@ -20,7 +20,7 @@ function addDays(value: Date, amount: number) {
 export function getCalendarRange(date: string, view: CalendarViewMode) {
   const anchor = parseInputDate(date);
 
-  if (view === "day") {
+  if (view === "day" || view === "clinic") {
     return {
       startDate: date,
       endDate: date,
@@ -28,7 +28,7 @@ export function getCalendarRange(date: string, view: CalendarViewMode) {
     };
   }
 
-  if (view === "week") {
+  if (view === "week" || view === "list") {
     const day = anchor.getDay();
     const mondayOffset = day === 0 ? -6 : 1 - day;
     const start = addDays(anchor, mondayOffset);
@@ -57,11 +57,11 @@ export function getCalendarRange(date: string, view: CalendarViewMode) {
 export function getAdjacentCalendarDate(date: string, view: CalendarViewMode, direction: -1 | 1) {
   const anchor = parseInputDate(date);
 
-  if (view === "day") {
+  if (view === "day" || view === "clinic") {
     return toInputDate(addDays(anchor, direction));
   }
 
-  if (view === "week") {
+  if (view === "week" || view === "list") {
     return toInputDate(addDays(anchor, direction * 7));
   }
 
@@ -72,7 +72,7 @@ export function getAdjacentCalendarDate(date: string, view: CalendarViewMode, di
 export function getCalendarTitle(date: string, view: CalendarViewMode) {
   const anchor = parseInputDate(date);
 
-  if (view === "day") {
+  if (view === "day" || view === "clinic") {
     return anchor.toLocaleDateString("pt-BR", {
       day: "2-digit",
       month: "long",
@@ -80,7 +80,7 @@ export function getCalendarTitle(date: string, view: CalendarViewMode) {
     });
   }
 
-  if (view === "week") {
+  if (view === "week" || view === "list") {
     const range = getCalendarRange(date, view);
     const start = parseInputDate(range.startDate);
     const end = parseInputDate(range.endDate);

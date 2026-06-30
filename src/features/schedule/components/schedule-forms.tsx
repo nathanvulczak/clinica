@@ -85,6 +85,9 @@ export function AppointmentForm({
   professionalProfiles,
   scheduleSettings,
   defaultDate,
+  defaultStartTime = "08:00",
+  defaultDuration,
+  defaultProfessionalId,
   disabled,
   onCompleted,
 }: {
@@ -95,13 +98,17 @@ export function AppointmentForm({
   professionalProfiles: ProfessionalOperationalProfile[];
   scheduleSettings: ScheduleSettings[];
   defaultDate: string;
+  defaultStartTime?: string;
+  defaultDuration?: number;
+  defaultProfessionalId?: string;
   disabled?: boolean;
   onCompleted?: () => void;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction, pending] = useActionState(createAppointmentAction, {});
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const initialProfessionalId = professionals[0]?.id ?? "";
+  const initialProfessionalId =
+    professionals.find((item) => item.id === defaultProfessionalId)?.id ?? professionals[0]?.id ?? "";
   const initialProfessionalProfile = professionalProfiles.find(
     (item) => item.professional_member_id === initialProfessionalId,
   );
@@ -120,7 +127,7 @@ export function AppointmentForm({
   );
   const [roomId, setRoomId] = useState(initialRoom?.id ?? "none");
   const [duration, setDuration] = useState(
-    initialService?.duration_minutes ?? initialScheduleSettings?.slot_minutes ?? 30,
+    defaultDuration ?? initialService?.duration_minutes ?? initialScheduleSettings?.slot_minutes ?? 30,
   );
 
   useScheduleToast(state, "O compromisso entrou no fluxo da agenda e foi registrado na auditoria.");
@@ -255,7 +262,7 @@ export function AppointmentForm({
         </div>
         <div className="grid gap-2">
           <Label htmlFor="start_time">Início</Label>
-          <Input id="start_time" name="start_time" type="time" defaultValue="08:00" disabled={!canSubmit || pending} required />
+          <Input id="start_time" name="start_time" type="time" defaultValue={defaultStartTime} disabled={!canSubmit || pending} required />
         </div>
         <div className="grid gap-2">
           <Label htmlFor="duration_minutes">Duração</Label>

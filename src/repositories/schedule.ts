@@ -27,6 +27,7 @@ export type ScheduleFilters = {
   startDate?: string;
   endDate?: string;
   professionalId?: string;
+  professionalIds?: string[];
   status?: AppointmentStatus | "all";
 };
 
@@ -266,6 +267,8 @@ export async function listScheduleBlocks(
     }
 
     query = query.eq("professional_member_id", access.currentMemberId);
+  } else if (filters?.professionalIds?.length) {
+    query = query.in("professional_member_id", filters.professionalIds.slice(0, 6));
   } else if (filters?.professionalId && filters.professionalId !== "all") {
     query = query.eq("professional_member_id", filters.professionalId);
   }
@@ -303,6 +306,8 @@ export async function listAppointments(
     }
 
     query = query.eq("professional_member_id", access.currentMemberId);
+  } else if (filters?.professionalIds?.length) {
+    query = query.in("professional_member_id", filters.professionalIds.slice(0, 6));
   } else if (filters?.professionalId && filters.professionalId !== "all") {
     query = query.eq("professional_member_id", filters.professionalId);
   }

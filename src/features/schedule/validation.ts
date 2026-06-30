@@ -29,6 +29,23 @@ export const updateAppointmentSchema = createAppointmentSchema.extend({
   appointment_id: z.string().uuid("Compromisso não identificado."),
 });
 
+export const moveCalendarAppointmentSchema = z
+  .object({
+    appointmentId: z.string().uuid("Compromisso não identificado."),
+    startsAt: z.string().datetime({ offset: true }),
+    endsAt: z.string().datetime({ offset: true }),
+  })
+  .refine((data) => new Date(data.endsAt).getTime() > new Date(data.startsAt).getTime(), {
+    message: "O fim do compromisso deve ser posterior ao início.",
+  })
+  .refine(
+    (data) => {
+      const duration = new Date(data.endsAt).getTime() - new Date(data.startsAt).getTime();
+      return duration >= 5 * 60_000 && duration <= 12 * 60 * 60_000;
+    },
+    { message: "A duração deve ficar entre 5 minutos e 12 horas." },
+  );
+
 export const rescheduleAppointmentSchema = updateAppointmentSchema.extend({
   reason: z.string().trim().min(3, "Informe o motivo da remarcação.").max(500),
 });

@@ -1,39 +1,97 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Clock3, MapPin } from "lucide-react";
+import FullCalendar from "@fullcalendar/react";
+import dayGridPlugin from "@fullcalendar/daygrid";
+import timeGridPlugin from "@fullcalendar/timegrid";
+import listPlugin from "@fullcalendar/list";
+import interactionPlugin, { type EventResizeDoneArg } from "@fullcalendar/interaction";
+import ptBrLocale from "@fullcalendar/core/locales/pt-br";
+import type {
+  BusinessHoursInput,
+  DateSelectArg,
+  EventClickArg,
+  EventContentArg,
+  EventDropArg,
+  EventInput,
+} from "@fullcalendar/core";
 import {
-  APPOINTMENT_STATUS_LABELS,
-  SCHEDULE_BLOCK_TYPE_LABELS,
-} from "@/config/schedule";
+  CalendarRange,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  MapPin,
+  PanelsTopLeft,
+  SlidersHorizontal,
+  UserRound,
+} from "lucide-react";
+import { SCHEDULE_BLOCK_TYPE_LABELS } from "@/config/schedule";
+import { moveCalendarAppointmentAction } from "@/features/schedule/actions";
+import { AppointmentModal } from "@/features/schedule/components/appointment-modal";
 import {
   getAdjacentCalendarDate,
   getCalendarTitle,
+  toInputDate,
   type CalendarViewMode,
 } from "@/features/schedule/calendar";
 import { formatTimeBr, getTodayInputDate } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import type {
   AppointmentSummary,
+  ClinicRoom,
+  ClinicService,
+  PatientSummary,
+  ProfessionalOperationalProfile,
   ScheduleBlock,
   ScheduleProfessional,
+  ScheduleSettings,
 } from "@/types/domain";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Modal, ModalFooter } from "@/components/ui/modal";
+import { useToast } from "@/components/ui/toast";
 
 const CALENDAR_VIEW_STORAGE_KEY = "clinicore.schedule.calendar-view";
+const MAX_PANEL_PROFESSIONALS = 6;
+
+type CalendarSelection = {
+  date: string;
+  startTime: string;
+  duration: number;
+  professionalId?: string;
+};
+
+type ScheduleCalendarProps = {
+  date: string;
+  view: CalendarViewMode;
+  appointments: AppointmentSummary[];
+  blocks: ScheduleBlock[];
+  professionals: ScheduleProfessional[];
+  patients: PatientSummary[];
+  services: ClinicService[];
+  rooms: ClinicRoom[];
+  professionalProfiles: ProfessionalOperationalProfile[];
+  scheduleSettings: ScheduleSettings[];
+  professionalId: string;
+  panelProfessionalIds: string[];
+  status: string;
+  canManage: boolean;
+};
 
 function queryUrl({
   date,
   view,
   professionalId,
+  panelProfessionalIds,
   status,
 }: {
   date: string;
   view: CalendarViewMode;
   professionalId: string;
+  panelProfessionalIds: string[];
   status: string;
 }) {
   const params = new URLSearchParams({
@@ -42,401 +100,530 @@ function queryUrl({
     professional_id: professionalId,
     status,
   });
+  if (panelProfessionalIds.length) params.set("professionals", panelProfessionalIds.join(","));
   return `/agenda?${params.toString()}`;
 }
 
-function eventDate(value: string) {
+function minutesInSaoPaulo(value: string) {
   const parts = new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
     timeZone: "America/Sao_Paulo",
-    year: "numeric",
   }).formatToParts(new Date(value));
   const byType = new Map(parts.map((part) => [part.type, part.value]));
-
-  return `${byType.get("year")}-${byType.get("month")}-${byType.get("day")}`;
+  return Number(byType.get("hour")) * 60 + Number(byType.get("minute"));
 }
 
-function eventHour(value: string) {
-  return Number(
-    new Intl.DateTimeFormat("pt-BR", {
-      hour: "2-digit",
-      hour12: false,
-      timeZone: "America/Sao_Paulo",
-    }).format(new Date(value)),
-  );
+function timeInput(value: Date) {
+  return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
 }
 
-function professionalName(professionals: ScheduleProfessional[], professionalId: string) {
+function viewPluginName(view: CalendarViewMode) {
+  if (view === "month") return "dayGridMonth";
+  if (view === "week") return "timeGridWeek";
+  if (view === "list") return "listWeek";
+  return "timeGridDay";
+}
+
+function viewLabel(view: CalendarViewMode) {
+  const labels: Record<CalendarViewMode, string> = {
+    day: "Dia",
+    week: "Semana",
+    month: "Mês",
+    list: "Lista",
+    clinic: "Painel da clínica",
+  };
+  return labels[view];
+}
+
+function professionalName(professionals: ScheduleProfessional[], id: string) {
+  return professionals.find((item) => item.id === id)?.profile?.full_name ?? "Profissional";
+}
+
+function professionalColor(
+  appointment: AppointmentSummary,
+  profiles: ProfessionalOperationalProfile[],
+) {
   return (
-    professionals.find((professional) => professional.id === professionalId)?.profile?.full_name ??
-    "Profissional"
+    profiles.find((profile) => profile.professional_member_id === appointment.professional_member_id)
+      ?.appointment_color ??
+    appointment.service?.color ??
+    "#0f766e"
   );
 }
 
-function appointmentTone(status: AppointmentSummary["status"]) {
-  return cn(
-    status === "scheduled" && "border-slate-300 bg-slate-50 text-slate-700",
-    status === "confirmed" && "border-primary/30 bg-primary/10 text-primary",
-    status === "checked_in" && "border-emerald-300 bg-emerald-50 text-emerald-800",
-    status === "in_triage" && "border-cyan-300 bg-cyan-50 text-cyan-800",
-    status === "in_progress" && "border-blue-300 bg-blue-50 text-blue-800",
-    status === "completed" && "border-slate-300 bg-slate-100 text-slate-700",
-    status === "billing_pending" && "border-amber-300 bg-amber-50 text-amber-800",
-    status === "billed" && "border-emerald-300 bg-emerald-50 text-emerald-800",
-    ["cancelled", "no_show", "rescheduled"].includes(status) &&
-      "border-destructive/30 bg-destructive/10 text-destructive",
+function eventIsEditable(appointment: AppointmentSummary, canManage: boolean) {
+  return canManage && ["scheduled", "confirmed"].includes(appointment.status);
+}
+
+function intervalsOverlap(startA: Date, endA: Date, startB: string, endB: string) {
+  return startA.getTime() < new Date(endB).getTime() && endA.getTime() > new Date(startB).getTime();
+}
+
+function businessHoursFor(
+  professionalId: string,
+  settings: ScheduleSettings[],
+): BusinessHoursInput {
+  const source = professionalId === "all"
+    ? settings
+    : settings.filter((item) => item.professional_member_id === professionalId);
+  const hours = source.flatMap((item) => {
+    const configured = item.working_hours as { days?: string[]; start?: string; end?: string };
+    if (!configured.days?.length || !configured.start || !configured.end) return [];
+    return [{
+      daysOfWeek: configured.days.map(Number),
+      startTime: configured.start,
+      endTime: configured.end,
+    }];
+  });
+  return hours.length
+    ? hours
+    : [{ daysOfWeek: [1, 2, 3, 4, 5, 6], startTime: "07:00", endTime: "20:00" }];
+}
+
+function CalendarEventContent({ event, timeText, view }: EventContentArg) {
+  const details = event.extendedProps as {
+    kind?: string;
+    status?: AppointmentSummary["status"];
+    professionalName?: string;
+    serviceName?: string;
+    roomName?: string;
+  };
+  if (details.kind !== "appointment") return null;
+  const compact = view.type === "dayGridMonth";
+
+  return (
+    <div className="min-w-0 px-0.5 py-0.5">
+      <div className="flex min-w-0 items-center gap-1.5">
+        {timeText ? <span className="shrink-0 text-[11px] font-semibold tabular-nums">{timeText}</span> : null}
+        <span className="truncate text-[11px] font-semibold">{event.title}</span>
+      </div>
+      {!compact ? (
+        <>
+          <p className="mt-0.5 truncate text-[10px] opacity-80">
+            {details.serviceName} · {details.professionalName}
+          </p>
+          <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] opacity-75">
+            <MapPin className="size-2.5 shrink-0" />{details.roomName}
+          </p>
+        </>
+      ) : null}
+    </div>
   );
 }
 
-function rangeHours(appointments: AppointmentSummary[], blocks: ScheduleBlock[]) {
-  const hours = [
-    ...appointments.map((appointment) => eventHour(appointment.starts_at)),
-    ...blocks.map((block) => eventHour(block.starts_at)),
-  ];
-  const min = Math.min(7, ...hours);
-  const max = Math.max(19, ...hours);
-
-  return Array.from({ length: max - min + 1 }, (_, index) => min + index);
-}
-
-function DayTimeline({
-  day,
+function ClinicPanel({
+  date,
   appointments,
   blocks,
   professionals,
-  professionalId,
+  visibleIds,
+  scheduleSettings,
+  canManage,
+  onSelect,
 }: {
-  day: string;
+  date: string;
   appointments: AppointmentSummary[];
   blocks: ScheduleBlock[];
   professionals: ScheduleProfessional[];
-  professionalId: string;
+  visibleIds: string[];
+  scheduleSettings: ScheduleSettings[];
+  canManage: boolean;
+  onSelect: (selection: CalendarSelection) => void;
 }) {
-  const dayAppointments = appointments.filter((appointment) => eventDate(appointment.starts_at) === day);
-  const dayBlocks = blocks.filter((block) => eventDate(block.starts_at) === day);
-  const activeProfessionalIds = new Set([
-    ...dayAppointments.map((appointment) => appointment.professional_member_id),
-    ...dayBlocks.map((block) => block.professional_member_id),
-  ]);
-  const visibleProfessionals = (
-    professionalId !== "all"
-      ? professionals.filter((professional) => professional.id === professionalId)
-      : professionals.filter((professional) => activeProfessionalIds.has(professional.id))
-  ).map((professional) => ({
-    id: professional.id,
-    name: professional.profile?.full_name ?? "Profissional sem nome",
-    role: professional.role,
-  }));
-  const fallbackLanes = Array.from(activeProfessionalIds).map((id) => {
-    const appointment = dayAppointments.find((item) => item.professional_member_id === id);
-    return {
-      id,
-      name: appointment?.professional?.profile?.full_name ?? "Profissional",
-      role: appointment?.professional?.role ?? "professional",
-    };
-  });
-  const lanes =
-    visibleProfessionals.length > 0
-      ? visibleProfessionals
-      : fallbackLanes.length > 0
-        ? fallbackLanes
-        : professionals.slice(0, 6).map((professional) => ({
-            id: professional.id,
-            name: professional.profile?.full_name ?? "Profissional sem nome",
-            role: professional.role,
-          }));
-  const hours = rangeHours(dayAppointments, dayBlocks);
-
-  if (dayAppointments.length === 0 && dayBlocks.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed bg-muted/20 px-6 py-12 text-center">
-        <Clock3 className="mx-auto size-8 text-muted-foreground/60" />
-        <p className="mt-3 text-sm font-medium">Agenda livre neste dia</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Use “Novo compromisso” para criar um horário ou ajuste os filtros acima.
-        </p>
-      </div>
-    );
-  }
+  const dayProfessionals = visibleIds
+    .map((id) => professionals.find((item) => item.id === id))
+    .filter((item): item is ScheduleProfessional => Boolean(item));
+  const startMinutes = 7 * 60;
+  const endMinutes = 21 * 60;
+  const pixelsPerHour = 64;
+  const totalHeight = ((endMinutes - startMinutes) / 60) * pixelsPerHour;
+  const hours = Array.from({ length: (endMinutes - startMinutes) / 60 + 1 }, (_, index) => 7 + index);
+  const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
 
   return (
     <div className="overflow-x-auto rounded-lg border bg-background">
       <div
-        className="grid min-w-[980px]"
-        style={{
-          gridTemplateColumns: `72px repeat(${Math.max(lanes.length, 1)}, minmax(220px, 1fr))`,
-        }}
+        className="grid min-w-[1040px]"
+        style={{ gridTemplateColumns: `68px repeat(${Math.max(dayProfessionals.length, 1)}, minmax(220px, 1fr))` }}
       >
-        <div className="sticky left-0 z-10 border-b border-r bg-muted/70 px-3 py-2 text-xs font-medium text-muted-foreground">
-          Hora
-        </div>
-        {lanes.map((professional) => (
-          <div key={professional.id} className="border-b border-r bg-muted/70 px-3 py-2 last:border-r-0">
-            <p className="truncate text-xs font-semibold">
-              {professional.name}
-            </p>
-            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              {professional.role === "doctor" ? "Médico" : professional.role === "nurse" ? "Enfermagem" : "Profissional"}
-            </p>
-          </div>
-        ))}
-
-        {hours.map((hour) => (
-          <div key={hour} className="contents">
-            <div className="sticky left-0 z-10 border-r border-t bg-card px-3 py-3 text-xs font-medium tabular-nums text-muted-foreground">
-              {String(hour).padStart(2, "0")}:00
-            </div>
-            {lanes.map((professional) => {
-              const hourAppointments = dayAppointments.filter(
-                (appointment) =>
-                  appointment.professional_member_id === professional.id &&
-                  eventHour(appointment.starts_at) === hour,
-              );
-              const hourBlocks = dayBlocks.filter(
-                (block) =>
-                  block.professional_member_id === professional.id && eventHour(block.starts_at) === hour,
-              );
-
-              return (
-                <div key={`${hour}-${professional.id}`} className="min-h-20 border-r border-t p-2 last:border-r-0">
-                  <div className="grid gap-1.5">
-                    {hourAppointments.map((appointment) => (
-                      <div
-                        key={appointment.id}
-                        className={cn(
-                          "rounded-md border-l-4 px-2.5 py-2 text-xs shadow-sm",
-                          appointmentTone(appointment.status),
-                        )}
-                        style={{ borderLeftColor: appointment.service?.color ?? undefined }}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="truncate font-semibold">
-                              {formatTimeBr(appointment.starts_at)} {appointment.patient?.social_name || appointment.patient?.full_name || "Paciente"}
-                            </p>
-                            <p className="mt-1 truncate text-[11px] opacity-80">
-                              {appointment.service?.name ?? appointment.appointment_type}
-                            </p>
-                          </div>
-                          <Badge className="h-5 shrink-0 border bg-background px-1.5 text-[10px] text-foreground">
-                            {APPOINTMENT_STATUS_LABELS[appointment.status]}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 flex min-w-0 items-center gap-1 truncate text-[11px] opacity-75">
-                          <MapPin className="size-3 shrink-0" />
-                          {appointment.room?.name ?? "Local a definir"}
-                        </p>
-                      </div>
-                    ))}
-                    {hourBlocks.map((block) => (
-                      <div
-                        key={block.id}
-                        className="rounded-md border border-dashed bg-muted px-2.5 py-2 text-xs text-muted-foreground"
-                      >
-                        <p className="font-medium">
-                          {formatTimeBr(block.starts_at)} até {formatTimeBr(block.ends_at)}
-                        </p>
-                        <p className="mt-0.5 truncate">
-                          {SCHEDULE_BLOCK_TYPE_LABELS[block.block_type]}{block.reason ? ` • ${block.reason}` : ""}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+        <div className="sticky left-0 z-20 border-b border-r bg-muted/80 px-2 py-2 text-xs font-medium text-muted-foreground">Hora</div>
+        {dayProfessionals.map((professional) => {
+          const count = appointments.filter((item) => item.professional_member_id === professional.id).length;
+          return (
+            <div key={professional.id} className="border-b border-r bg-muted/80 px-3 py-2 last:border-r-0">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold">{professional.profile?.full_name ?? "Profissional"}</p>
+                  <p className="truncate text-[11px] text-muted-foreground">{count} compromisso(s)</p>
                 </div>
-              );
-            })}
-          </div>
-        ))}
+                <Badge className="h-5 shrink-0 border bg-background px-1.5 text-[10px] text-foreground">{professional.role === "doctor" ? "Médico" : "Profissional"}</Badge>
+              </div>
+            </div>
+          );
+        })}
+
+        <div className="sticky left-0 z-10 border-r bg-card" style={{ height: totalHeight }}>
+          {hours.map((hour) => (
+            <span key={hour} className="absolute right-2 -translate-y-1/2 text-[11px] tabular-nums text-muted-foreground" style={{ top: (hour - 7) * pixelsPerHour }}>
+              {String(hour).padStart(2, "0")}:00
+            </span>
+          ))}
+        </div>
+
+        {dayProfessionals.map((professional) => {
+          const professionalAppointments = appointments.filter((item) => item.professional_member_id === professional.id);
+          const professionalBlocks = blocks.filter((item) => item.professional_member_id === professional.id);
+          const settings = scheduleSettings.find((item) => item.professional_member_id === professional.id);
+          const configured = settings?.working_hours as { days?: string[]; start?: string; end?: string } | undefined;
+          const worksToday = configured?.days?.includes(String(dayOfWeek));
+          const workingStart = worksToday && configured?.start ? Number(configured.start.slice(0, 2)) * 60 + Number(configured.start.slice(3, 5)) : startMinutes;
+          const workingEnd = worksToday && configured?.end ? Number(configured.end.slice(0, 2)) * 60 + Number(configured.end.slice(3, 5)) : endMinutes;
+
+          return (
+            <div key={professional.id} className="relative border-r last:border-r-0" style={{ height: totalHeight }}>
+              {hours.slice(0, -1).map((hour) => {
+                const hourMinutes = hour * 60;
+                const unavailable = Boolean(configured) && (!worksToday || hourMinutes < workingStart || hourMinutes >= workingEnd);
+                return (
+                  <button
+                    key={hour}
+                    type="button"
+                    disabled={!canManage || unavailable}
+                    onDoubleClick={() => onSelect({ date, startTime: `${String(hour).padStart(2, "0")}:00`, duration: settings?.slot_minutes ?? 30, professionalId: professional.id })}
+                    title={unavailable ? "Fora do expediente" : "Clique duas vezes para agendar"}
+                    className={cn("absolute inset-x-0 border-t text-left hover:bg-primary/5", unavailable && "bg-muted/45")}
+                    style={{ top: (hour - 7) * pixelsPerHour, height: pixelsPerHour }}
+                  />
+                );
+              })}
+              {professionalBlocks.map((block) => {
+                const top = ((minutesInSaoPaulo(block.starts_at) - startMinutes) / 60) * pixelsPerHour;
+                const height = Math.max(22, ((minutesInSaoPaulo(block.ends_at) - minutesInSaoPaulo(block.starts_at)) / 60) * pixelsPerHour);
+                return (
+                  <div key={block.id} className="pointer-events-none absolute inset-x-1 z-[2] overflow-hidden rounded-md border border-dashed bg-muted/90 px-2 py-1 text-[10px] text-muted-foreground" style={{ top, height }}>
+                    <strong>{SCHEDULE_BLOCK_TYPE_LABELS[block.block_type]}</strong>{block.reason ? ` · ${block.reason}` : ""}
+                  </div>
+                );
+              })}
+              {professionalAppointments.map((appointment) => {
+                const top = ((minutesInSaoPaulo(appointment.starts_at) - startMinutes) / 60) * pixelsPerHour;
+                const duration = minutesInSaoPaulo(appointment.ends_at) - minutesInSaoPaulo(appointment.starts_at);
+                const height = Math.max(30, (duration / 60) * pixelsPerHour);
+                return (
+                  <Link
+                    key={appointment.id}
+                    href={queryUrl({ date, view: "day", professionalId: professional.id, panelProfessionalIds: visibleIds, status: "all" })}
+                    className="absolute inset-x-1 z-[3] overflow-hidden rounded-md border-l-4 bg-card px-2 py-1.5 text-[11px] shadow-sm transition-shadow hover:shadow-md"
+                    style={{ top, height, borderLeftColor: appointment.service?.color ?? "#0f766e" }}
+                  >
+                    <p className="truncate font-semibold">{formatTimeBr(appointment.starts_at)} · {appointment.patient?.social_name || appointment.patient?.full_name || "Paciente"}</p>
+                    <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{appointment.service?.name ?? appointment.appointment_type}</p>
+                    <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{appointment.room?.name ?? "Consultório a definir"}</p>
+                  </Link>
+                );
+              })}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-export function ScheduleCalendar({
-  date,
-  view,
-  days,
-  appointments,
-  blocks,
-  professionals,
-  professionalId,
-  status,
-}: {
-  date: string;
-  view: CalendarViewMode;
-  days: string[];
-  appointments: AppointmentSummary[];
-  blocks: ScheduleBlock[];
-  professionals: ScheduleProfessional[];
-  professionalId: string;
-  status: string;
-}) {
+export function ScheduleCalendar(props: ScheduleCalendarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const previousDate = getAdjacentCalendarDate(date, view, -1);
-  const nextDate = getAdjacentCalendarDate(date, view, 1);
+  const { toast } = useToast();
+  const [, startTransition] = useTransition();
+  const [selection, setSelection] = useState<CalendarSelection | null>(null);
+  const [professionalsOpen, setProfessionalsOpen] = useState(false);
+  const [draftProfessionalIds, setDraftProfessionalIds] = useState(props.panelProfessionalIds);
+  const previousDate = getAdjacentCalendarDate(props.date, props.view, -1);
+  const nextDate = getAdjacentCalendarDate(props.date, props.view, 1);
   const today = getTodayInputDate();
 
   useEffect(() => {
     if (searchParams.has("view")) {
-      window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, view);
+      window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, props.view);
       return;
     }
-
-    const savedView = window.localStorage.getItem(CALENDAR_VIEW_STORAGE_KEY);
-
-    if (savedView !== "day" && savedView !== "week" && savedView !== "month") {
-      return;
-    }
-
-    if (savedView !== view) {
+    const savedView = window.localStorage.getItem(CALENDAR_VIEW_STORAGE_KEY) as CalendarViewMode | null;
+    if (!["day", "week", "month", "list", "clinic"].includes(savedView ?? "")) return;
+    if (savedView !== props.view) {
       const params = new URLSearchParams(searchParams.toString());
-      params.set("view", savedView);
+      params.set("view", savedView as CalendarViewMode);
       router.replace(`/agenda?${params.toString()}`, { scroll: false });
     }
-  }, [router, searchParams, view]);
+  }, [props.view, router, searchParams]);
+
+  const events = useMemo<EventInput[]>(() => [
+    ...props.appointments.map((appointment) => {
+      const color = professionalColor(appointment, props.professionalProfiles);
+      return {
+        id: appointment.id,
+        title: appointment.patient?.social_name || appointment.patient?.full_name || "Paciente",
+        start: appointment.starts_at,
+        end: appointment.ends_at,
+        editable: eventIsEditable(appointment, props.canManage),
+        backgroundColor: color,
+        borderColor: color,
+        textColor: "#ffffff",
+        extendedProps: {
+          kind: "appointment",
+          status: appointment.status,
+          professionalName: professionalName(props.professionals, appointment.professional_member_id),
+          serviceName: appointment.service?.name ?? appointment.appointment_type,
+          roomName: appointment.room?.name ?? "Consultório a definir",
+        },
+      };
+    }),
+    ...props.blocks.map((block) => ({
+      id: `block:${block.id}`,
+      start: block.starts_at,
+      end: block.ends_at,
+      display: "background",
+      backgroundColor: "rgba(100, 116, 139, 0.18)",
+      editable: false,
+      extendedProps: { kind: "block", professionalId: block.professional_member_id },
+    })),
+  ], [props.appointments, props.blocks, props.canManage, props.professionalProfiles, props.professionals]);
+
+  const businessHours = useMemo(
+    () => businessHoursFor(props.professionalId, props.scheduleSettings),
+    [props.professionalId, props.scheduleSettings],
+  );
+
+  function openSelection(arg: DateSelectArg) {
+    if (!props.canManage) return;
+    const duration = Math.max(5, Math.round((arg.end.getTime() - arg.start.getTime()) / 60_000));
+    setSelection({
+      date: toInputDate(arg.start),
+      startTime: timeInput(arg.start),
+      duration,
+      professionalId: props.professionalId === "all" ? undefined : props.professionalId,
+    });
+  }
+
+  function eventClick(arg: EventClickArg) {
+    if (arg.event.extendedProps.kind !== "appointment" || !arg.event.start) return;
+    router.push(queryUrl({
+      date: toInputDate(arg.event.start),
+      view: "day",
+      professionalId: props.professionalId,
+      panelProfessionalIds: props.panelProfessionalIds,
+      status: props.status,
+    }));
+  }
+
+  function persistMovement(arg: EventDropArg | EventResizeDoneArg) {
+    if (!arg.event.start || !arg.event.end) {
+      arg.revert();
+      return;
+    }
+    startTransition(async () => {
+      const result = await moveCalendarAppointmentAction({
+        appointmentId: arg.event.id,
+        startsAt: arg.event.start?.toISOString(),
+        endsAt: arg.event.end?.toISOString(),
+      });
+      if (result.error) arg.revert();
+      toast({
+        title: result.success ?? "Ação não concluída",
+        description: result.error ?? "O novo horário foi validado e registrado na auditoria.",
+        variant: result.error ? "destructive" : "default",
+      });
+      if (!result.error) router.refresh();
+    });
+  }
+
+  function movementAllowed(start: Date, end: Date, draggedId?: string, selectedProfessionalId?: string) {
+    const dragged = draggedId ? props.appointments.find((item) => item.id === draggedId) : null;
+    const targetProfessionalId = dragged?.professional_member_id ?? selectedProfessionalId;
+    const targetRoomId = dragged?.room_id ?? null;
+    const conflictsAppointment = props.appointments.some(
+      (item) =>
+        item.id !== draggedId &&
+        !["cancelled", "no_show", "rescheduled"].includes(item.status) &&
+        (item.professional_member_id === targetProfessionalId || Boolean(targetRoomId && item.room_id === targetRoomId)) &&
+        intervalsOverlap(start, end, item.starts_at, item.ends_at),
+    );
+    const conflictsBlock = props.blocks.some(
+      (item) => item.professional_member_id === targetProfessionalId && intervalsOverlap(start, end, item.starts_at, item.ends_at),
+    );
+    return !conflictsAppointment && !conflictsBlock;
+  }
+
+  function applyPanelProfessionals() {
+    const selected = draftProfessionalIds.slice(0, MAX_PANEL_PROFESSIONALS);
+    router.push(queryUrl({
+      date: props.date,
+      view: "clinic",
+      professionalId: "all",
+      panelProfessionalIds: selected,
+      status: props.status,
+    }));
+    setProfessionalsOpen(false);
+  }
 
   return (
-    <section className="grid gap-4">
-      <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <section className="grid gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
         <div className="flex items-center gap-2">
-          <Button asChild variant="outline" size="icon" title="Período anterior" className="size-8">
-            <Link href={queryUrl({ date: previousDate, view, professionalId, status })}>
-              <ChevronLeft className="size-4" />
-            </Link>
+          <Button asChild variant="ghost" size="icon" title="Período anterior" className="size-8">
+            <Link href={queryUrl({ date: previousDate, view: props.view, professionalId: props.professionalId, panelProfessionalIds: props.panelProfessionalIds, status: props.status })}><ChevronLeft className="size-4" /></Link>
           </Button>
           <Button asChild variant="outline" size="sm" className="h-8">
-            <Link href={queryUrl({ date: today, view, professionalId, status })}>Hoje</Link>
+            <Link href={queryUrl({ date: today, view: props.view, professionalId: props.professionalId, panelProfessionalIds: props.panelProfessionalIds, status: props.status })}>Hoje</Link>
           </Button>
-          <Button asChild variant="outline" size="icon" title="Próximo período" className="size-8">
-            <Link href={queryUrl({ date: nextDate, view, professionalId, status })}>
-              <ChevronRight className="size-4" />
-            </Link>
+          <Button asChild variant="ghost" size="icon" title="Próximo período" className="size-8">
+            <Link href={queryUrl({ date: nextDate, view: props.view, professionalId: props.professionalId, panelProfessionalIds: props.panelProfessionalIds, status: props.status })}><ChevronRight className="size-4" /></Link>
           </Button>
-          <h2 className="ml-1 text-base font-semibold capitalize">{getCalendarTitle(date, view)}</h2>
+          <h2 className="ml-1 text-sm font-semibold capitalize">{getCalendarTitle(props.date, props.view)}</h2>
         </div>
 
-        <div className="flex rounded-md border bg-background p-1">
-          {(["day", "week", "month"] as CalendarViewMode[]).map((mode) => (
-            <Button
-              key={mode}
-              asChild
-              variant={view === mode ? "secondary" : "ghost"}
-              size="sm"
-              className="h-7 min-w-16 px-2 text-xs"
-            >
-              <Link
-                href={queryUrl({ date, view: mode, professionalId, status })}
-                onClick={() => window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, mode)}
-              >
-                {mode === "day" ? "Dia" : mode === "week" ? "Semana" : "Mês"}
-              </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {props.view === "clinic" ? (
+            <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setProfessionalsOpen(true)}>
+              <SlidersHorizontal />Profissionais ({props.panelProfessionalIds.length})
             </Button>
-          ))}
+          ) : null}
+          <div className="flex rounded-md border bg-card p-0.5">
+            {(["day", "week", "month", "list", "clinic"] as CalendarViewMode[]).map((mode) => (
+              <Button key={mode} asChild variant={props.view === mode ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-xs">
+                <Link
+                  href={queryUrl({ date: props.date, view: mode, professionalId: mode === "clinic" ? "all" : props.professionalId, panelProfessionalIds: props.panelProfessionalIds, status: props.status })}
+                  onClick={() => window.localStorage.setItem(CALENDAR_VIEW_STORAGE_KEY, mode)}
+                  title={viewLabel(mode)}
+                >
+                  {mode === "clinic" ? <PanelsTopLeft className="size-3.5" /> : mode === "list" ? <CalendarRange className="size-3.5" /> : null}
+                  {viewLabel(mode)}
+                </Link>
+              </Button>
+            ))}
+          </div>
         </div>
       </header>
 
-      {view === "day" ? (
-        <DayTimeline
-          day={date}
-          appointments={appointments}
-          blocks={blocks}
-          professionals={professionals}
-          professionalId={professionalId}
+      {props.view === "clinic" ? (
+        <ClinicPanel
+          date={props.date}
+          appointments={props.appointments}
+          blocks={props.blocks}
+          professionals={props.professionals}
+          visibleIds={props.panelProfessionalIds}
+          scheduleSettings={props.scheduleSettings}
+          canManage={props.canManage}
+          onSelect={setSelection}
         />
       ) : (
-        <div className="overflow-x-auto rounded-lg border bg-background">
-          <div className="grid min-w-[980px] grid-cols-7">
-            {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((weekday) => (
-              <div
-                key={weekday}
-                className="border-b border-r bg-muted/70 px-3 py-2 text-center text-xs font-medium uppercase text-muted-foreground last:border-r-0"
-              >
-                {weekday}
-              </div>
-            ))}
-
-            {days.map((day) => {
-              const dayAppointments = appointments.filter(
-                (appointment) => eventDate(appointment.starts_at) === day,
-              );
-              const dayBlocks = blocks.filter((block) => eventDate(block.starts_at) === day);
-              const parsed = new Date(`${day}T12:00:00`);
-              const outsideMonth =
-                view === "month" &&
-                parsed.getMonth() !== new Date(`${date}T12:00:00`).getMonth();
-
-              return (
-                <div
-                  key={day}
-                  className={cn(
-                    "min-h-36 border-b border-r p-2 last:border-r-0",
-                    view === "week" && "min-h-[380px]",
-                    outsideMonth && "bg-muted/30 text-muted-foreground",
-                  )}
-                >
-                  <div className="mb-2 flex items-center justify-between">
-                    <span
-                      className={cn(
-                        "flex size-7 items-center justify-center rounded-md text-sm font-medium",
-                        day === today && "bg-primary text-primary-foreground",
-                      )}
-                    >
-                      {parsed.getDate()}
-                    </span>
-                    {dayAppointments.length > 0 ? (
-                      <Badge className="h-5 border bg-background px-1.5 text-[10px] text-foreground">
-                        {dayAppointments.length}
-                      </Badge>
-                    ) : null}
-                  </div>
-
-                  <div className="grid gap-1.5">
-                    {dayAppointments.slice(0, view === "month" ? 4 : 12).map((appointment) => (
-                      <Link
-                        key={appointment.id}
-                        href={queryUrl({
-                          date: day,
-                          view: "day",
-                          professionalId,
-                          status,
-                        })}
-                        className="grid gap-0.5 rounded-md border-l-4 bg-card px-2 py-1.5 text-xs shadow-sm transition-colors hover:bg-muted"
-                        style={{ borderLeftColor: appointment.service?.color ?? "#0f766e" }}
-                      >
-                        <span className="truncate font-medium">
-                          {formatTimeBr(appointment.starts_at)} {appointment.patient?.full_name}
-                        </span>
-                        <span className="truncate text-muted-foreground">
-                          {professionalName(professionals, appointment.professional_member_id)} •{" "}
-                          {appointment.room?.name ?? "Sem sala"}
-                        </span>
-                      </Link>
-                    ))}
-                    {view === "month" && dayAppointments.length > 4 ? (
-                      <Link
-                        href={queryUrl({ date: day, view: "day", professionalId, status })}
-                        className="px-1 text-xs font-medium text-primary"
-                      >
-                        + {dayAppointments.length - 4} compromisso(s)
-                      </Link>
-                    ) : null}
-                    {dayBlocks.map((block) => (
-                      <div
-                        key={block.id}
-                        className="rounded-md border border-dashed bg-muted px-2 py-1 text-xs text-muted-foreground"
-                      >
-                        {formatTimeBr(block.starts_at)} bloqueado
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        <div className="schedule-fullcalendar overflow-hidden rounded-lg border bg-background p-2">
+          <FullCalendar
+            key={`${props.view}:${props.date}:${props.professionalId}`}
+            plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
+            locale={ptBrLocale}
+            firstDay={1}
+            initialView={viewPluginName(props.view)}
+            initialDate={props.date}
+            headerToolbar={false}
+            events={events}
+            businessHours={businessHours}
+            nowIndicator
+            selectable={props.canManage && props.patients.length > 0}
+            selectMirror
+            select={openSelection}
+            selectAllow={(arg) => movementAllowed(
+              arg.start,
+              arg.end,
+              undefined,
+              props.professionalId === "all" ? props.professionals[0]?.id : props.professionalId,
+            )}
+            editable={props.canManage}
+            eventStartEditable={props.canManage}
+            eventDurationEditable={props.canManage}
+            eventOverlap={false}
+            eventAllow={(drop, dragged) => movementAllowed(drop.start, drop.end, dragged?.id)}
+            eventDrop={persistMovement}
+            eventResize={persistMovement}
+            eventClick={eventClick}
+            eventContent={CalendarEventContent}
+            eventClassNames={(arg) => [`schedule-event-${String(arg.event.extendedProps.status ?? "block")}`]}
+            allDaySlot={false}
+            slotMinTime="06:00:00"
+            slotMaxTime="22:00:00"
+            slotDuration="00:15:00"
+            snapDuration="00:05:00"
+            slotLabelInterval="01:00:00"
+            slotEventOverlap={false}
+            dayMaxEvents={4}
+            navLinks
+            height="auto"
+            contentHeight={props.view === "month" ? 690 : 760}
+            expandRows
+            stickyHeaderDates
+            progressiveEventRendering
+            weekends
+          />
         </div>
       )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />
+          {props.view === "clinic"
+            ? "Clique duas vezes em um horário livre para agendar na coluna do profissional."
+            : "Arraste para mover, redimensione pela borda inferior e selecione um intervalo para agendar."}
+        </p>
+        <p className="flex items-center gap-1.5"><Check className="size-3.5 text-emerald-600" />Conflitos e alterações são validados no servidor.</p>
+      </div>
+
+      <AppointmentModal
+        professionals={props.professionals}
+        patients={props.patients}
+        services={props.services}
+        rooms={props.rooms}
+        professionalProfiles={props.professionalProfiles}
+        scheduleSettings={props.scheduleSettings}
+        defaultDate={selection?.date ?? props.date}
+        defaultStartTime={selection?.startTime}
+        defaultDuration={selection?.duration}
+        defaultProfessionalId={selection?.professionalId}
+        open={Boolean(selection)}
+        onOpenChange={(open) => { if (!open) setSelection(null); }}
+        hideTrigger
+        disabled={!props.canManage}
+      />
+
+      <Modal
+        open={professionalsOpen}
+        onOpenChange={setProfessionalsOpen}
+        title="Profissionais visíveis"
+        description={`Escolha até ${MAX_PANEL_PROFESSIONALS} agendas para manter o painel rápido e legível.`}
+        size="sm"
+      >
+        <div className="grid gap-2">
+          {props.professionals.map((professional) => {
+            const checked = draftProfessionalIds.includes(professional.id);
+            const atLimit = !checked && draftProfessionalIds.length >= MAX_PANEL_PROFESSIONALS;
+            return (
+              <label key={professional.id} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
+                <span className="flex min-w-0 items-center gap-2"><UserRound className="size-4 text-muted-foreground" /><span className="truncate text-sm font-medium">{professional.profile?.full_name ?? "Profissional"}</span></span>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={atLimit}
+                  onChange={(event) => setDraftProfessionalIds((current) => event.target.checked ? [...current, professional.id] : current.filter((id) => id !== professional.id))}
+                  className="size-4 accent-primary"
+                />
+              </label>
+            );
+          })}
+        </div>
+        <ModalFooter>
+          <Button type="button" variant="outline" onClick={() => setProfessionalsOpen(false)}>Cancelar</Button>
+          <Button type="button" onClick={applyPanelProfessionals} disabled={!draftProfessionalIds.length}>Aplicar visualização</Button>
+        </ModalFooter>
+      </Modal>
     </section>
   );
 }

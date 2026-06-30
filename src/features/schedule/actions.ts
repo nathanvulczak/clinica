@@ -12,6 +12,7 @@ import {
   createScheduleBlockSchema,
   deleteAppointmentSchema,
   deleteScheduleBlockSchema,
+  moveCalendarAppointmentSchema,
   rescheduleAppointmentSchema,
   sendAppointmentNotificationSchema,
   updateAppointmentSchema,
@@ -646,6 +647,79 @@ export async function updateAppointmentAction(
   revalidatePath("/agenda");
   revalidatePath("/auditoria");
   return { success: "Compromisso atualizado." };
+}
+
+export async function moveCalendarAppointmentAction(input: unknown): Promise<ScheduleActionState> {
+  const parsed = moveCalendarAppointmentSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Movimentação inválida." };
+  }
+
+  const context = await getScheduleActionContext();
+  if ("error" in context) return { error: context.error };
+
+  const { activeClinic, user } = context;
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = await admin
+    .from("appointments")
+    .select("*")
+    .eq("id", parsed.data.appointmentId)
+    .eq("clinic_id", activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!previous) return { error: "Compromisso não encontrado na clínica ativa." };
+  if (!["scheduled", "confirmed"].includes(previous.status)) {
+    return { error: "Somente compromissos agendados ou confirmados podem ser movidos no calendário." };
+  }
+
+  const availabilityError = await validateAppointmentAvailability({
+    clinicId: activeClinic.id,
+    professionalMemberId: previous.professional_member_id,
+    roomId: previous.room_id,
+    startsAt: parsed.data.startsAt,
+    endsAt: parsed.data.endsAt,
+    excludeAppointmentId: previous.id,
+  });
+  if (availabilityError) return { error: availabilityError };
+
+  const updatePayload = {
+    starts_at: parsed.data.startsAt,
+    ends_at: parsed.data.endsAt,
+    updated_by: user.id,
+  };
+  const { error } = await admin
+    .from("appointments")
+    .update(updatePayload)
+    .eq("id", previous.id)
+    .eq("clinic_id", activeClinic.id);
+
+  if (error) {
+    const message = error.message.toLowerCase();
+    return {
+      error: message.includes("appointments_no_active_overlap")
+        ? "O profissional já possui outro compromisso neste intervalo. A movimentação foi desfeita."
+        : message.includes("appointments_no_active_room_overlap")
+          ? "O consultório já está ocupado neste intervalo. A movimentação foi desfeita."
+          : "Não foi possível mover o compromisso. A agenda foi restaurada.",
+    };
+  }
+
+  await logAuditEvent({
+    clinicId: activeClinic.id,
+    userId: user.id,
+    actionType: "appointment_calendar_moved",
+    module: "schedule",
+    recordTable: "appointments",
+    recordId: previous.id,
+    oldValues: { starts_at: previous.starts_at, ends_at: previous.ends_at },
+    newValues: updatePayload,
+    notes: "Horário alterado por arraste ou redimensionamento no calendário.",
+  });
+
+  revalidatePath("/agenda");
+  revalidatePath("/auditoria");
+  return { success: "Horário atualizado com validação de conflitos." };
 }
 
 export async function rescheduleAppointmentAction(

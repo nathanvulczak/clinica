@@ -22,6 +22,12 @@ export function AppointmentModal({
   professionalProfiles,
   scheduleSettings,
   defaultDate,
+  defaultStartTime,
+  defaultDuration,
+  defaultProfessionalId,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
   disabled,
 }: {
   professionals: ScheduleProfessional[];
@@ -31,22 +37,36 @@ export function AppointmentModal({
   professionalProfiles: ProfessionalOperationalProfile[];
   scheduleSettings: ScheduleSettings[];
   defaultDate: string;
+  defaultStartTime?: string;
+  defaultDuration?: number;
+  defaultProfessionalId?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
   disabled?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
   const [formVersion, setFormVersion] = useState(0);
+  const open = controlledOpen ?? internalOpen;
+
+  const setOpen = useCallback((nextOpen: boolean) => {
+    if (controlledOpen === undefined) setInternalOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  }, [controlledOpen, onOpenChange]);
 
   const closeModal = useCallback(() => {
     setOpen(false);
     setFormVersion((value) => value + 1);
-  }, []);
+  }, [setOpen]);
 
   return (
     <>
-      <Button type="button" disabled={disabled} onClick={() => setOpen(true)}>
-        <CalendarPlus />
-        Novo compromisso
-      </Button>
+      {!hideTrigger ? (
+        <Button type="button" disabled={disabled} onClick={() => setOpen(true)}>
+          <CalendarPlus />
+          Novo compromisso
+        </Button>
+      ) : null}
       <Modal
         open={open}
         onOpenChange={(nextOpen) => {
@@ -59,7 +79,7 @@ export function AppointmentModal({
         className="max-w-4xl"
       >
         <AppointmentForm
-          key={`appointment-${formVersion}`}
+          key={`appointment-${formVersion}-${defaultDate}-${defaultStartTime ?? "08:00"}-${defaultProfessionalId ?? "auto"}`}
           professionals={professionals}
           patients={patients}
           services={services}
@@ -67,6 +87,9 @@ export function AppointmentModal({
           professionalProfiles={professionalProfiles}
           scheduleSettings={scheduleSettings}
           defaultDate={defaultDate}
+          defaultStartTime={defaultStartTime}
+          defaultDuration={defaultDuration}
+          defaultProfessionalId={defaultProfessionalId}
           disabled={disabled}
           onCompleted={closeModal}
         />

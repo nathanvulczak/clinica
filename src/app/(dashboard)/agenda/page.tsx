@@ -56,7 +56,9 @@ function normalizeStatus(value?: string): AppointmentStatus | "all" {
 }
 
 function normalizeView(value?: string): CalendarViewMode {
-  return value === "week" || value === "month" ? value : "day";
+  return value === "week" || value === "month" || value === "list" || value === "clinic"
+    ? value
+    : "day";
 }
 
 function metricTone(tone: "neutral" | "success" | "warning" | "care") {
@@ -138,8 +140,22 @@ export default async function AgendaPage({
     ? params.professional_id || "all"
     : scheduleAccess.currentMemberId || "all";
 
+  const professionals =
+    activeClinic && scheduleAccess.canView
+      ? await listScheduleProfessionals(activeClinic.id, {
+          scopeToCurrentUser: true,
+          access: scheduleAccess,
+        })
+      : [];
+  const requestedPanelIds = (params.professionals ?? "")
+    .split(",")
+    .filter((id) => professionals.some((professional) => professional.id === id))
+    .slice(0, 6);
+  const panelProfessionalIds = requestedPanelIds.length
+    ? requestedPanelIds
+    : professionals.slice(0, 4).map((professional) => professional.id);
+
   const [
-    professionals,
     patients,
     appointments,
     blocks,
@@ -150,30 +166,28 @@ export default async function AgendaPage({
   ] =
     activeClinic && scheduleAccess.canView
       ? await Promise.all([
-          listScheduleProfessionals(activeClinic.id, {
-            scopeToCurrentUser: true,
-            access: scheduleAccess,
-          }),
           scheduleAccess.canManage ? listSchedulePatients(activeClinic.id) : Promise.resolve([]),
           listAppointments(activeClinic.id, {
             startDate: range.startDate,
             endDate: range.endDate,
             professionalId,
+            professionalIds: view === "clinic" ? panelProfessionalIds : undefined,
             status,
           }),
           listScheduleBlocks(activeClinic.id, {
             startDate: range.startDate,
             endDate: range.endDate,
             professionalId,
+            professionalIds: view === "clinic" ? panelProfessionalIds : undefined,
           }),
           scheduleAccess.canManage ? listClinicServices(activeClinic.id) : Promise.resolve([]),
           scheduleAccess.canManage ? listClinicRooms(activeClinic.id) : Promise.resolve([]),
           scheduleAccess.canManage
             ? listProfessionalOperationalProfiles(activeClinic.id, registrationAccess)
             : Promise.resolve([]),
-          scheduleAccess.canManage ? listScheduleSettings(activeClinic.id) : Promise.resolve([]),
+          listScheduleSettings(activeClinic.id),
         ])
-      : [[], [], [], [], [], [], [], []];
+      : [[], [], [], [], [], [], []];
   const workflowEvents =
     activeClinic && scheduleAccess.canView
       ? await listAppointmentWorkflowEvents(
@@ -245,6 +259,9 @@ export default async function AgendaPage({
           <section className="rounded-lg border bg-card px-4 py-3 shadow-sm">
             <form className="grid gap-3 xl:grid-cols-[150px_minmax(220px,1fr)_190px_auto] xl:items-end">
               <input type="hidden" name="view" value={view} />
+              {panelProfessionalIds.length ? (
+                <input type="hidden" name="professionals" value={panelProfessionalIds.join(",")} />
+              ) : null}
               <div className="grid gap-1.5">
                 <Label htmlFor="date" className="text-xs">Data</Label>
                 <Input id="date" name="date" type="date" defaultValue={date} className="h-9" />
@@ -361,12 +378,20 @@ export default async function AgendaPage({
                   <CardTitle className="text-base">Calendário operacional</CardTitle>
                   <CardDescription>
                     {scheduleAccess.canManage
-                      ? "Visão por dia, semana ou mês com profissionais, consultórios e bloqueios."
+                      ? "Visões diária, semanal, mensal, em lista e por profissional, com consultórios e bloqueios."
                       : "Sua visualização está restrita aos pacientes vinculados à sua agenda."}
                   </CardDescription>
                 </div>
                 <Badge className="bg-muted text-muted-foreground">
-                  {view === "day" ? "Visão diária" : view === "week" ? "Visão semanal" : "Visão mensal"}
+                  {view === "day"
+                    ? "Visão diária"
+                    : view === "week"
+                      ? "Visão semanal"
+                      : view === "month"
+                        ? "Visão mensal"
+                        : view === "list"
+                          ? "Lista operacional"
+                          : "Painel por profissional"}
                 </Badge>
               </div>
             </CardHeader>
@@ -374,12 +399,18 @@ export default async function AgendaPage({
               <ScheduleCalendar
                 date={date}
                 view={view}
-                days={range.days}
                 appointments={appointments}
                 blocks={blocks}
                 professionals={professionals}
+                patients={patients}
+                services={services}
+                rooms={rooms}
+                professionalProfiles={professionalProfiles}
+                scheduleSettings={scheduleSettings}
                 professionalId={professionalId}
+                panelProfessionalIds={panelProfessionalIds}
                 status={status}
+                canManage={scheduleAccess.canManage}
               />
             </CardContent>
           </Card>

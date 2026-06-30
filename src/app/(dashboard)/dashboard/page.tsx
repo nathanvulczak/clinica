@@ -2,8 +2,10 @@ import { ACTIVE_CARE_STATUSES } from "@/config/clinical-workflow";
 import { PLAN_LIMITS } from "@/config/plans";
 import { DashboardWorkspace } from "@/features/dashboard/components/dashboard-workspace";
 import { getActiveClinicContext } from "@/features/clinics/context";
+import { getClinicBrandingSettings } from "@/repositories/clinic-branding";
 import { listClinicMembers } from "@/repositories/clinics";
 import { listClinicalEncounters } from "@/repositories/clinical-workflow";
+import { getDashboardPreferences } from "@/repositories/dashboard";
 import { getFinancialWorkspace } from "@/repositories/financial";
 import { getCurrentProfile } from "@/repositories/profile";
 import { listAppointments } from "@/repositories/schedule";
@@ -29,7 +31,7 @@ export default async function DashboardPage({
     getCurrentProfile(),
   ]);
   const today = todayInSaoPaulo();
-  const [subscription, members, appointments, encounters, financial] = await Promise.all([
+  const [subscription, members, appointments, encounters, financial, preferences, branding] = await Promise.all([
     billingAuthorization.canView && billingAuthorization.ownerUserId
       ? getCurrentSubscription(billingAuthorization.ownerUserId)
       : Promise.resolve(null),
@@ -39,6 +41,8 @@ export default async function DashboardPage({
     activeClinic ? listAppointments(activeClinic.id, { date: today }) : Promise.resolve([]),
     activeClinic ? listClinicalEncounters(activeClinic.id, { statuses: ACTIVE_CARE_STATUSES }) : Promise.resolve([]),
     activeClinic ? getFinancialWorkspace(activeClinic.id, { scope: "overview" }) : Promise.resolve(null),
+    getDashboardPreferences(activeClinic?.id),
+    activeClinic ? getClinicBrandingSettings(activeClinic.id) : Promise.resolve(null),
   ]);
   const planLimit = subscription?.plan_slug ? PLAN_LIMITS[subscription.plan_slug as PlanSlug] : null;
   const canCreateClinic = billingAuthorization.initialSignup || authorization.can("clinics", "create");
@@ -62,6 +66,7 @@ export default async function DashboardPage({
       deniedModule={params.module}
       activeClinicId={activeClinic?.id ?? null}
       activeClinicName={activeClinic?.trade_name ?? "Clínica pendente"}
+      clinicLogoUrl={branding?.compact_logo_url ?? branding?.horizontal_logo_url ?? null}
       firstName={profile?.full_name?.split(" ")[0] ?? "bem-vindo"}
       canCreateClinic={canCreateClinic}
       canViewBilling={billingAuthorization.canView}
@@ -72,6 +77,7 @@ export default async function DashboardPage({
       clinicsCount={clinics.length}
       planLimit={planLimit}
       membersCount={members.length}
+      preferences={preferences}
       metrics={{
         activeAppointments: activeAppointments.length,
         confirmedAppointments: appointments.filter((item) => item.status === "confirmed").length,
