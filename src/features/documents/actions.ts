@@ -11,6 +11,8 @@ import { logAuditEvent } from "@/services/audit/audit-service";
 export type DocumentsActionState = {
   error?: string;
   success?: string;
+  documentId?: string;
+  status?: "draft" | "issued";
 };
 
 const optionalUuid = z
@@ -20,14 +22,54 @@ const optionalUuid = z
   .or(z.literal(""))
   .transform((value) => value || null);
 
+const optionalDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .optional()
+  .or(z.literal(""))
+  .transform((value) => value || null);
+
+const templateTypeSchema = z.enum([
+  "service_contract",
+  "lgpd_consent",
+  "procedure_consent",
+  "payment_acknowledgement",
+  "attendance_declaration",
+  "receipt",
+  "other",
+]);
+
 const templateSchema = z.object({
   id: optionalUuid,
+  template_type: templateTypeSchema,
   name: z.string().trim().min(3, "Informe o nome do modelo.").max(160),
   description: z.string().trim().max(500).optional().or(z.literal("")).transform((value) => value || null),
-  legal_basis: z.string().trim().max(1200).optional().or(z.literal("")).transform((value) => value || null),
-  content: z.string().trim().min(80, "O modelo precisa ter conteúdo suficiente para emissão.").max(20000),
+  legal_basis: z.string().trim().max(1600).optional().or(z.literal("")).transform((value) => value || null),
+  content: z.string().trim().min(80, "O modelo precisa ter conteúdo suficiente para emissão.").max(30000),
   accepted_file_name: z.string().trim().max(180).optional().or(z.literal("")).transform((value) => value || null),
   active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
+});
+
+const generatedDocumentSchema = z.object({
+  template_id: z.string().uuid("Selecione um modelo válido."),
+  patient_id: optionalUuid,
+  appointment_id: optionalUuid,
+  encounter_id: optionalUuid,
+  financial_entry_id: optionalUuid,
+  professional_member_id: optionalUuid,
+  title: z.string().trim().min(3, "Informe o título do documento.").max(180),
+  content: z.string().trim().min(40, "Revise o conteúdo antes de salvar.").max(40000),
+  status: z.enum(["draft", "issued"]),
+  expires_at: optionalDate,
+  observations: z.string().trim().max(1000).optional().or(z.literal("")).transform((value) => value || null),
+});
+
+const documentOperationSchema = z.object({
+  document_id: z.string().uuid("Documento não identificado."),
+});
+
+const cancelDocumentSchema = documentOperationSchema.extend({
+  reason: z.string().trim().min(5, "Informe um motivo com pelo menos 5 caracteres.").max(500),
 });
 
 async function getContext() {
@@ -42,7 +84,20 @@ async function getContext() {
   if (!user) return { error: "Faça login novamente." as const };
   if (!activeClinic) return { error: "Selecione uma clínica antes de acessar documentos." as const };
   const access = await getDocumentsAccess(activeClinic.id);
-  return { activeClinic, user, access };
+  return { activeClinic, user, access, supabase };
+}
+
+function documentRpcError(message?: string) {
+  const normalized = message?.toUpperCase() ?? "";
+  if (normalized.includes("PERMISSION")) return "Seu perfil não possui permissão para esta operação documental.";
+  if (normalized.includes("MISMATCH")) return "Os vínculos selecionados não pertencem ao mesmo atendimento. Revise paciente, consulta e lançamento financeiro.";
+  if (normalized.includes("TEMPLATE")) return "O modelo selecionado não está mais disponível.";
+  if (normalized.includes("PATIENT")) return "O paciente selecionado não pertence à clínica ativa.";
+  if (normalized.includes("APPOINTMENT")) return "A consulta selecionada não pertence à clínica ativa.";
+  if (normalized.includes("FINANCIAL")) return "O lançamento financeiro selecionado não está disponível.";
+  if (normalized.includes("NOT_DRAFT")) return "Somente rascunhos podem ser emitidos.";
+  if (normalized.includes("ALREADY_CANCELLED")) return "Este documento já está cancelado.";
+  return "Não foi possível concluir a operação documental.";
 }
 
 export async function saveDocumentTemplateAction(
@@ -51,6 +106,7 @@ export async function saveDocumentTemplateAction(
 ): Promise<DocumentsActionState> {
   const parsed = templateSchema.safeParse({
     id: formData.get("id") || undefined,
+    template_type: formData.get("template_type"),
     name: formData.get("name"),
     description: formData.get("description"),
     legal_basis: formData.get("legal_basis"),
@@ -67,6 +123,56 @@ export async function saveDocumentTemplateAction(
   }
 
   const admin = createSupabaseAdminClient();
+  const basePayload = {
+    template_type: parsed.data.template_type,
+    name: parsed.data.name,
+    description: parsed.data.description,
+    legal_basis: parsed.data.legal_basis,
+    content: parsed.data.content,
+    accepted_file_name: parsed.data.accepted_file_name,
+    active: parsed.data.active,
+    updated_by: context.user.id,
+  };
+
+  if (!parsed.data.id) {
+    if (!context.access.canManage) {
+      return { error: "A criação de modelos exige permissão de gestão documental." };
+    }
+    const { data: created, error } = await admin
+      .from("document_templates")
+      .insert({
+        clinic_id: context.activeClinic.id,
+        ...basePayload,
+        version_number: 1,
+        created_by: context.user.id,
+      })
+      .select("id")
+      .single<{ id: string }>();
+    if (error || !created) return { error: "Não foi possível criar o modelo." };
+
+    await admin.from("document_template_versions").insert({
+      clinic_id: context.activeClinic.id,
+      template_id: created.id,
+      version_number: 1,
+      content: parsed.data.content,
+      legal_basis: parsed.data.legal_basis,
+      accepted_file_name: parsed.data.accepted_file_name,
+      created_by: context.user.id,
+    });
+    await logAuditEvent({
+      clinicId: context.activeClinic.id,
+      userId: context.user.id,
+      actionType: "document_template_created",
+      module: "documents",
+      recordTable: "document_templates",
+      recordId: created.id,
+      newValues: { ...basePayload, version_number: 1 },
+      notes: "Novo modelo documental criado.",
+    });
+    revalidatePath("/documentos");
+    return { success: "Modelo criado e pronto para emissão." };
+  }
+
   const { data: previous } = await admin
     .from("document_templates")
     .select("*")
@@ -74,27 +180,15 @@ export async function saveDocumentTemplateAction(
     .eq("clinic_id", context.activeClinic.id)
     .is("deleted_at", null)
     .maybeSingle();
-
   if (!previous) return { error: "Modelo não encontrado." };
 
   const nextVersion = Number(previous.version_number ?? 1) + 1;
-  const payload = {
-    name: parsed.data.name,
-    description: parsed.data.description,
-    legal_basis: parsed.data.legal_basis,
-    content: parsed.data.content,
-    accepted_file_name: parsed.data.accepted_file_name,
-    active: parsed.data.active,
-    version_number: nextVersion,
-    updated_by: context.user.id,
-  };
-
+  const payload = { ...basePayload, version_number: nextVersion };
   const { error } = await admin
     .from("document_templates")
     .update(payload)
     .eq("id", previous.id)
     .eq("clinic_id", context.activeClinic.id);
-
   if (error) return { error: "Não foi possível salvar o modelo." };
 
   await admin.from("document_template_versions").insert({
@@ -106,7 +200,6 @@ export async function saveDocumentTemplateAction(
     accepted_file_name: parsed.data.accepted_file_name,
     created_by: context.user.id,
   });
-
   await logAuditEvent({
     clinicId: context.activeClinic.id,
     userId: context.user.id,
@@ -121,4 +214,143 @@ export async function saveDocumentTemplateAction(
 
   revalidatePath("/documentos");
   return { success: "Modelo salvo e versionado." };
+}
+
+export async function createGeneratedDocumentAction(
+  _state: DocumentsActionState,
+  formData: FormData,
+): Promise<DocumentsActionState> {
+  const parsed = generatedDocumentSchema.safeParse({
+    template_id: formData.get("template_id"),
+    patient_id: formData.get("patient_id") || undefined,
+    appointment_id: formData.get("appointment_id") || undefined,
+    encounter_id: formData.get("encounter_id") || undefined,
+    financial_entry_id: formData.get("financial_entry_id") || undefined,
+    professional_member_id: formData.get("professional_member_id") || undefined,
+    title: formData.get("title"),
+    content: formData.get("content"),
+    status: formData.get("status"),
+    expires_at: formData.get("expires_at") || undefined,
+    observations: formData.get("observations"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const context = await getContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canCreate && !context.access.canManage) {
+    return { error: "Seu perfil não possui permissão para emitir documentos." };
+  }
+
+  const payload = {
+    clinic_id: context.activeClinic.id,
+    template_id: parsed.data.template_id,
+    patient_id: parsed.data.patient_id,
+    appointment_id: parsed.data.appointment_id,
+    encounter_id: parsed.data.encounter_id,
+    financial_entry_id: parsed.data.financial_entry_id,
+    professional_member_id: parsed.data.professional_member_id,
+    title: parsed.data.title,
+    content: parsed.data.content,
+    status: parsed.data.status,
+    expires_at: parsed.data.expires_at,
+    metadata: { observations: parsed.data.observations },
+  };
+  const { data: documentId, error } = await context.supabase.rpc(
+    "save_generated_document_transaction",
+    { document_payload: payload },
+  );
+  if (error || !documentId) return { error: documentRpcError(error?.message) };
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: parsed.data.status === "issued" ? "document_issued" : "document_draft_created",
+    module: "documents",
+    recordTable: "generated_documents",
+    recordId: documentId as string,
+    newValues: {
+      template_id: parsed.data.template_id,
+      patient_id: parsed.data.patient_id,
+      appointment_id: parsed.data.appointment_id,
+      encounter_id: parsed.data.encounter_id,
+      financial_entry_id: parsed.data.financial_entry_id,
+      title: parsed.data.title,
+      status: parsed.data.status,
+    },
+    level: parsed.data.patient_id ? "security" : "info",
+    notes: parsed.data.status === "issued" ? "Documento emitido pela central documental." : "Rascunho documental criado.",
+  });
+
+  revalidatePath("/documentos");
+  revalidatePath("/auditoria");
+  return {
+    success: parsed.data.status === "issued" ? "Documento emitido e numerado." : "Rascunho salvo.",
+    documentId: documentId as string,
+    status: parsed.data.status,
+  };
+}
+
+export async function issueGeneratedDocumentAction(
+  _state: DocumentsActionState,
+  formData: FormData,
+): Promise<DocumentsActionState> {
+  const parsed = documentOperationSchema.safeParse({ document_id: formData.get("document_id") });
+  if (!parsed.success) return { error: "Documento não identificado." };
+  const context = await getContext();
+  if ("error" in context) return { error: context.error };
+
+  const { data: documentNumber, error } = await context.supabase.rpc(
+    "issue_generated_document_transaction",
+    { document_uuid: parsed.data.document_id },
+  );
+  if (error || !documentNumber) return { error: documentRpcError(error?.message) };
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "document_issued",
+    module: "documents",
+    recordTable: "generated_documents",
+    recordId: parsed.data.document_id,
+    newValues: { status: "issued", document_number: documentNumber },
+    level: "security",
+    notes: "Rascunho revisado e emitido pela central documental.",
+  });
+  revalidatePath("/documentos");
+  return { success: `Documento ${documentNumber} emitido.`, documentId: parsed.data.document_id, status: "issued" };
+}
+
+export async function cancelGeneratedDocumentAction(
+  _state: DocumentsActionState,
+  formData: FormData,
+): Promise<DocumentsActionState> {
+  const parsed = cancelDocumentSchema.safeParse({
+    document_id: formData.get("document_id"),
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  const context = await getContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage) return { error: "O cancelamento exige permissão de gestão documental." };
+
+  const { error } = await context.supabase.rpc("cancel_generated_document_transaction", {
+    document_uuid: parsed.data.document_id,
+    cancellation_note: parsed.data.reason,
+  });
+  if (error) return { error: documentRpcError(error.message) };
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "document_cancelled",
+    module: "documents",
+    recordTable: "generated_documents",
+    recordId: parsed.data.document_id,
+    newValues: { status: "cancelled", reason: parsed.data.reason },
+    level: "security",
+    notes: "Documento cancelado com preservação integral do histórico.",
+  });
+  revalidatePath("/documentos");
+  revalidatePath("/auditoria");
+  return { success: "Documento cancelado e preservado no histórico." };
 }

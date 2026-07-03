@@ -583,6 +583,18 @@ export type DocumentTemplate = {
   updated_at: string;
 };
 
+export type GeneratedDocumentStatus = "draft" | "issued" | "signed" | "cancelled";
+
+export type GeneratedDocumentEvent = {
+  id: string;
+  clinic_id: string;
+  document_id: string;
+  event_type: "draft_created" | "issued" | "opened_for_print" | "printed" | "signed" | "cancelled";
+  details: Record<string, unknown>;
+  created_at: string;
+  created_by: string | null;
+};
+
 export type InventoryItem = {
   id: string;
   clinic_id: string;
