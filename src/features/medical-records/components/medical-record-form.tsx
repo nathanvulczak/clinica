@@ -14,12 +14,14 @@ import {
 import { MedicalDocumentsPanel } from "@/features/medical-records/components/medical-documents-panel";
 import { MedicalAttachmentsPanel } from "@/features/medical-records/components/medical-attachments-panel";
 import { MedicalTimelinePanel } from "@/features/medical-records/components/medical-timeline-panel";
+import { SpecialtyClinicalForm } from "@/features/medical-records/components/specialty-clinical-form";
 import {
   openMedicalRecordCorrectionAction,
   saveMedicalRecordAction,
   type MedicalRecordActionState,
 } from "@/features/medical-records/actions";
 import type { MedicalRecordEncounterDetail, MedicalRecordPreferences } from "@/repositories/medical-records";
+import type { ClinicalFormWorkspace } from "@/repositories/clinical-forms";
 import type { ClinicDocumentBranding } from "@/services/documents/clinic-document-branding";
 
 function formatDate(value: string | null | undefined) {
@@ -175,10 +177,12 @@ export function MedicalRecordForm({
   detail,
   preferences,
   documentBranding,
+  clinicalFormWorkspace,
 }: {
   detail: MedicalRecordEncounterDetail;
   preferences: MedicalRecordPreferences;
   documentBranding: ClinicDocumentBranding;
+  clinicalFormWorkspace: ClinicalFormWorkspace | null;
 }) {
   const record = detail.medical_record;
   const requiredFields = new Set<MedicalRecordFieldKey>(preferences.required_fields);
@@ -313,6 +317,8 @@ export function MedicalRecordForm({
       </section>
 
       {preferences.show_nursing_summary ? <NursingSummary detail={detail} /> : null}
+
+      <SpecialtyClinicalForm workspace={clinicalFormWorkspace} disabled={locked} />
 
       <section className="grid gap-4 rounded-lg border bg-card p-3.5">
         <div className="flex items-center gap-3">

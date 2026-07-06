@@ -107,7 +107,7 @@ select is(
 );
 
 select ok(
-  public.save_medical_record_transaction(
+  public.save_advanced_medical_record_transaction(
     jsonb_build_object(
       'clinic_id', '62000000-0000-0000-0000-000000000001',
       'encounter_id', '66000000-0000-0000-0000-000000000001',

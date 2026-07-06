@@ -23,6 +23,7 @@ import {
   listMedicalRecords,
   listPatientMedicalOverviews,
 } from "@/repositories/medical-records";
+import { getClinicalFormTemplates } from "@/repositories/clinical-forms";
 
 type MedicalRecordSection = "queue" | "records" | "patients" | "reports" | "preferences";
 
@@ -69,6 +70,10 @@ export default async function ProntuariosPage({
     activeClinic && canView && section === "preferences"
       ? await getMedicalRecordPreferences(activeClinic.id)
       : null;
+  const clinicalFormTemplates =
+    activeClinic && canView && section === "preferences"
+      ? await getClinicalFormTemplates(activeClinic.id)
+      : [];
   const patientOverviews =
     activeClinic && canView && section === "patients"
       ? await listPatientMedicalOverviews(activeClinic.id)
@@ -158,7 +163,7 @@ export default async function ProntuariosPage({
               <div className="grid gap-3 lg:grid-cols-4">
                 {[{ label: "Prontuários", value: reports.totalRecords }, { label: "Concluídos", value: reports.completedRecords }, { label: "Rascunhos", value: reports.draftRecords }, { label: "Documentos emitidos", value: reports.issuedDocuments }].map((item) => <div key={item.label} className="rounded-lg border bg-card p-3.5"><p className="text-xs font-medium text-muted-foreground">{item.label}</p><p className="mt-2 text-xl font-semibold tabular-nums">{item.value}</p></div>)}
               </div>
-              <div className="grid gap-4 lg:grid-cols-2">
+              <div className="grid gap-4 lg:grid-cols-3">
                 <Card>
                   <CardHeader>
                     <CardTitle>Status dos prontuarios</CardTitle>
@@ -187,12 +192,26 @@ export default async function ProntuariosPage({
                     ))}
                   </CardContent>
                 </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Por especialidade</CardTitle>
+                    <CardDescription>Utilização dos layouts clínicos configuráveis.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-2">
+                    {reports.recordsBySpecialty.length ? reports.recordsBySpecialty.map((item) => (
+                      <div key={item.specialty} className="flex justify-between rounded-md border bg-muted/20 p-3 text-sm">
+                        <span>{item.specialty}</span>
+                        <strong>{item.count}</strong>
+                      </div>
+                    )) : <p className="text-sm text-muted-foreground">Nenhum formulário especializado concluído.</p>}
+                  </CardContent>
+                </Card>
               </div>
             </div>
           ) : null}
 
           {section === "preferences" && preferences ? (
-            <MedicalRecordPreferencesForm preferences={preferences} canEdit={access.canViewAll} />
+            <MedicalRecordPreferencesForm preferences={preferences} canEdit={access.canViewAll} templates={clinicalFormTemplates} />
           ) : null}
         </div>
       )}

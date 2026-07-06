@@ -25,7 +25,7 @@ export async function getClinicalWorkflowAccess(
   const authorization = await getClinicAuthorization(clinicId ?? undefined);
 
   return {
-    canViewAll: authorization.can("schedule", "manage"),
+    canViewAll: authorization.can("medical_records", "manage"),
     canViewOwn:
       authorization.can("medical_records", "view") &&
       authorization.can("medical_records", "access_medical_record"),

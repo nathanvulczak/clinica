@@ -21,6 +21,8 @@ export type MedicalRecordPreferences = {
   allow_completed_corrections: boolean;
   require_correction_reason: boolean;
   show_nursing_summary: boolean;
+  default_specialty_slug: string;
+  allow_professional_template_choice: boolean;
 };
 
 export type MedicalRecord = {
@@ -220,6 +222,7 @@ export type MedicalRecordReports = {
   deletedDocuments: number;
   recordsByStatus: Array<{ status: string; count: number }>;
   recordsByProfessional: Array<{ professional: string; count: number }>;
+  recordsBySpecialty: Array<{ specialty: string; count: number }>;
 };
 
 export type PatientMedicalOverview = {
@@ -234,6 +237,8 @@ export const defaultMedicalRecordPreferences = (clinicId = ""): MedicalRecordPre
   allow_completed_corrections: true,
   require_correction_reason: true,
   show_nursing_summary: true,
+  default_specialty_slug: "general_medicine",
+  allow_professional_template_choice: true,
 });
 
 type ProfessionalRow = {
@@ -273,7 +278,7 @@ export async function getMedicalRecordPreferences(
   const { data } = await admin
     .from("medical_record_preferences")
     .select(
-      "clinic_id, required_fields, allow_completed_corrections, require_correction_reason, show_nursing_summary",
+      "clinic_id, required_fields, allow_completed_corrections, require_correction_reason, show_nursing_summary, default_specialty_slug, allow_professional_template_choice",
     )
     .eq("clinic_id", clinicId)
     .is("deleted_at", null)
@@ -283,6 +288,8 @@ export async function getMedicalRecordPreferences(
       allow_completed_corrections: boolean | null;
       require_correction_reason: boolean | null;
       show_nursing_summary: boolean | null;
+      default_specialty_slug: string | null;
+      allow_professional_template_choice: boolean | null;
     }>();
 
   if (!data) return defaultMedicalRecordPreferences(clinicId);
@@ -296,6 +303,8 @@ export async function getMedicalRecordPreferences(
     allow_completed_corrections: data.allow_completed_corrections ?? true,
     require_correction_reason: data.require_correction_reason ?? true,
     show_nursing_summary: data.show_nursing_summary ?? true,
+    default_specialty_slug: data.default_specialty_slug ?? "general_medicine",
+    allow_professional_template_choice: data.allow_professional_template_choice ?? true,
   };
 }
 
@@ -681,14 +690,33 @@ export async function getMedicalRecordReports(
     documentQuery = documentQuery.eq("professional_member_id", access.currentMemberId);
   }
 
-  const { data: documents } = await documentQuery;
+  let specialtyQuery = admin
+    .from("clinical_form_instances")
+    .select("professional_member_id, template:clinical_form_templates(name)")
+    .eq("clinic_id", clinicId)
+    .eq("is_current", true)
+    .is("deleted_at", null);
+  if (!access.canViewAll && access.currentMemberId) {
+    specialtyQuery = specialtyQuery.eq("professional_member_id", access.currentMemberId);
+  }
+
+  const [{ data: documents }, { data: specialtyInstances }] = await Promise.all([
+    documentQuery,
+    specialtyQuery,
+  ]);
   const statusMap = new Map<string, number>();
   const professionalMap = new Map<string, number>();
+  const specialtyMap = new Map<string, number>();
 
   for (const record of records) {
     statusMap.set(record.status, (statusMap.get(record.status) ?? 0) + 1);
     const professional = record.professional?.profile?.full_name ?? "Profissional";
     professionalMap.set(professional, (professionalMap.get(professional) ?? 0) + 1);
+  }
+  for (const instance of specialtyInstances ?? []) {
+    const template = instance.template as unknown as { name?: string } | null;
+    const specialty = template?.name ?? "Sem layout definido";
+    specialtyMap.set(specialty, (specialtyMap.get(specialty) ?? 0) + 1);
   }
 
   return {
@@ -702,6 +730,7 @@ export async function getMedicalRecordReports(
       professional,
       count,
     })),
+    recordsBySpecialty: [...specialtyMap.entries()].map(([specialty, count]) => ({ specialty, count })),
   };
 }
 
@@ -714,6 +743,7 @@ function emptyReports(): MedicalRecordReports {
     deletedDocuments: 0,
     recordsByStatus: [],
     recordsByProfessional: [],
+    recordsBySpecialty: [],
   };
 }
 

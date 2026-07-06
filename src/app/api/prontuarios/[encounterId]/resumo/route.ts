@@ -7,6 +7,8 @@ import {
 } from "@/features/medical-records/labels";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getMedicalRecordEncounterDetail } from "@/repositories/medical-records";
+import { getEncounterClinicalFormWorkspace } from "@/repositories/clinical-forms";
+import type { ClinicalFormField, ClinicalFormResponseValue } from "@/features/medical-records/clinical-form-schema";
 import { logAuditEvent } from "@/services/audit/audit-service";
 import {
   clinicDocumentCss,
@@ -42,6 +44,16 @@ function clinicalList(items: Array<string | null | undefined>) {
   return values.length ? values.join(" | ") : "Nao informado";
 }
 
+function clinicalResponse(field: ClinicalFormField, value: ClinicalFormResponseValue | undefined) {
+  if (value === null || value === undefined || value === "" || (Array.isArray(value) && !value.length)) return "Não informado";
+  if (typeof value === "boolean") return value ? "Sim" : "Não";
+  if (Array.isArray(value)) {
+    return value.map((item) => field.options?.find((option) => option.value === item)?.label ?? item).join(", ");
+  }
+  const display = field.options?.find((option) => option.value === String(value))?.label ?? String(value);
+  return field.unit ? `${display} ${field.unit}` : display;
+}
+
 export async function GET(
   _request: Request,
   context: { params: Promise<{ encounterId: string }> },
@@ -61,11 +73,14 @@ export async function GET(
     return new NextResponse("Clinica ativa nao encontrada.", { status: 404 });
   }
 
-  const detail = await getMedicalRecordEncounterDetail(activeClinic.id, encounterId);
+  const [detail, clinicalFormWorkspace, branding] = await Promise.all([
+    getMedicalRecordEncounterDetail(activeClinic.id, encounterId),
+    getEncounterClinicalFormWorkspace(activeClinic.id, encounterId),
+    getClinicDocumentBranding(activeClinic.id, { embedLogo: true }),
+  ]);
   if (!detail) {
     return new NextResponse("Prontuario nao encontrado ou sem permissao de acesso.", { status: 404 });
   }
-  const branding = await getClinicDocumentBranding(activeClinic.id, { embedLogo: true });
 
   await logAuditEvent({
     clinicId: activeClinic.id,
@@ -163,6 +178,21 @@ export async function GET(
       `,
     )
     .join("");
+
+  const specialtyTemplate = clinicalFormWorkspace?.instance
+    ? clinicalFormWorkspace.templates.find((template) => template.id === clinicalFormWorkspace.instance?.template_id)
+    : null;
+  const specialtySections = clinicalFormWorkspace?.instance
+    ? clinicalFormWorkspace.instance.template_snapshot.sections.map((section) => {
+        const rows = section.fields.map((field) => `
+          <div class="box">
+            <strong>${escapeHtml(field.label)}</strong>
+            <span>${escapeHtml(clinicalResponse(field, clinicalFormWorkspace.instance?.responses[field.key]))}</span>
+          </div>
+        `).join("");
+        return `<h3>${escapeHtml(section.title)}</h3><div class="grid">${rows}</div>`;
+      }).join("")
+    : "";
 
   const html = `<!doctype html>
 <html lang="pt-BR">
@@ -287,6 +317,8 @@ export async function GET(
       <h3>P - Plano terapêutico / conduta</h3>${paragraph(record?.plan)}
       <h3>Orientações ao paciente</h3>${paragraph(record?.patient_guidance)}
       <h3>Retorno</h3>${paragraph(record?.follow_up_required ? record.follow_up_notes ?? "Retorno solicitado." : "Retorno não solicitado.")}</section>
+
+      ${specialtySections ? `<section class="clinical-section"><h2>Formulário especializado - ${escapeHtml(specialtyTemplate?.name ?? "Avaliação clínica")}</h2>${specialtySections}</section>` : ""}
 
       <h2>Documentos e receitas</h2>
       ${documents || '<p class="muted">Nenhum documento registrado.</p>'}

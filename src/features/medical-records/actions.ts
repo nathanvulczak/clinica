@@ -8,6 +8,10 @@ import {
   isMedicalRecordFieldKey,
   medicalRecordFieldLabels,
 } from "@/features/medical-records/config";
+import {
+  parseClinicalFormDefinition,
+  validateClinicalFormResponses,
+} from "@/features/medical-records/clinical-form-schema";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -45,6 +49,8 @@ const recordSchema = z.object({
   follow_up_required: z.boolean(),
   follow_up_notes: optionalText(2000),
   correction_reason: optionalText(800),
+  clinical_template_id: z.string().uuid().optional().or(z.literal("")).transform((value) => value || null),
+  clinical_responses: z.string().max(100000).optional().transform((value) => value || "{}"),
 });
 
 const documentSchema = z.object({
@@ -73,6 +79,9 @@ const preferencesSchema = z.object({
   allow_completed_corrections: z.boolean(),
   require_correction_reason: z.boolean(),
   show_nursing_summary: z.boolean(),
+  default_specialty_slug: z.string().regex(/^[a-z][a-z0-9_]{2,79}$/),
+  allow_professional_template_choice: z.boolean(),
+  active_specialty_slugs: z.array(z.string().regex(/^[a-z][a-z0-9_]{2,79}$/)).min(1),
 });
 
 const commentSchema = z.object({
@@ -253,6 +262,8 @@ export async function saveMedicalRecordAction(
     follow_up_required: formData.get("follow_up_required") === "on",
     follow_up_notes: formString("follow_up_notes"),
     correction_reason: formString("correction_reason"),
+    clinical_template_id: formString("clinical_template_id"),
+    clinical_responses: formString("clinical_responses"),
   });
 
   if (!parsed.success) {
@@ -326,6 +337,34 @@ export async function saveMedicalRecordAction(
     return { error: "O prontuario sera liberado apos a chegada e encaminhamento assistencial do paciente." };
   }
 
+  let clinicalResponses: Record<string, unknown> = {};
+  if (parsed.data.clinical_template_id) {
+    let rawResponses: unknown;
+    try {
+      rawResponses = JSON.parse(parsed.data.clinical_responses);
+    } catch {
+      return { error: "Os dados do formulário especializado estão inválidos. Atualize a página." };
+    }
+    const { data: clinicalTemplate } = await admin
+      .from("clinical_form_templates")
+      .select("definition")
+      .eq("id", parsed.data.clinical_template_id)
+      .eq("clinic_id", context.activeClinic.id)
+      .eq("active", true)
+      .is("deleted_at", null)
+      .maybeSingle<{ definition: unknown }>();
+    if (!clinicalTemplate) return { error: "O formulário especializado selecionado não está mais disponível." };
+    const validation = validateClinicalFormResponses(
+      parseClinicalFormDefinition(clinicalTemplate.definition),
+      rawResponses,
+      parsed.data.mode === "complete",
+    );
+    if (validation.errors.length) {
+      return { error: validation.errors.slice(0, 4).join(" ") };
+    }
+    clinicalResponses = validation.responses;
+  }
+
   const { data: previous } = await admin
     .from("medical_records")
     .select("*")
@@ -369,13 +408,15 @@ export async function saveMedicalRecordAction(
     follow_up_required: parsed.data.follow_up_required,
     follow_up_notes: parsed.data.follow_up_notes,
     correction_reason: parsed.data.correction_reason,
+    clinical_template_id: parsed.data.clinical_template_id,
+    clinical_responses: clinicalResponses,
     completed_at: parsed.data.mode === "complete" ? new Date().toISOString() : previous?.completed_at,
     created_by: previous?.created_by ?? context.user.id,
     updated_by: context.user.id,
   };
 
   const { data: savedId, error } = await context.supabase.rpc(
-    "save_medical_record_transaction",
+    "save_advanced_medical_record_transaction",
     {
       record_payload: payload,
       complete_record: parsed.data.mode === "complete",
@@ -394,6 +435,10 @@ export async function saveMedicalRecordAction(
         error?.message?.includes("INVALID_MEDICAL_RECORD_STAGE") ||
         error?.message?.includes("INVALID_MEDICAL_COMPLETION_STAGE")
           ? "A etapa assistencial mudou. Atualize a fila de Atendimentos antes de continuar."
+          : error?.message?.includes("CLINICAL_REQUIRED_FIELD")
+            ? `Preencha o campo especializado obrigatório: ${error.message.split(":").at(-1) ?? "campo não informado"}.`
+            : error?.message?.includes("CLINICAL_TEMPLATE_LOCKED")
+              ? "O formulário de um prontuário concluído não pode ser substituído. Abra uma correção formal."
           : "Nao foi possivel salvar o prontuario de forma segura. Atualize a pagina e tente novamente.",
     };
   }
@@ -875,12 +920,18 @@ export async function upsertMedicalRecordPreferencesAction(
     allow_completed_corrections: formData.get("allow_completed_corrections") === "on",
     require_correction_reason: formData.get("require_correction_reason") === "on",
     show_nursing_summary: formData.get("show_nursing_summary") === "on",
+    default_specialty_slug: formData.get("default_specialty_slug"),
+    allow_professional_template_choice: formData.get("allow_professional_template_choice") === "on",
+    active_specialty_slugs: formData.getAll("active_specialty_slugs").map(String),
   });
   if (!parsed.success) return { error: "Preferencias invalidas." };
 
   const context = await getContext();
   if (!context) return { error: "Selecione uma clinica e autentique-se novamente." };
   if (!context.access.canViewAll) return { error: "Apenas administradores podem alterar preferencias." };
+  if (!parsed.data.active_specialty_slugs.includes(parsed.data.default_specialty_slug)) {
+    return { error: "A especialidade padrão precisa permanecer ativa." };
+  }
 
   const admin = createSupabaseAdminClient();
   const { data: previous } = await admin
@@ -897,14 +948,20 @@ export async function upsertMedicalRecordPreferencesAction(
     allow_completed_corrections: parsed.data.allow_completed_corrections,
     require_correction_reason: parsed.data.require_correction_reason,
     show_nursing_summary: parsed.data.show_nursing_summary,
+    default_specialty_slug: parsed.data.default_specialty_slug,
+    allow_professional_template_choice: parsed.data.allow_professional_template_choice,
     created_by: previous?.created_by ?? context.user.id,
     updated_by: context.user.id,
     deleted_at: null,
   };
 
-  const { error } = await admin
-    .from("medical_record_preferences")
-    .upsert(payload, { onConflict: "clinic_id" });
+  const { error } = await context.supabase.rpc("save_clinical_form_preferences_transaction", {
+    preferences_payload: {
+      ...payload,
+      required_fields: payload.required_fields,
+    },
+    active_specialties: parsed.data.active_specialty_slugs,
+  });
   if (error) return { error: "Nao foi possivel salvar as preferencias." };
 
   await logAuditEvent({
