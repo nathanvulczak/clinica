@@ -8,6 +8,7 @@ import {
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getMedicalRecordEncounterDetail } from "@/repositories/medical-records";
 import { getEncounterClinicalFormWorkspace } from "@/repositories/clinical-forms";
+import { getEncounterDiagnosticSummary } from "@/repositories/diagnostics";
 import type { ClinicalFormField, ClinicalFormResponseValue } from "@/features/medical-records/clinical-form-schema";
 import { logAuditEvent } from "@/services/audit/audit-service";
 import {
@@ -73,10 +74,11 @@ export async function GET(
     return new NextResponse("Clinica ativa nao encontrada.", { status: 404 });
   }
 
-  const [detail, clinicalFormWorkspace, branding] = await Promise.all([
+  const [detail, clinicalFormWorkspace, branding, diagnosticSummary] = await Promise.all([
     getMedicalRecordEncounterDetail(activeClinic.id, encounterId),
     getEncounterClinicalFormWorkspace(activeClinic.id, encounterId),
     getClinicDocumentBranding(activeClinic.id, { embedLogo: true }),
+    getEncounterDiagnosticSummary(activeClinic.id, encounterId),
   ]);
   if (!detail) {
     return new NextResponse("Prontuario nao encontrado ou sem permissao de acesso.", { status: 404 });
@@ -178,6 +180,11 @@ export async function GET(
       `,
     )
     .join("");
+
+  const diagnosticResults = diagnosticSummary.flatMap((order) => order.items.map((item) => {
+    const result = item.results.find((entry) => entry.status === "final") ?? item.results[0];
+    return `<article class="item"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(order.order_number)} - ${escapeHtml(result?.flag ?? "pendente")}</span>${paragraph(result ? result.value_text || `${result.value_numeric ?? "-"} ${result.unit ?? ""}` : "Resultado pendente")}${result?.interpretation ? paragraph(result.interpretation) : ""}</article>`;
+  })).join("");
 
   const specialtyTemplate = clinicalFormWorkspace?.instance
     ? clinicalFormWorkspace.templates.find((template) => template.id === clinicalFormWorkspace.instance?.template_id)
@@ -325,6 +332,9 @@ export async function GET(
 
       <h2>Anexos e exames</h2>
       ${attachments ? `<ul>${attachments}</ul>` : '<p class="muted">Nenhum anexo registrado.</p>'}
+
+      <h2>Resultados diagnósticos estruturados</h2>
+      ${diagnosticResults || '<p class="muted">Nenhum resultado diagnóstico vinculado a este atendimento.</p>'}
 
       <h2>Comentarios clinicos</h2>
       ${comments || '<p class="muted">Nenhum comentario clinico registrado.</p>'}

@@ -15,6 +15,8 @@ export const PERMISSION_MODULES: PermissionModule[] = [
   "financial",
   "documents",
   "inventory",
+  "diagnostics",
+  "insurance",
   "reports",
 ];
 
@@ -53,6 +55,8 @@ export const MODULE_LABELS: Record<PermissionModule, string> = {
   financial: "Financeiro",
   documents: "Documentos",
   inventory: "Estoque",
+  diagnostics: "Exames e diagnóstico",
+  insurance: "Convênios e TISS",
   reports: "Relatórios",
 };
 
@@ -117,6 +121,13 @@ export const ROLE_PERMISSION_PRESETS: Record<AppRole, PermissionKey[]> = {
     "inventory:edit",
     "inventory:manage",
     "inventory:export",
+    "diagnostics:view",
+    "diagnostics:manage",
+    "diagnostics:export",
+    "insurance:view",
+    "insurance:manage",
+    "insurance:approve",
+    "insurance:export",
     "reports:view",
     "reports:export",
   ],
@@ -131,6 +142,11 @@ export const ROLE_PERMISSION_PRESETS: Record<AppRole, PermissionKey[]> = {
     "inventory:create",
     "schedule:view",
     "schedule:edit",
+    "diagnostics:view",
+    "diagnostics:create",
+    "diagnostics:edit",
+    "diagnostics:approve",
+    "diagnostics:export",
   ],
   nurse: [
     "patients:view",
@@ -144,6 +160,9 @@ export const ROLE_PERMISSION_PRESETS: Record<AppRole, PermissionKey[]> = {
     "medical_records:access_medical_record",
     "schedule:view",
     "schedule:edit",
+    "diagnostics:view",
+    "diagnostics:create",
+    "diagnostics:edit",
   ],
   receptionist: [
     "patients:view",
@@ -156,6 +175,9 @@ export const ROLE_PERMISSION_PRESETS: Record<AppRole, PermissionKey[]> = {
     "schedule:manage",
     "schedule:export",
     "financial:create",
+    "diagnostics:view",
+    "insurance:view",
+    "insurance:create",
   ],
   financial: [
     "billing:view",
@@ -169,6 +191,12 @@ export const ROLE_PERMISSION_PRESETS: Record<AppRole, PermissionKey[]> = {
     "inventory:create",
     "reports:view",
     "reports:export",
+    "insurance:view",
+    "insurance:create",
+    "insurance:edit",
+    "insurance:approve",
+    "insurance:manage",
+    "insurance:export",
   ],
   professional: [
     "patients:view",
@@ -178,6 +206,10 @@ export const ROLE_PERMISSION_PRESETS: Record<AppRole, PermissionKey[]> = {
     "medical_records:access_medical_record",
     "schedule:view",
     "schedule:edit",
+    "diagnostics:view",
+    "diagnostics:create",
+    "diagnostics:edit",
+    "diagnostics:approve",
   ],
 };
 
@@ -407,6 +439,60 @@ export const CRITICAL_PERMISSION_OPTIONS: Array<{
     action: "view",
     label: "Visualizar relatórios",
     description: "Prepara o acesso aos relatórios operacionais e administrativos.",
+  },
+  {
+    module: "diagnostics",
+    action: "view",
+    label: "Visualizar exames",
+    description: "Permite consultar pedidos, filas e resultados diagnósticos autorizados.",
+  },
+  {
+    module: "diagnostics",
+    action: "create",
+    label: "Solicitar exames",
+    description: "Permite criar pedidos diagnósticos vinculados ao paciente e atendimento.",
+  },
+  {
+    module: "diagnostics",
+    action: "edit",
+    label: "Registrar resultados",
+    description: "Permite registrar coletas, resultados e correções justificadas.",
+  },
+  {
+    module: "diagnostics",
+    action: "approve",
+    label: "Validar resultados",
+    description: "Permite tornar um resultado definitivo e disponível no prontuário.",
+  },
+  {
+    module: "diagnostics",
+    action: "manage",
+    label: "Gerenciar diagnóstico",
+    description: "Permite administrar filas, preferências e correções excepcionais.",
+  },
+  {
+    module: "insurance",
+    action: "view",
+    label: "Visualizar convênios e TISS",
+    description: "Permite consultar coberturas, guias, lotes e glosas.",
+  },
+  {
+    module: "insurance",
+    action: "create",
+    label: "Criar guias TISS",
+    description: "Permite cadastrar coberturas e preparar guias de faturamento.",
+  },
+  {
+    module: "insurance",
+    action: "approve",
+    label: "Aprovar faturamento TISS",
+    description: "Permite autorizar fechamento, envio e correções de lotes.",
+  },
+  {
+    module: "insurance",
+    action: "manage",
+    label: "Gerenciar convênios",
+    description: "Permite administrar o ciclo completo de faturamento de convênios.",
   },
   {
     module: "reports",

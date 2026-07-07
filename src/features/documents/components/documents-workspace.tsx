@@ -344,14 +344,37 @@ function IssueDocumentModal({
       encounterId: appointment?.encounter_id ?? "",
       patientId: appointment?.patient_id ?? selections.patientId,
       professionalId: appointment?.professional_member_id ?? selections.professionalId,
-      financialId: linkedFinancial?.id ?? selections.financialId,
+      financialId: linkedFinancial?.id ?? "",
     };
     setSelections(next);
     applyTemplate(next);
   }
 
   function updateSelection(key: keyof IssueSelections, value: string) {
-    const next = { ...selections, [key]: value };
+    let next = { ...selections, [key]: value };
+    if (key === "patientId") {
+      const appointment = data.appointments.find((item) => item.id === selections.appointmentId);
+      const financial = data.financialEntries.find((item) => item.id === selections.financialId);
+      if ((appointment && appointment.patient_id !== value) || (financial?.patient_id && financial.patient_id !== value)) {
+        next = {
+          ...next,
+          appointmentId: "",
+          encounterId: "",
+          financialId: "",
+        };
+      }
+    }
+    if (key === "financialId") {
+      const financial = data.financialEntries.find((item) => item.id === value);
+      const linkedAppointment = data.appointments.find((item) => item.id === financial?.appointment_id);
+      next = {
+        ...next,
+        patientId: financial?.patient_id ?? next.patientId,
+        appointmentId: linkedAppointment?.id ?? "",
+        encounterId: linkedAppointment?.encounter_id ?? "",
+        professionalId: linkedAppointment?.professional_member_id ?? next.professionalId,
+      };
+    }
     setSelections(next);
     if (selectedTemplate) applyTemplate(next);
   }

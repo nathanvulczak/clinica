@@ -17,6 +17,8 @@ const protectedPrefixes = [
   "/financeiro",
   "/documentos",
   "/estoque",
+  "/exames",
+  "/convenios",
   "/administracao",
 ];
 const authPrefixes = ["/login", "/cadastro"];
@@ -33,6 +35,8 @@ const subscriptionRequiredPrefixes = [
   "/financeiro",
   "/documentos",
   "/estoque",
+  "/exames",
+  "/convenios",
   "/administracao",
 ];
 

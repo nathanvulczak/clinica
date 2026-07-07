@@ -1,0 +1,3 @@
+export default function DiagnosticsLoading() {
+  return <div className="grid gap-4"><div className="h-20 animate-pulse rounded-md bg-muted" /><div className="h-11 animate-pulse rounded-md bg-muted" /><div className="grid grid-cols-4 gap-px overflow-hidden rounded-md border bg-border">{Array.from({ length: 4 }).map((_, index) => <div key={index} className="h-20 animate-pulse bg-card" />)}</div><div className="h-80 animate-pulse rounded-md bg-muted" /></div>;
+}

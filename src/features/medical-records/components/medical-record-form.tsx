@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ClipboardCheck, FileText, RotateCcw, Save, Sparkles, Stethoscope, UserRound } from "lucide-react";
+import { AlertTriangle, Beaker, ClipboardCheck, FileText, RotateCcw, Save, Sparkles, Stethoscope, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Modal } from "@/components/ui/modal";
@@ -22,6 +22,7 @@ import {
 } from "@/features/medical-records/actions";
 import type { MedicalRecordEncounterDetail, MedicalRecordPreferences } from "@/repositories/medical-records";
 import type { ClinicalFormWorkspace } from "@/repositories/clinical-forms";
+import type { DiagnosticOrder } from "@/repositories/diagnostics";
 import type { ClinicDocumentBranding } from "@/services/documents/clinic-document-branding";
 
 function formatDate(value: string | null | undefined) {
@@ -178,11 +179,13 @@ export function MedicalRecordForm({
   preferences,
   documentBranding,
   clinicalFormWorkspace,
+  diagnosticSummary,
 }: {
   detail: MedicalRecordEncounterDetail;
   preferences: MedicalRecordPreferences;
   documentBranding: ClinicDocumentBranding;
   clinicalFormWorkspace: ClinicalFormWorkspace | null;
+  diagnosticSummary: Array<Pick<DiagnosticOrder, "id" | "order_number" | "category" | "priority" | "status" | "created_at" | "items">>;
 }) {
   const record = detail.medical_record;
   const requiredFields = new Set<MedicalRecordFieldKey>(preferences.required_fields);
@@ -317,6 +320,23 @@ export function MedicalRecordForm({
       </section>
 
       {preferences.show_nursing_summary ? <NursingSummary detail={detail} /> : null}
+
+      {diagnosticSummary.length ? (
+        <section className="overflow-hidden rounded-lg border bg-card">
+          <header className="flex items-center gap-3 border-b px-4 py-3">
+            <Beaker className="size-5 text-primary" />
+            <div><p className="text-sm font-semibold">Exames deste atendimento</p><p className="text-xs text-muted-foreground">Resultados validados e versões anteriores permanecem rastreáveis.</p></div>
+          </header>
+          <div className="divide-y">
+            {diagnosticSummary.map((order) => (
+              <div key={order.id} className="grid gap-3 px-4 py-3 lg:grid-cols-[180px_1fr]">
+                <div><p className="selectable font-mono text-xs font-medium">{order.order_number}</p><p className="mt-1 text-xs text-muted-foreground">{order.status === "completed" ? "Concluído" : "Em andamento"}</p></div>
+                <div className="grid gap-2">{order.items.map((item) => { const result = item.results.find((entry) => entry.status === "final") ?? item.results[0]; return <div key={item.id} className="grid gap-2 rounded-md border bg-muted/10 px-3 py-2 lg:grid-cols-[1fr_1fr_auto]"><span className="text-sm font-medium">{item.name}</span><span className="selectable text-sm text-muted-foreground">{result ? result.value_text || `${result.value_numeric ?? "-"} ${result.unit ?? ""}` : "Resultado pendente"}</span>{result?.flag && result.flag !== "normal" ? <span className="flex items-center gap-1 text-xs text-destructive"><AlertTriangle className="size-3.5" />{result.flag === "critical" ? "Crítico" : "Alterado"}</span> : null}</div>; })}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <SpecialtyClinicalForm workspace={clinicalFormWorkspace} disabled={locked} />
 

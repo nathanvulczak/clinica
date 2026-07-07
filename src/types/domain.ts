@@ -30,6 +30,8 @@ export type PermissionModule =
   | "financial"
   | "documents"
   | "inventory"
+  | "diagnostics"
+  | "insurance"
   | "reports";
 
 export type PermissionAction =

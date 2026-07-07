@@ -11,6 +11,7 @@ import { MedicalRecordForm } from "@/features/medical-records/components/medical
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
 import { getInventoryCareConsumption } from "@/repositories/inventory";
 import { getEncounterClinicalFormWorkspace } from "@/repositories/clinical-forms";
+import { getEncounterDiagnosticSummary } from "@/repositories/diagnostics";
 import { getClinicDocumentBranding } from "@/services/documents/clinic-document-branding";
 import {
   getMedicalRecordEncounterDetail,
@@ -48,12 +49,13 @@ export default async function MedicalRecordPage({
     );
   }
 
-  const [detail, preferences, documentBranding, inventoryCare, clinicalFormWorkspace] = await Promise.all([
+  const [detail, preferences, documentBranding, inventoryCare, clinicalFormWorkspace, diagnosticSummary] = await Promise.all([
     getMedicalRecordEncounterDetail(activeClinic.id, encounterId),
     getMedicalRecordPreferences(activeClinic.id),
     getClinicDocumentBranding(activeClinic.id),
     getInventoryCareConsumption(activeClinic.id, encounterId),
     getEncounterClinicalFormWorkspace(activeClinic.id, encounterId),
+    getEncounterDiagnosticSummary(activeClinic.id, encounterId),
   ]);
 
   if (!detail) notFound();
@@ -101,7 +103,7 @@ export default async function MedicalRecordPage({
           <section className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-4 py-3"><p className="text-sm font-medium text-emerald-900">Consulta concluída</p><p className="mt-1 text-sm text-emerald-800">Correções permanecem disponíveis conforme permissão, sempre com motivo e auditoria.</p></section>
         ) : null}
 
-        <MedicalRecordForm detail={detail} preferences={preferences} documentBranding={documentBranding} clinicalFormWorkspace={clinicalFormWorkspace} />
+        <MedicalRecordForm detail={detail} preferences={preferences} documentBranding={documentBranding} clinicalFormWorkspace={clinicalFormWorkspace} diagnosticSummary={diagnosticSummary} />
         <InventoryConsumptionPanel
           items={inventoryCare.items}
           locations={inventoryCare.locations}
