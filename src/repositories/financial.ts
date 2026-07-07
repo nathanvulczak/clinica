@@ -314,13 +314,13 @@ export async function getFinancialWorkspace(
       .order("name") : Promise.resolve({ data: [] }),
     needsHealthPlans ? admin
       .from("financial_health_plans")
-      .select("id, clinic_id, name, document, email, phone, active, notes")
+      .select("id, clinic_id, name, document, email, phone, legal_name, trade_name, postal_code, address_line, address_number, address_complement, neighborhood, city, state, registration_status, ans_registration, tiss_version, operator_code, submission_deadline_days, active, notes")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
       .order("name") : Promise.resolve({ data: [] }),
     needsVendors ? admin
       .from("financial_vendors")
-      .select("id, clinic_id, name, document, email, phone, vendor_type, active, notes")
+      .select("id, clinic_id, name, document, email, phone, legal_name, trade_name, postal_code, address_line, address_number, address_complement, neighborhood, city, state, registration_status, vendor_type, active, notes")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
       .order("name") : Promise.resolve({ data: [] }),

@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(9);
+select plan(10);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -148,6 +148,31 @@ select is(
   (select status from public.generated_documents where id = (select document_id from pg_temp.document_test_result)),
   'cancelled',
   'cancelamento preserva o documento com novo status'
+);
+
+insert into pg_temp.document_test_result (document_id)
+select public.save_generated_document_transaction(
+  jsonb_build_object(
+    'clinic_id', '82000000-0000-0000-0000-000000000001',
+    'template_id', (
+      select id from public.document_templates
+      where clinic_id = '82000000-0000-0000-0000-000000000001'
+      order by created_at limit 1
+    ),
+    'title', 'Emissao direta pela central',
+    'content', repeat('Conteudo documental seguro e rastreavel. ', 4),
+    'status', 'issued'
+  )
+);
+
+select ok(
+  exists (
+    select 1 from public.generated_documents
+    where title = 'Emissao direta pela central'
+      and status = 'issued'
+      and document_number ~ '^DOC-[0-9]{4}-[0-9]{6}$'
+  ),
+  'documento pode ser emitido diretamente pelo fluxo principal'
 );
 
 select set_config('request.jwt.claim.sub', '81000000-0000-0000-0000-000000000002', true);

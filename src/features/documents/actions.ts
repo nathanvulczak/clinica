@@ -229,11 +229,27 @@ export async function createGeneratedDocumentAction(
     professional_member_id: formData.get("professional_member_id") || undefined,
     title: formData.get("title"),
     content: formData.get("content"),
-    status: formData.get("status"),
+    status: formData.get("document_intent") || formData.get("status"),
     expires_at: formData.get("expires_at") || undefined,
     observations: formData.get("observations"),
   });
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  if (!parsed.success) {
+    const fieldLabels: Record<string, string> = {
+      template_id: "modelo",
+      patient_id: "paciente",
+      appointment_id: "consulta",
+      encounter_id: "atendimento",
+      financial_entry_id: "lançamento financeiro",
+      professional_member_id: "profissional",
+      title: "título",
+      content: "conteúdo",
+      status: "tipo de emissão",
+      expires_at: "validade",
+    };
+    const issue = parsed.error.issues[0];
+    const field = fieldLabels[String(issue?.path[0] ?? "")];
+    return { error: issue?.message && !/^Invalid/i.test(issue.message) ? issue.message : `Revise o campo ${field ?? "do documento"} antes de emitir.` };
+  }
 
   const context = await getContext();
   if ("error" in context) return { error: context.error };

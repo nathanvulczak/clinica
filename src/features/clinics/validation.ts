@@ -19,4 +19,10 @@ export const clinicSchema = z.object({
   phone: z.string().optional().transform((value) => (value ? onlyDigits(value) : null)),
   city: z.string().optional(),
   state: z.string().max(2, "Use UF com 2 letras.").optional(),
+  postal_code: z.string().optional().transform((value) => value ? onlyDigits(value) : null),
+  address_line: z.string().trim().optional(),
+  address_number: z.string().trim().optional(),
+  address_complement: z.string().trim().optional(),
+  neighborhood: z.string().trim().optional(),
+  registration_status: z.string().trim().optional(),
 });

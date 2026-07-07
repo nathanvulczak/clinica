@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { onlyDigits } from "@/lib/utils";
-import { isValidEmail } from "@/lib/validators";
+import { isValidCpfOrCnpj, isValidEmail } from "@/lib/validators";
 
 const optionalText = z
   .string()
@@ -19,7 +19,7 @@ const optionalDocument = z
   .string()
   .optional()
   .transform((value) => onlyDigits(value ?? ""))
-  .refine((value) => !value || value.length === 11 || value.length === 14, "Informe CPF ou CNPJ valido.")
+  .refine((value) => !value || isValidCpfOrCnpj(value), "Informe um CPF ou CNPJ válido.")
   .transform((value) => (value.length > 0 ? value : null));
 
 const optionalPhone = z
@@ -28,6 +28,19 @@ const optionalPhone = z
   .transform((value) => onlyDigits(value ?? ""))
   .refine((value) => !value || (value.length >= 10 && value.length <= 11), "Telefone invalido.")
   .transform((value) => (value.length > 0 ? value : null));
+
+const companyRegistrationFields = {
+  legal_name: optionalText,
+  trade_name: optionalText,
+  postal_code: optionalText,
+  address_line: optionalText,
+  address_number: optionalText,
+  address_complement: optionalText,
+  neighborhood: optionalText,
+  city: optionalText,
+  state: z.string().optional().transform((value) => value?.trim().toUpperCase() || null).refine((value) => !value || /^[A-Z]{2}$/.test(value), "Informe uma UF válida."),
+  registration_status: optionalText,
+};
 
 export const currencyString = z
   .string()
@@ -122,6 +135,12 @@ export const healthPlanSchema = z.object({
   document: optionalDocument,
   email: optionalEmail,
   phone: optionalPhone,
+  ...companyRegistrationFields,
+  ans_registration: optionalText,
+  tiss_version: optionalText,
+  operator_code: optionalText,
+  submission_deadline_days: z.coerce.number().int().min(1).max(365),
+  ...companyRegistrationFields,
   notes: optionalText,
   active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
 });

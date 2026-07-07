@@ -26,6 +26,12 @@ export async function createClinicAction(_state: ClinicState, formData: FormData
     phone: formData.get("phone"),
     city: formData.get("city"),
     state: formData.get("state"),
+    postal_code: formData.get("postal_code"),
+    address_line: formData.get("address_line"),
+    address_number: formData.get("address_number"),
+    address_complement: formData.get("address_complement"),
+    neighborhood: formData.get("neighborhood"),
+    registration_status: formData.get("registration_status"),
   });
 
   if (!parsed.success) {
@@ -128,6 +134,12 @@ export async function updateClinicAction(_state: ClinicState, formData: FormData
     phone: formData.get("phone"),
     city: formData.get("city"),
     state: formData.get("state"),
+    postal_code: formData.get("postal_code"),
+    address_line: formData.get("address_line"),
+    address_number: formData.get("address_number"),
+    address_complement: formData.get("address_complement"),
+    neighborhood: formData.get("neighborhood"),
+    registration_status: formData.get("registration_status"),
   });
 
   if (!clinicId) {
@@ -150,7 +162,7 @@ export async function updateClinicAction(_state: ClinicState, formData: FormData
   const admin = createSupabaseAdminClient();
   const { data: previous, error: previousError } = await admin
     .from("clinics")
-    .select("id, legal_name, trade_name, document, email, phone, city, state, created_by")
+    .select("id, legal_name, trade_name, document, email, phone, city, state, postal_code, address_line, address_number, address_complement, neighborhood, registration_status, created_by")
     .eq("id", clinicId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -196,6 +208,12 @@ export async function updateClinicAction(_state: ClinicState, formData: FormData
     phone: parsed.data.phone,
     city: parsed.data.city || null,
     state: parsed.data.state?.toUpperCase() || null,
+    postal_code: parsed.data.postal_code,
+    address_line: parsed.data.address_line || null,
+    address_number: parsed.data.address_number || null,
+    address_complement: parsed.data.address_complement || null,
+    neighborhood: parsed.data.neighborhood || null,
+    registration_status: parsed.data.registration_status || null,
   };
 
   const { error } = await admin
@@ -225,6 +243,11 @@ export async function updateClinicAction(_state: ClinicState, formData: FormData
       phone: previous.phone,
       city: previous.city,
       state: previous.state,
+      postal_code: previous.postal_code,
+      address_line: previous.address_line,
+      address_number: previous.address_number,
+      address_complement: previous.address_complement,
+      neighborhood: previous.neighborhood,
     },
     newValues: nextData,
     notes: "Cadastro da clínica atualizado.",

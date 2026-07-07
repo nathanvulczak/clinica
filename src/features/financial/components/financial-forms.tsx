@@ -1,8 +1,11 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Building2, Calculator, CalendarCheck, Check, CreditCard, Landmark, LockOpen, ReceiptText, RotateCcw, Save, Settings2, ShieldCheck, Tags, Trash2, Truck, Upload, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CnpjLookupInput, type CompanyLookupResult } from "@/components/forms/cnpj-lookup-input";
+import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -35,8 +38,9 @@ import {
   updateFinancialCommissionStatusAction,
   type FinancialActionState,
 } from "@/features/financial/actions";
-import { formatCpfOrCnpj, formatCurrencyInput, formatPhone, normalizeEmail } from "@/lib/formatters";
+import { formatCpfOrCnpj, formatCurrencyInput, formatPhone, formatPostalCode, normalizeEmail } from "@/lib/formatters";
 import { formatCurrencyBRL } from "@/lib/utils";
+import { InventoryItemForm } from "@/features/inventory/components/inventory-workspace";
 import type {
   FinancialAccount,
   FinancialBankImport,
@@ -142,32 +146,17 @@ function CurrencyInput({
   );
 }
 
-function DocumentInput({ name, label, defaultValue }: { name: string; label: string; defaultValue?: string | null }) {
-  const [value, setValue] = useState(defaultValue ? formatCpfOrCnpj(defaultValue) : "");
+function PhoneInput({ name, label, defaultValue, value: controlledValue, onValueChange }: { name: string; label: string; defaultValue?: string | null; value?: string; onValueChange?: (value: string) => void }) {
+  const [localValue, setLocalValue] = useState(defaultValue ? formatPhone(defaultValue) : "");
+  const value = controlledValue ?? localValue;
+  const update = (next: string) => onValueChange ? onValueChange(next) : setLocalValue(next);
   return (
     <label className="grid gap-2 text-sm font-medium">
       {label}
       <input
         name={name}
         value={value}
-        onChange={(event) => setValue(formatCpfOrCnpj(event.target.value))}
-        inputMode="numeric"
-        placeholder="CPF ou CNPJ"
-        className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      />
-    </label>
-  );
-}
-
-function PhoneInput({ name, label, defaultValue }: { name: string; label: string; defaultValue?: string | null }) {
-  const [value, setValue] = useState(defaultValue ? formatPhone(defaultValue) : "");
-  return (
-    <label className="grid gap-2 text-sm font-medium">
-      {label}
-      <input
-        name={name}
-        value={value}
-        onChange={(event) => setValue(formatPhone(event.target.value))}
+        onChange={(event) => update(formatPhone(event.target.value))}
         inputMode="tel"
         placeholder="(00) 00000-0000"
         className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -176,8 +165,10 @@ function PhoneInput({ name, label, defaultValue }: { name: string; label: string
   );
 }
 
-function EmailInput({ name, label, defaultValue }: { name: string; label: string; defaultValue?: string | null }) {
-  const [value, setValue] = useState(defaultValue ?? "");
+function EmailInput({ name, label, defaultValue, value: controlledValue, onValueChange }: { name: string; label: string; defaultValue?: string | null; value?: string; onValueChange?: (value: string) => void }) {
+  const [localValue, setLocalValue] = useState(defaultValue ?? "");
+  const value = controlledValue ?? localValue;
+  const update = (next: string) => onValueChange ? onValueChange(next) : setLocalValue(next);
   return (
     <label className="grid gap-2 text-sm font-medium">
       {label}
@@ -185,8 +176,8 @@ function EmailInput({ name, label, defaultValue }: { name: string; label: string
         name={name}
         type="email"
         value={value}
-        onChange={(event) => setValue(event.target.value)}
-        onBlur={() => setValue((current) => normalizeEmail(current))}
+        onChange={(event) => update(event.target.value)}
+        onBlur={() => update(normalizeEmail(value))}
         placeholder="email@clinica.com"
         className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
@@ -236,6 +227,8 @@ function Field({
   type = "text",
   required,
   placeholder,
+  value,
+  onChange,
 }: {
   name: string;
   label: string;
@@ -243,6 +236,8 @@ function Field({
   type?: string;
   required?: boolean;
   placeholder?: string;
+  value?: string;
+  onChange?: React.ChangeEventHandler<HTMLInputElement>;
 }) {
   return (
     <label className="grid gap-2 text-sm font-medium">
@@ -251,7 +246,7 @@ function Field({
         name={name}
         type={type}
         required={required}
-        defaultValue={defaultValue ?? ""}
+        {...(value !== undefined ? { value, onChange } : { defaultValue: defaultValue ?? "" })}
         placeholder={placeholder}
         className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
@@ -457,18 +452,94 @@ export function CardMachineForm({
   );
 }
 
+type CompanyFormState = {
+  name: string;
+  document: string;
+  legalName: string;
+  tradeName: string;
+  email: string;
+  phone: string;
+  postalCode: string;
+  addressLine: string;
+  addressNumber: string;
+  addressComplement: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  registrationStatus: string;
+};
+
+function companyFormState(source?: Partial<FinancialVendor & FinancialHealthPlan> | null): CompanyFormState {
+  return {
+    name: source?.name ?? "",
+    document: source?.document ? formatCpfOrCnpj(source.document) : "",
+    legalName: source?.legal_name ?? "",
+    tradeName: source?.trade_name ?? "",
+    email: source?.email ?? "",
+    phone: source?.phone ? formatPhone(source.phone) : "",
+    postalCode: source?.postal_code ? formatPostalCode(source.postal_code) : "",
+    addressLine: source?.address_line ?? "",
+    addressNumber: source?.address_number ?? "",
+    addressComplement: source?.address_complement ?? "",
+    neighborhood: source?.neighborhood ?? "",
+    city: source?.city ?? "",
+    state: source?.state ?? "",
+    registrationStatus: source?.registration_status ?? "",
+  };
+}
+
+function applyCompanyResult(current: CompanyFormState, company: CompanyLookupResult): CompanyFormState {
+  return {
+    ...current,
+    name: company.tradeName || company.legalName || current.name,
+    document: formatCpfOrCnpj(company.cnpj),
+    legalName: company.legalName,
+    tradeName: company.tradeName,
+    email: company.email || current.email,
+    phone: company.phone ? formatPhone(company.phone) : current.phone,
+    postalCode: formatPostalCode(company.postalCode),
+    addressLine: company.addressLine,
+    addressNumber: company.addressNumber,
+    addressComplement: company.addressComplement,
+    neighborhood: company.neighborhood,
+    city: company.city,
+    state: company.state,
+    registrationStatus: company.registrationStatus,
+  };
+}
+
+function CompanyAddressFields({ company, setCompany }: { company: CompanyFormState; setCompany: React.Dispatch<React.SetStateAction<CompanyFormState>> }) {
+  const field = (key: keyof CompanyFormState) => ({
+    value: company[key],
+    onChange: (event: React.ChangeEvent<HTMLInputElement>) => setCompany((current) => ({ ...current, [key]: event.target.value })),
+  });
+  return <>
+    <input type="hidden" name="registration_status" value={company.registrationStatus} />
+    <Field name="legal_name" label="Razão social" value={company.legalName} onChange={field("legalName").onChange} />
+    <Field name="trade_name" label="Nome fantasia" value={company.tradeName} onChange={field("tradeName").onChange} />
+    <label className="grid gap-2 text-sm font-medium">CEP<input name="postal_code" value={company.postalCode} onChange={(event) => setCompany((current) => ({ ...current, postalCode: formatPostalCode(event.target.value) }))} className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring" /></label>
+    <Field name="address_line" label="Logradouro" value={company.addressLine} onChange={field("addressLine").onChange} />
+    <Field name="address_number" label="Número" value={company.addressNumber} onChange={field("addressNumber").onChange} />
+    <Field name="address_complement" label="Complemento" value={company.addressComplement} onChange={field("addressComplement").onChange} />
+    <Field name="neighborhood" label="Bairro" value={company.neighborhood} onChange={field("neighborhood").onChange} />
+    <Field name="city" label="Cidade" value={company.city} onChange={field("city").onChange} />
+    <label className="grid gap-2 text-sm font-medium">UF<input name="state" value={company.state} maxLength={2} onChange={(event) => setCompany((current) => ({ ...current, state: event.target.value.toUpperCase().replace(/[^A-Z]/g, "") }))} className="h-10 rounded-md border bg-background px-3 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring" /></label>
+  </>;
+}
+
 export function VendorForm({ vendor, onCompleted }: { vendor?: FinancialVendor | null; onCompleted?: () => void }) {
   const [state, action, pending] = useActionState(saveVendorAction, {});
+  const [company, setCompany] = useState(() => companyFormState(vendor));
   useActionToast(state, onCompleted);
 
   return (
     <form action={action} className="grid gap-4">
       <input type="hidden" name="id" value={vendor?.id ?? ""} />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Field name="name" label="Nome" defaultValue={vendor?.name} required />
-        <DocumentInput name="document" label="CPF/CNPJ" defaultValue={vendor?.document} />
-        <EmailInput name="email" label="E-mail" defaultValue={vendor?.email} />
-        <PhoneInput name="phone" label="Telefone" defaultValue={vendor?.phone} />
+        <Field name="name" label="Nome para exibição" value={company.name} onChange={(event) => setCompany((current) => ({ ...current, name: event.target.value }))} required />
+        <CnpjLookupInput value={company.document} onChange={(document) => setCompany((current) => ({ ...current, document }))} onFound={(result) => setCompany((current) => applyCompanyResult(current, result))} />
+        <EmailInput name="email" label="E-mail" value={company.email} onValueChange={(email) => setCompany((current) => ({ ...current, email }))} />
+        <PhoneInput name="phone" label="Telefone" value={company.phone} onValueChange={(phone) => setCompany((current) => ({ ...current, phone }))} />
         <label className="grid gap-2 text-sm font-medium">
           Tipo
           <Select name="vendor_type" defaultValue={vendor?.vendor_type ?? "supplier"}>
@@ -479,6 +550,7 @@ export function VendorForm({ vendor, onCompleted }: { vendor?: FinancialVendor |
             <option value="other">Outro</option>
           </Select>
         </label>
+        <CompanyAddressFields company={company} setCompany={setCompany} />
       </div>
       <TextArea name="notes" label="Observações" defaultValue={vendor?.notes} />
       <BooleanField name="active" label="Fornecedor ativo" defaultChecked={vendor?.active ?? true} />
@@ -578,16 +650,22 @@ export function HealthPlanForm({
   onCompleted?: () => void;
 }) {
   const [state, action, pending] = useActionState(saveHealthPlanAction, {});
+  const [company, setCompany] = useState(() => companyFormState(healthPlan));
   useActionToast(state, onCompleted);
 
   return (
     <form action={action} className="grid gap-4">
       <input type="hidden" name="id" value={healthPlan?.id ?? ""} />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Field name="name" label="Nome do convênio" defaultValue={healthPlan?.name} required />
-        <DocumentInput name="document" label="CNPJ" defaultValue={healthPlan?.document} />
-        <EmailInput name="email" label="E-mail" defaultValue={healthPlan?.email} />
-        <PhoneInput name="phone" label="Telefone" defaultValue={healthPlan?.phone} />
+        <Field name="name" label="Nome do convênio" value={company.name} onChange={(event) => setCompany((current) => ({ ...current, name: event.target.value }))} required />
+        <CnpjLookupInput value={company.document} onChange={(document) => setCompany((current) => ({ ...current, document }))} onFound={(result) => setCompany((current) => applyCompanyResult(current, result))} />
+        <EmailInput name="email" label="E-mail" value={company.email} onValueChange={(email) => setCompany((current) => ({ ...current, email }))} />
+        <PhoneInput name="phone" label="Telefone" value={company.phone} onValueChange={(phone) => setCompany((current) => ({ ...current, phone }))} />
+        <CompanyAddressFields company={company} setCompany={setCompany} />
+        <Field name="ans_registration" label="Registro ANS" defaultValue={healthPlan?.ans_registration} />
+        <Field name="operator_code" label="Código da operadora" defaultValue={healthPlan?.operator_code} />
+        <Field name="tiss_version" label="Versão TISS" defaultValue={healthPlan?.tiss_version ?? "202511"} />
+        <Field name="submission_deadline_days" label="Prazo de envio (dias)" type="number" defaultValue={healthPlan?.submission_deadline_days ?? 30} />
       </div>
       <TextArea name="notes" label="Observações" defaultValue={healthPlan?.notes} />
       <BooleanField name="active" label="Convênio ativo" defaultChecked={healthPlan?.active ?? true} />
@@ -611,6 +689,7 @@ export function FinancialEntryForm({
   inventoryItems = [],
   inventoryLocations = [],
   onCompleted,
+  onDirtyChange,
 }: {
   entry?: (FinancialEntry & { items?: FinancialEntryItem[] }) | null;
   entryType: FinancialEntryType;
@@ -621,9 +700,12 @@ export function FinancialEntryForm({
   inventoryItems?: InventoryItem[];
   inventoryLocations?: InventoryLocation[];
   onCompleted?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const router = useRouter();
   const [state, action, pending] = useActionState(saveFinancialEntryAction, {});
   useActionToast(state, onCompleted);
+  const [quickCreate, setQuickCreate] = useState<"item" | "vendor" | "cost-center" | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   const effectiveType = entry?.entry_type ?? entryType;
   const [items, setItems] = useState<PayableItemDraft[]>(() =>
@@ -655,6 +737,7 @@ export function FinancialEntryForm({
   }
 
   function patchItem(id: string, patch: Partial<Omit<PayableItemDraft, "id">>) {
+    onDirtyChange?.(true);
     setItems((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 
@@ -685,11 +768,13 @@ export function FinancialEntryForm({
   const hasPayableItems = effectiveType === "payable" && normalizedItems.length > 0;
 
   function updateItem(id: string, key: keyof Omit<PayableItemDraft, "id">, value: string | boolean) {
+    onDirtyChange?.(true);
     setItems((current) => current.map((item) => (item.id === id ? { ...item, [key]: value } : item)));
   }
 
   return (
-    <form action={action} className="grid gap-4">
+    <>
+    <form action={action} className="grid gap-4" onChangeCapture={() => onDirtyChange?.(true)}>
       <input type="hidden" name="id" value={entry?.id ?? ""} />
       <input type="hidden" name="entry_type" value={effectiveType} />
       <input type="hidden" name="line_items_json" value={effectiveType === "payable" ? JSON.stringify(normalizedItems) : "[]"} />
@@ -724,15 +809,18 @@ export function FinancialEntryForm({
           </Select>
         </label>
         <label className="grid gap-2 text-sm font-medium">
-          Centro de custo
-          <Select name="cost_center_id" defaultValue={entry?.cost_center_id ?? "none"}>
-            <option value="none">Não informado</option>
-            {costCenters.map((costCenter) => (
-              <option key={costCenter.id} value={costCenter.id}>
-                {costCenter.code ? `${costCenter.code} - ${costCenter.name}` : costCenter.name}
-              </option>
-            ))}
-          </Select>
+          <span>Centro de custo</span>
+          <span className="flex min-w-0 gap-2">
+            <Select name="cost_center_id" defaultValue={entry?.cost_center_id ?? "none"} className="min-w-0 flex-1">
+              <option value="none">Não informado</option>
+              {costCenters.map((costCenter) => (
+                <option key={costCenter.id} value={costCenter.id}>
+                  {costCenter.code ? `${costCenter.code} - ${costCenter.name}` : costCenter.name}
+                </option>
+              ))}
+            </Select>
+            <Button type="button" size="sm" variant="outline" onClick={() => setQuickCreate("cost-center")}>Cadastrar</Button>
+          </span>
         </label>
         {effectiveType === "receivable" ? (
           <label className="grid gap-2 text-sm font-medium">
@@ -749,15 +837,18 @@ export function FinancialEntryForm({
         ) : null}
         {effectiveType === "payable" ? (
           <label className="grid gap-2 text-sm font-medium">
-            Fornecedor
-            <Select name="vendor_id" defaultValue={entry?.vendor_id ?? "none"}>
-              <option value="none">Não informado</option>
-              {vendors.map((vendor) => (
-                <option key={vendor.id} value={vendor.id}>
-                  {vendor.name}
-                </option>
-              ))}
-            </Select>
+            <span>Fornecedor</span>
+            <span className="flex min-w-0 gap-2">
+              <Select name="vendor_id" defaultValue={entry?.vendor_id ?? "none"} className="min-w-0 flex-1">
+                <option value="none">Não informado</option>
+                {vendors.map((vendor) => (
+                  <option key={vendor.id} value={vendor.id}>
+                    {vendor.name}
+                  </option>
+                ))}
+              </Select>
+              <Button type="button" size="sm" variant="outline" onClick={() => setQuickCreate("vendor")}>Cadastrar</Button>
+            </span>
           </label>
         ) : null}
         <Field name="issue_date" label="Emissão" type="date" defaultValue={entry?.issue_date ?? today} />
@@ -779,14 +870,19 @@ export function FinancialEntryForm({
               <p className="text-sm font-medium">Itens do documento</p>
               <p className="text-xs text-muted-foreground">Itens da nota, contrato ou recibo. Marque estoque somente para materiais físicos.</p>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setItems((current) => [...current, createPayableItemDraft(undefined, current.length)])}
-            >
-              Adicionar item
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setQuickCreate("item")}>
+                Cadastrar item
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => { onDirtyChange?.(true); setItems((current) => [...current, createPayableItemDraft(undefined, current.length)]); }}
+              >
+                Adicionar linha
+              </Button>
+            </div>
           </div>
           <datalist id={inventoryDatalistId}>
             {inventoryItems.map((inventoryItem) => (
@@ -808,7 +904,7 @@ export function FinancialEntryForm({
               const lineTotal = Math.round(Number(item.quantity.replace(",", ".")) * inputToCents(item.unit_amount));
               return (
                 <div key={item.id} className="grid gap-3 rounded-md border bg-background p-3">
-                  <div className="grid gap-2 lg:grid-cols-[minmax(240px,1fr)_110px_130px_130px_auto] lg:items-end">
+                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.4fr)_minmax(96px,.45fr)_minmax(120px,.55fr)_minmax(120px,.5fr)_auto] xl:items-end">
                     <label className="grid gap-1.5 text-[13px] font-medium">
                       Item cadastrado
                       <input
@@ -852,12 +948,12 @@ export function FinancialEntryForm({
                       variant="ghost"
                       size="sm"
                       disabled={items.length === 1}
-                      onClick={() => setItems((current) => current.filter((row) => row.id !== item.id))}
+                      onClick={() => { onDirtyChange?.(true); setItems((current) => current.filter((row) => row.id !== item.id)); }}
                     >
                       Remover
                     </Button>
                   </div>
-                  <div className="grid gap-2 rounded-md border bg-muted/15 p-2.5 lg:grid-cols-[170px_minmax(220px,1fr)_minmax(180px,0.7fr)_120px_140px] lg:items-end">
+                  <div className="grid gap-2 rounded-md border bg-muted/15 p-2.5 md:grid-cols-2 xl:grid-cols-[145px_minmax(210px,1fr)_minmax(160px,.75fr)_110px_138px] xl:items-end">
                     <label className="flex items-center gap-2 text-xs font-medium">
                       <input
                         type="checkbox"
@@ -943,6 +1039,16 @@ export function FinancialEntryForm({
         </Button>
       </div>
     </form>
+    <Modal open={quickCreate === "item"} onOpenChange={(open) => !open && setQuickCreate(null)} title="Cadastrar item" description="O novo item ficará disponível neste lançamento após a atualização." size="md">
+      <InventoryItemForm onCompleted={() => { setQuickCreate(null); router.refresh(); }} />
+    </Modal>
+    <Modal open={quickCreate === "vendor"} onOpenChange={(open) => !open && setQuickCreate(null)} title="Cadastrar fornecedor" description="Cadastre sem perder os dados já preenchidos no documento." size="md">
+      <VendorForm onCompleted={() => { setQuickCreate(null); router.refresh(); }} />
+    </Modal>
+    <Modal open={quickCreate === "cost-center"} onOpenChange={(open) => !open && setQuickCreate(null)} title="Cadastrar centro de custo" description="Organize a despesa sem sair do lançamento atual." size="md">
+      <CostCenterForm onCompleted={() => { setQuickCreate(null); router.refresh(); }} />
+    </Modal>
+    </>
   );
 }
 

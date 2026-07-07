@@ -36,7 +36,7 @@ function Metric({ label, value, hint }: { label: string; value: string; hint: st
   );
 }
 
-function InventoryItemForm({ item, onCompleted }: { item?: InventoryItem | null; onCompleted?: () => void }) {
+export function InventoryItemForm({ item, onCompleted }: { item?: InventoryItem | null; onCompleted?: () => void }) {
   const [state, action, pending] = useActionState(saveInventoryItemAction, {});
   useInventoryToast(state, onCompleted);
 

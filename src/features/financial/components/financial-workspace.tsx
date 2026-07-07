@@ -27,6 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopyableText } from "@/components/ui/copy-button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
@@ -269,7 +270,25 @@ function PayablesWorkspace({ data, activeView }: { data: FinancialWorkspaceData;
 
 function PayableOpenPanel({ data, activeView }: { data: FinancialWorkspaceData; activeView: FinancialSubsection }) {
   const [creating, setCreating] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const entries = data.entries.filter((entry) => entry.entry_type === "payable");
+
+  function requestOpenChange(open: boolean) {
+    if (!open && dirty) {
+      setConfirmDiscard(true);
+      return;
+    }
+    setCreating(open);
+    if (!open) setExpanded(false);
+  }
+
+  function closeAfterSave() {
+    setDirty(false);
+    setCreating(false);
+    setExpanded(false);
+  }
 
   return (
     <div className="grid gap-5">
@@ -284,7 +303,16 @@ function PayableOpenPanel({ data, activeView }: { data: FinancialWorkspaceData; 
         }
       />
       <EntriesTable entries={entries} data={data} entryType="payable" activeView={activeView} />
-      <Modal open={creating} onOpenChange={setCreating} title="Novo documento a pagar" description="Registre documento, itens, fornecedor e vencimento." className="max-w-5xl">
+      <Modal
+        open={creating}
+        onOpenChange={requestOpenChange}
+        title="Novo documento a pagar"
+        description="Registre documento, itens, fornecedor e vencimento. Expanda quando precisar de uma área maior de trabalho."
+        size="xl"
+        expandable
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+      >
         <FinancialEntryForm
           entryType="payable"
           categories={data.categories}
@@ -293,9 +321,24 @@ function PayableOpenPanel({ data, activeView }: { data: FinancialWorkspaceData; 
           vendors={data.vendors}
           inventoryItems={data.inventoryItems}
           inventoryLocations={data.inventoryLocations}
-          onCompleted={() => setCreating(false)}
+          onDirtyChange={setDirty}
+          onCompleted={closeAfterSave}
         />
       </Modal>
+      <ConfirmDialog
+        open={confirmDiscard}
+        onOpenChange={setConfirmDiscard}
+        title="Descartar lançamento?"
+        description="As informações preenchidas neste documento serão perdidas. Esta ação não pode ser desfeita."
+        confirmLabel="Descartar e sair"
+        cancelLabel="Continuar preenchendo"
+        destructive
+        onConfirm={() => {
+          setDirty(false);
+          setCreating(false);
+          setExpanded(false);
+        }}
+      />
     </div>
   );
 }

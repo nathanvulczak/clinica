@@ -309,6 +309,7 @@ function IssueDocumentModal({
   });
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const documentIntentRef = useRef<HTMLInputElement>(null);
 
   const resetAndClose = useCallback(() => {
     onOpenChange(false);
@@ -390,6 +391,7 @@ function IssueDocumentModal({
         <input type="hidden" name="encounter_id" value={selections.encounterId} />
         <input type="hidden" name="professional_member_id" value={selections.professionalId} />
         <input type="hidden" name="financial_entry_id" value={selections.financialId} />
+        <input ref={documentIntentRef} type="hidden" name="document_intent" defaultValue="issued" />
 
         <div className="grid grid-cols-3 gap-2 border-b pb-4">
           {["Contexto", "Conteúdo", "Revisão"].map((label, index) => {
@@ -501,8 +503,8 @@ function IssueDocumentModal({
             <Button type="button" disabled={!canContinue || (step === 2 && (!title.trim() || content.trim().length < 40))} onClick={() => setStep((current) => current + 1)}>Continuar <ChevronRight /></Button>
           ) : (
             <div className="flex gap-2">
-              <Button type="submit" name="status" value="draft" variant="outline" disabled={pending}><Save /> {pending ? "Salvando..." : "Salvar rascunho"}</Button>
-              <Button type="submit" name="status" value="issued" disabled={pending}><FileCheck2 /> {pending ? "Emitindo..." : "Emitir documento"}</Button>
+              <Button type="submit" variant="outline" disabled={pending} onClick={() => { if (documentIntentRef.current) documentIntentRef.current.value = "draft"; }}><Save /> {pending ? "Salvando..." : "Salvar rascunho"}</Button>
+              <Button type="submit" disabled={pending} onClick={() => { if (documentIntentRef.current) documentIntentRef.current.value = "issued"; }}><FileCheck2 /> {pending ? "Emitindo..." : "Emitir documento"}</Button>
             </div>
           )}
         </ModalFooter>
