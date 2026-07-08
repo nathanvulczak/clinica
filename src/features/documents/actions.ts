@@ -59,7 +59,7 @@ const generatedDocumentSchema = z.object({
   professional_member_id: optionalUuid,
   title: z.string().trim().min(3, "Informe o título do documento.").max(180),
   content: z.string().trim().min(40, "Revise o conteúdo antes de salvar.").max(40000),
-  status: z.enum(["draft", "issued"]),
+  status: z.enum(["draft", "issued"]).optional().default("issued"),
   expires_at: optionalDate,
   observations: z.string().trim().max(1000).optional().or(z.literal("")).transform((value) => value || null),
 });

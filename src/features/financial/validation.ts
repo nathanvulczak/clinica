@@ -243,6 +243,27 @@ export const settleEntrySchema = z.object({
   notes: optionalText,
 });
 
+export const settleEntryBatchSchema = z.object({
+  entry_ids_json: z
+    .string()
+    .transform((value, context) => {
+      try {
+        const parsed = JSON.parse(value);
+        if (!Array.isArray(parsed)) throw new Error("invalid");
+        return parsed;
+      } catch {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "Seleção de contas inválida." });
+        return z.NEVER;
+      }
+    })
+    .pipe(z.array(z.string().uuid()).min(1, "Selecione pelo menos uma conta para baixar.").max(50, "Baixe no máximo 50 contas por vez.")),
+  account_id: optionalUuid,
+  payment_method_id: optionalUuid,
+  card_machine_id: optionalUuid,
+  paid_at: z.string().optional().transform((value) => value || new Date().toISOString()),
+  notes: optionalText,
+});
+
 export const reversePaymentSchema = z.object({
   payment_id: z.string().uuid(),
   reason: z.string().trim().min(5, "Informe o motivo do estorno.").max(500),

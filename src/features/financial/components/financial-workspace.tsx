@@ -77,6 +77,7 @@ import {
   ReverseReconciliationForm,
   ReopenMonthlyCloseForm,
   ReversePaymentForm,
+  SettleEntriesBatchForm,
   SettleEntryForm,
   VendorForm,
 } from "@/features/financial/components/financial-forms";
@@ -344,19 +345,59 @@ function PayableOpenPanel({ data, activeView }: { data: FinancialWorkspaceData; 
 }
 
 function PayableSettlePanel({ data }: { data: FinancialWorkspaceData }) {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [batchOpen, setBatchOpen] = useState(false);
   const entries = data.entries.filter((entry) => entry.entry_type === "payable");
-  const openEntries = entries.filter((entry) => openEntryCents(entry) > 0 && entry.status !== "cancelled");
+  const openEntries = entries.filter((entry) => openEntryCents(entry) > 0 && entry.status !== "cancelled" && !entryHasReconciliation(entry));
   const dueToday = openEntries.filter((entry) => entry.due_date <= new Date().toISOString().slice(0, 10));
+  const selectedEntries = openEntries.filter((entry) => selectedIds.includes(entry.id));
+  const selectedTotal = selectedEntries.reduce((sum, entry) => sum + openEntryCents(entry), 0);
 
   return (
     <div className="grid gap-5">
-      <FinancialPanelHeader title="Baixar pagamento" description="Tela operacional focada em documentos em aberto. Use o botão Baixar na linha para registrar pagamento com conta, forma e data." />
+      <FinancialPanelHeader
+        title="Baixar pagamento"
+        description="Selecione uma ou mais contas em aberto para baixar com o mesmo caixa, forma e data. Itens conciliados ficam protegidos."
+        action={
+          <Button disabled={!selectedEntries.length || !data.access.canEdit} onClick={() => setBatchOpen(true)}>
+            <CheckCircle2 />
+            Baixar selecionadas
+          </Button>
+        }
+      />
       <div className="grid gap-3 lg:grid-cols-3">
         <MetricCard label="Em aberto" value={formatCurrencyBRL(openEntries.reduce((sum, entry) => sum + openEntryCents(entry), 0))} description="Saldo pendente de pagamento" tone="warning" />
         <MetricCard label="Vencidos/hoje" value={String(dueToday.length)} description="Prioridade de caixa" tone={dueToday.length ? "warning" : "default"} />
-        <MetricCard label="Documentos" value={String(openEntries.length)} description="Contas aptas para baixa" />
+        <MetricCard label="Selecionado" value={formatCurrencyBRL(selectedTotal)} description={`${selectedEntries.length} conta(s) marcada(s)`} />
       </div>
-      <EntriesTable entries={entries} data={data} entryType="payable" activeView="settle" />
+      <EntriesTable
+        entries={entries}
+        data={data}
+        entryType="payable"
+        activeView="settle"
+        selectableEntryIds={openEntries.map((entry) => entry.id)}
+        selectedEntryIds={selectedIds}
+        onToggleEntry={(entryId) => setSelectedIds((current) => current.includes(entryId) ? current.filter((id) => id !== entryId) : [...current, entryId])}
+        onToggleAllEntries={() => setSelectedIds((current) => current.length === openEntries.length ? [] : openEntries.map((entry) => entry.id))}
+      />
+      <Modal open={batchOpen} onOpenChange={setBatchOpen} title="Baixar contas selecionadas" description="Confirme os dados da baixa em lote. Cada conta continuará registrada individualmente." className="max-w-4xl">
+        <SettleEntriesBatchForm
+          entries={selectedEntries.map((entry) => ({
+            id: entry.id,
+            description: entry.description,
+            due_date: formatDate(entry.due_date),
+            open_cents: openEntryCents(entry),
+            vendor_name: entry.vendor?.name,
+          }))}
+          accounts={data.accounts}
+          paymentMethods={data.paymentMethods}
+          cardMachines={data.cardMachines}
+          onCompleted={() => {
+            setBatchOpen(false);
+            setSelectedIds([]);
+          }}
+        />
+      </Modal>
     </div>
   );
 }
@@ -1375,11 +1416,19 @@ function EntriesTable({
   data,
   entryType,
   activeView,
+  selectableEntryIds = [],
+  selectedEntryIds = [],
+  onToggleEntry,
+  onToggleAllEntries,
 }: {
   entries: FinancialEntryWithRelations[];
   data: FinancialWorkspaceData;
   entryType: "receivable" | "payable";
   activeView: FinancialSubsection;
+  selectableEntryIds?: string[];
+  selectedEntryIds?: string[];
+  onToggleEntry?: (entryId: string) => void;
+  onToggleAllEntries?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<EntryStatusFilter>(() => defaultStatusFilter(activeView));
@@ -1442,6 +1491,11 @@ function EntriesTable({
   const pageSize = 20;
   const totalPages = Math.max(Math.ceil(filtered.length / pageSize), 1);
   const visibleEntries = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const selectionEnabled = selectableEntryIds.length > 0;
+  const selectableVisibleIds = visibleEntries
+    .map((entry) => entry.id)
+    .filter((entryId) => selectableEntryIds.includes(entryId));
+  const visibleSelected = selectableVisibleIds.length > 0 && selectableVisibleIds.every((entryId) => selectedEntryIds.includes(entryId));
 
   return (
     <section className="grid gap-4 rounded-lg border bg-card p-4">
@@ -1621,6 +1675,18 @@ function EntriesTable({
         <table className="w-full min-w-[1260px] text-[13px]">
           <thead className="bg-muted/60 text-left text-[11px] uppercase text-muted-foreground">
             <tr>
+              {selectionEnabled ? (
+                <th className="w-10 px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={visibleSelected}
+                    disabled={!selectableVisibleIds.length}
+                    onChange={onToggleAllEntries}
+                    aria-label="Selecionar contas visíveis"
+                    className="size-4 accent-primary"
+                  />
+                </th>
+              ) : null}
               <th className="min-w-56 px-3 py-2.5 font-medium">{entryType === "receivable" ? "Paciente/Origem" : "Fornecedor/Origem"}</th>
               <th className="min-w-72 px-3 py-2.5 font-medium">Descrição</th>
               <th className="w-28 px-3 py-2.5 font-medium">Vencimento</th>
@@ -1634,10 +1700,21 @@ function EntriesTable({
           </thead>
           <tbody>
             {visibleEntries.length ? (
-              visibleEntries.map((entry) => <EntryTableRow key={entry.id} entry={entry} data={data} entryType={entryType} />)
+              visibleEntries.map((entry) => (
+                <EntryTableRow
+                  key={entry.id}
+                  entry={entry}
+                  data={data}
+                  entryType={entryType}
+                  showSelection={selectionEnabled}
+                  selectable={selectableEntryIds.includes(entry.id)}
+                  selected={selectedEntryIds.includes(entry.id)}
+                  onToggleSelected={onToggleEntry}
+                />
+              ))
             ) : (
               <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
+                <td colSpan={selectionEnabled ? 10 : 9} className="px-4 py-10 text-center text-muted-foreground">
                   Nenhum lançamento encontrado para os filtros selecionados.
                 </td>
               </tr>
@@ -1670,10 +1747,18 @@ function EntryTableRow({
   entry,
   data,
   entryType,
+  showSelection = false,
+  selectable = false,
+  selected = false,
+  onToggleSelected,
 }: {
   entry: FinancialEntryWithRelations;
   data: FinancialWorkspaceData;
   entryType: "receivable" | "payable";
+  showSelection?: boolean;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelected?: (entryId: string) => void;
 }) {
   const [settling, setSettling] = useState(false);
   const [detailing, setDetailing] = useState(false);
@@ -1688,6 +1773,18 @@ function EntryTableRow({
 
   return (
     <tr className="border-t align-top">
+      {showSelection ? (
+        <td className="px-3 py-3">
+          <input
+            type="checkbox"
+            checked={selected}
+            disabled={!selectable}
+            onChange={() => onToggleSelected?.(entry.id)}
+            aria-label={`Selecionar ${entry.description}`}
+            className="size-4 accent-primary disabled:opacity-40"
+          />
+        </td>
+      ) : null}
       <td className="min-w-56 px-3 py-2.5">
         <p className="whitespace-normal break-words font-medium">{party}</p>
         <p className="mt-1 text-xs text-muted-foreground">{entry.category?.name ?? "Sem categoria"}</p>

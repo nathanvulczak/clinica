@@ -4,6 +4,7 @@ import {
   CalendarClock,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   HeartPulse,
   LockKeyhole,
@@ -131,6 +132,7 @@ export default async function AgendaPage({
   const { activeClinic } = await getActiveClinicContext();
   const date = params.date || getTodayInputDate();
   const view = normalizeView(params.view);
+  const expandedOptions = params.options === "expanded";
   const range = getCalendarRange(date, view);
   const status = normalizeStatus(params.status);
   const confirmationUrlBase = `${getAppUrl()}/confirmar-consulta`;
@@ -295,7 +297,18 @@ export default async function AgendaPage({
             </form>
           </section>
 
-          <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="flex justify-end">
+            <Button asChild variant="outline" size="sm" className="h-8">
+              <Link
+                href={`/agenda?date=${date}&view=${view}&professional_id=${professionalId}&status=${status}${expandedOptions ? "" : "&options=expanded"}`}
+              >
+                <ChevronDown className={expandedOptions ? "rotate-180 transition-transform" : "transition-transform"} />
+                {expandedOptions ? "Recolher opções" : "Expandir opções"}
+              </Link>
+            </Button>
+          </div>
+
+          {expandedOptions ? <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <AgendaMetric
               icon={CalendarClock}
               label="Compromissos"
@@ -324,9 +337,9 @@ export default async function AgendaPage({
               detail={`${blocks.length} bloqueio(s) no período`}
               tone="neutral"
             />
-          </section>
+          </section> : null}
 
-          <section className="grid gap-3 rounded-lg border bg-card p-4 shadow-sm xl:grid-cols-[1fr_280px] xl:items-center">
+          {expandedOptions ? <section className="grid gap-3 rounded-lg border bg-card p-4 shadow-sm xl:grid-cols-[1fr_280px] xl:items-center">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge className="border bg-background text-foreground">{activeClinic.trade_name}</Badge>
@@ -369,7 +382,7 @@ export default async function AgendaPage({
                   : "Agenda livre conforme filtros atuais"}
               </p>
             </div>
-          </section>
+          </section> : null}
 
           <Card>
             <CardHeader className="px-4 py-3">
@@ -411,6 +424,7 @@ export default async function AgendaPage({
                 panelProfessionalIds={panelProfessionalIds}
                 status={status}
                 canManage={scheduleAccess.canManage}
+                focusMode={!expandedOptions}
               />
             </CardContent>
           </Card>
@@ -426,7 +440,7 @@ export default async function AgendaPage({
             </Card>
           ) : null}
 
-          {view === "day" ? (
+          {expandedOptions && view === "day" ? (
             <Card>
               <CardHeader className="px-4 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">

@@ -26,6 +26,7 @@ import {
   receiptSchema,
   reversePaymentSchema,
   settleEntrySchema,
+  settleEntryBatchSchema,
   settleCommissionSchema,
   vendorSchema,
 } from "@/features/financial/validation";
@@ -1611,6 +1612,112 @@ export async function settleFinancialEntryAction(
 
   revalidateFinancial();
   return { success: "Baixa registrada.", receiptId };
+}
+
+export async function settleFinancialEntriesBatchAction(
+  _state: FinancialActionState,
+  formData: FormData,
+): Promise<FinancialActionState> {
+  const parsed = settleEntryBatchSchema.safeParse({
+    entry_ids_json: formData.get("entry_ids_json"),
+    account_id: formData.get("account_id") || undefined,
+    payment_method_id: formData.get("payment_method_id") || undefined,
+    card_machine_id: formData.get("card_machine_id") || undefined,
+    paid_at: formData.get("paid_at"),
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+
+  const context = await getFinancialContext();
+  if ("error" in context) return { error: context.error };
+  if (!context.access.canManage && !context.access.canEdit) {
+    return { error: "Você não possui permissão para baixar lançamentos." };
+  }
+
+  const uniqueEntryIds = [...new Set(parsed.data.entry_ids_json)];
+  const admin = createSupabaseAdminClient();
+  const [{ data: entries }, { data: payments }] = await Promise.all([
+    admin
+      .from("financial_entries")
+      .select("*")
+      .eq("clinic_id", context.activeClinic.id)
+      .eq("entry_type", "payable")
+      .in("id", uniqueEntryIds)
+      .is("deleted_at", null),
+    admin
+      .from("financial_payments")
+      .select("id, entry_id, reconciliation_id, status")
+      .eq("clinic_id", context.activeClinic.id)
+      .in("entry_id", uniqueEntryIds)
+      .is("deleted_at", null),
+  ]);
+
+  if (!entries?.length) return { error: "Nenhuma conta a pagar válida foi encontrada." };
+  if (entries.length !== uniqueEntryIds.length) {
+    return { error: "Alguma conta selecionada não pertence à clínica ativa ou não é conta a pagar." };
+  }
+  if ((payments ?? []).some((payment) => payment.reconciliation_id && payment.status === "confirmed")) {
+    return { error: "Uma das contas selecionadas possui movimento conciliado. Reabra a conciliação antes de baixar em lote." };
+  }
+
+  let settledCount = 0;
+  let totalSettled = 0;
+  for (const entry of entries as FinancialEntry[]) {
+    if (["paid", "cancelled", "refunded"].includes(entry.status)) continue;
+    const total = entry.amount_cents - entry.discount_cents + (entry.freight_cents ?? 0) + entry.addition_cents;
+    const openAmount = Math.max(total - entry.paid_cents, 0);
+    if (openAmount <= 0) continue;
+
+    const payment = await createPayment({
+      admin,
+      clinicId: context.activeClinic.id,
+      userId: context.user.id,
+      entryId: entry.id,
+      entryType: entry.entry_type,
+      amountCents: openAmount,
+      accountId: parsed.data.account_id,
+      paymentMethodId: parsed.data.payment_method_id,
+      cardMachineId: parsed.data.card_machine_id,
+      paidAt: parsed.data.paid_at,
+      notes: parsed.data.notes,
+    });
+    if (payment.error) return { error: payment.error };
+
+    await admin
+      .from("financial_entries")
+      .update({ paid_cents: total, status: "paid", updated_by: context.user.id })
+      .eq("id", entry.id);
+
+    await logAuditEvent({
+      clinicId: context.activeClinic.id,
+      userId: context.user.id,
+      actionType: "payable_settled",
+      module: "financial",
+      recordTable: "financial_payments",
+      recordId: payment.paymentId,
+      oldValues: entry,
+      newValues: { amount_cents: openAmount, status: "paid", batch: true },
+      level: "security",
+      notes: "Baixa financeira em lote registrada.",
+    });
+    await recordEntryEvent({
+      admin,
+      clinicId: context.activeClinic.id,
+      userId: context.user.id,
+      entryId: entry.id,
+      eventType: "settled",
+      oldValues: entry,
+      newValues: { payment_id: payment.paymentId, amount_cents: openAmount, status: "paid", batch: true },
+      notes: "Baixa financeira em lote registrada.",
+    });
+
+    settledCount += 1;
+    totalSettled += openAmount;
+  }
+
+  if (!settledCount) return { error: "As contas selecionadas não possuem saldo em aberto para baixa." };
+  revalidateFinancial();
+  return { success: `${settledCount} conta(s) baixada(s), total ${formatCurrencyBRL(totalSettled)}.` };
 }
 
 export async function reverseFinancialPaymentAction(

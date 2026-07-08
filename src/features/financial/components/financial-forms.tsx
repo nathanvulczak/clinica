@@ -34,6 +34,7 @@ import {
   saveHealthPlanAction,
   savePaymentMethodAction,
   saveVendorAction,
+  settleFinancialEntriesBatchAction,
   settleFinancialEntryAction,
   updateFinancialCommissionStatusAction,
   type FinancialActionState,
@@ -1341,6 +1342,76 @@ export function SettleEntryForm({
         <Button disabled={pending}>
           <Save />
           {pending ? "Baixando..." : "Confirmar baixa"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export function SettleEntriesBatchForm({
+  entries,
+  accounts,
+  paymentMethods,
+  cardMachines,
+  onCompleted,
+}: {
+  entries: Array<{ id: string; description: string; due_date: string; open_cents: number; vendor_name?: string | null }>;
+  accounts: FinancialAccount[];
+  paymentMethods: FinancialPaymentMethod[];
+  cardMachines: FinancialCardMachine[];
+  onCompleted?: (state: FinancialActionState) => void;
+}) {
+  const [state, action, pending] = useActionState(settleFinancialEntriesBatchAction, {});
+  useActionToast(state, onCompleted);
+  const total = entries.reduce((sum, entry) => sum + entry.open_cents, 0);
+
+  return (
+    <form action={action} className="grid gap-4">
+      <input type="hidden" name="entry_ids_json" value={JSON.stringify(entries.map((entry) => entry.id))} />
+      <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+        Você está baixando <strong className="text-foreground">{entries.length} conta(s)</strong>, totalizando{" "}
+        <strong className="text-foreground">{formatCurrencyBRL(total)}</strong>. Cada baixa será auditada individualmente.
+      </div>
+      <div className="max-h-52 overflow-auto rounded-md border">
+        {entries.map((entry) => (
+          <div key={entry.id} className="grid grid-cols-[1fr_auto] gap-3 border-b px-3 py-2.5 text-sm last:border-0">
+            <span className="min-w-0">
+              <b className="block truncate font-medium">{entry.vendor_name || entry.description}</b>
+              <small className="block truncate text-muted-foreground">{entry.description} · venc. {entry.due_date}</small>
+            </span>
+            <span className="font-medium tabular-nums">{formatCurrencyBRL(entry.open_cents)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Field name="paid_at" label="Data/hora da baixa" type="datetime-local" />
+        <label className="grid gap-2 text-sm font-medium">
+          Conta/caixa
+          <Select name="account_id" defaultValue={accounts[0]?.id ?? "none"}>
+            <option value="none">Não definida</option>
+            {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+          </Select>
+        </label>
+        <label className="grid gap-2 text-sm font-medium">
+          Forma
+          <Select name="payment_method_id" defaultValue={paymentMethods[0]?.id ?? "none"}>
+            <option value="none">Não definida</option>
+            {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
+          </Select>
+        </label>
+        <label className="grid gap-2 text-sm font-medium">
+          Máquina
+          <Select name="card_machine_id" defaultValue="none">
+            <option value="none">Não usada</option>
+            {cardMachines.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}
+          </Select>
+        </label>
+      </div>
+      <TextArea name="notes" label="Observações da baixa em lote" />
+      <div className="flex justify-end">
+        <Button disabled={pending || !entries.length}>
+          <Save />
+          {pending ? "Baixando..." : "Confirmar baixa em lote"}
         </Button>
       </div>
     </form>

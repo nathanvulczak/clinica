@@ -79,6 +79,7 @@ type ScheduleCalendarProps = {
   panelProfessionalIds: string[];
   status: string;
   canManage: boolean;
+  focusMode?: boolean;
 };
 
 function queryUrl({
@@ -558,8 +559,8 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
             slotEventOverlap={false}
             dayMaxEvents={4}
             navLinks
-            height="auto"
-            contentHeight={props.view === "month" ? 690 : 760}
+            height={props.focusMode ? "calc(100vh - 250px)" : "auto"}
+            contentHeight={props.focusMode ? "auto" : props.view === "month" ? 690 : 760}
             expandRows
             stickyHeaderDates
             progressiveEventRendering
