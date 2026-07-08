@@ -8,6 +8,7 @@ import type {
   GeneratedDocumentEvent,
   GeneratedDocumentStatus,
 } from "@/types/domain";
+import type { DocumentPageSettings } from "@/features/documents/document-editor";
 
 export type DocumentsAccess = {
   canView: boolean;
@@ -64,6 +65,10 @@ export type GeneratedDocumentSummary = {
   id: string;
   title: string;
   content: string;
+  metadata: {
+    observations?: string | null;
+    page_settings?: DocumentPageSettings;
+  };
   status: GeneratedDocumentStatus;
   document_number: string | null;
   issued_at: string | null;
@@ -148,14 +153,14 @@ export async function getDocumentsWorkspace(clinicId?: string | null): Promise<D
       .maybeSingle(),
     admin
       .from("document_templates")
-      .select("id, clinic_id, template_type, name, description, legal_basis, content, accepted_file_url, accepted_file_name, active, version_number, created_at, updated_at")
+      .select("id, clinic_id, template_type, name, description, legal_basis, content, page_settings, accepted_file_url, accepted_file_name, active, version_number, created_at, updated_at")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
       .order("template_type")
       .order("name"),
     admin
       .from("generated_documents")
-      .select("id, title, content, status, document_number, issued_at, expires_at, printed_at, cancellation_reason, cancelled_at, created_at, template:document_templates(id, name, template_type), patient:patients(id, full_name, social_name, cpf, email, phone), appointment:appointments(id, starts_at, appointment_type), professional:clinic_members(id, profile:profiles!clinic_members_user_id_fkey(full_name)), financial_entry:financial_entries(id, description, amount_cents)")
+      .select("id, title, content, metadata, status, document_number, issued_at, expires_at, printed_at, cancellation_reason, cancelled_at, created_at, template:document_templates(id, name, template_type), patient:patients(id, full_name, social_name, cpf, email, phone), appointment:appointments(id, starts_at, appointment_type), professional:clinic_members(id, profile:profiles!clinic_members_user_id_fkey(full_name)), financial_entry:financial_entries(id, description, amount_cents)")
       .eq("clinic_id", clinicId)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })

@@ -7,6 +7,14 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getDocumentsAccess } from "@/repositories/documents";
 import { logAuditEvent } from "@/services/audit/audit-service";
+import {
+  documentContentText,
+  sanitizeDocumentContent,
+} from "@/services/documents/document-content";
+import {
+  normalizeDocumentPageSettings,
+  parseDocumentPageSettings,
+} from "@/features/documents/document-editor";
 
 export type DocumentsActionState = {
   error?: string;
@@ -53,7 +61,8 @@ const templateSchema = z.object({
   name: z.string().trim().min(3, "Informe o nome do modelo.").max(160),
   description: z.string().trim().max(500).optional().or(z.literal("")).transform((value) => value || null),
   legal_basis: z.string().trim().max(1600).optional().or(z.literal("")).transform((value) => value || null),
-  content: z.string().trim().min(80, "O modelo precisa ter conteúdo suficiente para emissão.").max(30000),
+  content: z.string().trim().max(50000),
+  page_settings: z.string().optional().or(z.literal("")),
   accepted_file_name: z.string().trim().max(180).optional().or(z.literal("")).transform((value) => value || null),
   active: z.enum(["on", "off"]).optional().transform((value) => value !== "off"),
 });
@@ -66,7 +75,8 @@ const generatedDocumentSchema = z.object({
   financial_entry_id: optionalUuid,
   professional_member_id: optionalUuid,
   title: optionalTitle,
-  content: z.string().trim().min(40, "Revise o conteúdo antes de salvar.").max(40000),
+  content: z.string().trim().max(60000),
+  page_settings: z.string().optional().or(z.literal("")),
   status: z.enum(["draft", "issued"]).optional().default("issued"),
   expires_at: optionalDate,
   observations: z.string().trim().max(1000).optional().or(z.literal("")).transform((value) => value || null),
@@ -119,10 +129,16 @@ export async function saveDocumentTemplateAction(
     description: formData.get("description"),
     legal_basis: formData.get("legal_basis"),
     content: formData.get("content"),
+    page_settings: formData.get("page_settings")?.toString(),
     accepted_file_name: formData.get("accepted_file_name"),
     active: formData.get("active") ? "on" : "off",
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  const sanitizedContent = sanitizeDocumentContent(parsed.data.content);
+  if (documentContentText(sanitizedContent).length < 80) {
+    return { error: "O modelo precisa ter conteúdo suficiente para emissão." };
+  }
+  const pageSettings = parseDocumentPageSettings(parsed.data.page_settings);
 
   const context = await getContext();
   if ("error" in context) return { error: context.error };
@@ -136,7 +152,8 @@ export async function saveDocumentTemplateAction(
     name: parsed.data.name,
     description: parsed.data.description,
     legal_basis: parsed.data.legal_basis,
-    content: parsed.data.content,
+    content: sanitizedContent,
+    page_settings: pageSettings,
     accepted_file_name: parsed.data.accepted_file_name,
     active: parsed.data.active,
     updated_by: context.user.id,
@@ -162,7 +179,8 @@ export async function saveDocumentTemplateAction(
       clinic_id: context.activeClinic.id,
       template_id: created.id,
       version_number: 1,
-      content: parsed.data.content,
+      content: sanitizedContent,
+      page_settings: pageSettings,
       legal_basis: parsed.data.legal_basis,
       accepted_file_name: parsed.data.accepted_file_name,
       created_by: context.user.id,
@@ -203,7 +221,8 @@ export async function saveDocumentTemplateAction(
     clinic_id: context.activeClinic.id,
     template_id: previous.id,
     version_number: nextVersion,
-    content: parsed.data.content,
+    content: sanitizedContent,
+    page_settings: pageSettings,
     legal_basis: parsed.data.legal_basis,
     accepted_file_name: parsed.data.accepted_file_name,
     created_by: context.user.id,
@@ -235,8 +254,9 @@ export async function createGeneratedDocumentAction(
     encounter_id: formData.get("encounter_id") || undefined,
     financial_entry_id: formData.get("financial_entry_id") || undefined,
     professional_member_id: formData.get("professional_member_id") || undefined,
-    title: formData.get("title"),
-    content: formData.get("content"),
+    title: formData.get("title") ?? undefined,
+    content: formData.get("content") ?? "",
+    page_settings: formData.get("page_settings")?.toString(),
     status: formData.get("document_intent") || formData.get("status"),
     expires_at: formData.get("expires_at") || undefined,
     observations: formData.get("observations"),
@@ -258,6 +278,13 @@ export async function createGeneratedDocumentAction(
     const field = fieldLabels[String(issue?.path[0] ?? "")];
     return { error: issue?.message && !/^Invalid/i.test(issue.message) ? issue.message : `Revise o campo ${field ?? "do documento"} antes de emitir.` };
   }
+  const sanitizedContent = sanitizeDocumentContent(parsed.data.content);
+  if (documentContentText(sanitizedContent).length < 40) {
+    return { error: "Revise o conteúdo antes de salvar. O documento precisa ter ao menos 40 caracteres." };
+  }
+  const pageSettings = normalizeDocumentPageSettings(
+    parseDocumentPageSettings(parsed.data.page_settings),
+  );
 
   const context = await getContext();
   if ("error" in context) return { error: context.error };
@@ -284,16 +311,25 @@ export async function createGeneratedDocumentAction(
     financial_entry_id: parsed.data.financial_entry_id,
     professional_member_id: parsed.data.professional_member_id,
     title: documentTitle,
-    content: parsed.data.content,
+    content: sanitizedContent,
     status: parsed.data.status,
     expires_at: parsed.data.expires_at,
-    metadata: { observations: parsed.data.observations },
+    metadata: { observations: parsed.data.observations, page_settings: pageSettings },
   };
   const { data: documentId, error } = await context.supabase.rpc(
     "save_generated_document_transaction",
     { document_payload: payload },
   );
-  if (error || !documentId) return { error: documentRpcError(error?.message) };
+  if (error || !documentId) {
+    console.error("document.issue.failed", {
+      clinicId: context.activeClinic.id,
+      userId: context.user.id,
+      code: error?.code,
+      message: error?.message,
+      details: error?.details,
+    });
+    return { error: documentRpcError(error?.message) };
+  }
 
   await logAuditEvent({
     clinicId: context.activeClinic.id,

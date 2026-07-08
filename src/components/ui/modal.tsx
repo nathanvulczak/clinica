@@ -45,18 +45,18 @@ export function Modal({
         <Dialog.Content
           aria-describedby={descriptionId}
           className={cn(
-            "fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border bg-card shadow-xl outline-none will-change-transform",
-            "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in data-[state=open]:zoom-in-[0.98] data-[state=closed]:fade-out data-[state=closed]:zoom-out-[0.98] data-[state=open]:duration-100 data-[state=closed]:duration-75 motion-reduce:animate-none",
+            "fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border bg-card shadow-[0_18px_55px_rgb(15_23_42/0.16)] outline-none will-change-transform",
+            "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in data-[state=open]:zoom-in-[0.99] data-[state=closed]:fade-out data-[state=closed]:zoom-out-[0.99] data-[state=open]:duration-150 data-[state=closed]:duration-100 motion-reduce:animate-none",
             modalWidths[size],
             expanded && "inset-3 max-h-none w-auto max-w-none translate-x-0 translate-y-0",
             className,
           )}
         >
-          <header className="flex items-start justify-between gap-4 border-b px-5 py-4">
+          <header className="flex items-start justify-between gap-4 border-b px-5 py-3.5">
             <div className="min-w-0">
-              <Dialog.Title className="text-lg font-semibold">{title}</Dialog.Title>
+              <Dialog.Title className="text-[17px] font-semibold">{title}</Dialog.Title>
               {description ? (
-                <Dialog.Description id={descriptionId} className="mt-1 text-sm leading-6 text-muted-foreground">
+                <Dialog.Description id={descriptionId} className="mt-1 text-[13px] leading-5 text-muted-foreground">
                   {description}
                 </Dialog.Description>
               ) : (

@@ -208,15 +208,15 @@ export async function GET(
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Resumo clinico - ${escapeHtml(patientName)}</title>
     <style>
-      @page { size: A4; margin: 14mm; }
+      @page { size: A4 portrait; margin: 13mm 14mm 15mm; }
       ${clinicDocumentCss}
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        background: #f8fafc;
+        background: #eef2f1;
         color: #111827;
         font-family: Arial, sans-serif;
-        line-height: 1.5;
+        line-height: 1.45;
       }
       .toolbar {
         position: sticky;
@@ -240,34 +240,47 @@ export async function GET(
         cursor: pointer;
       }
       main {
-        width: min(980px, calc(100% - 32px));
+        width: min(210mm, calc(100% - 32px));
+        min-height: 297mm;
         margin: 24px auto;
         border: 1px solid #e5e7eb;
-        border-radius: 10px;
+        border-radius: 6px;
         background: white;
-        padding: 28px;
+        padding: 14mm;
       }
-      h1 { margin: 0; font-size: 20px; }
-      h2 { margin: 20px 0 8px; font-size: 13px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
-      h3 { margin: 18px 0 8px; font-size: 14px; }
-      .muted { color: #6b7280; font-size: 12px; }
-      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      h1 { margin: 0; font-size: 18px; }
+      h2 { margin: 18px 0 7px; padding: 5px 7px; border-left: 3px solid ${escapeHtml(branding.primary_color)}; background: #f4f7f6; color:#23312f; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+      h3 { margin: 13px 0 5px; color:#334155; font-size: 11px; }
+      .muted { color: #64748b; font-size: 10px; }
+      .patient-banner { display:grid; grid-template-columns:2fr 1fr 1fr; gap:0; margin-top:12px; border:1px solid #cbd5e1; }
+      .patient-banner > div { padding:8px 10px; border-right:1px solid #cbd5e1; }
+      .patient-banner > div:last-child { border-right:0; }
+      .patient-banner span { display:block; color:#64748b; font-size:8px; text-transform:uppercase; }
+      .patient-banner strong { display:block; margin-top:2px; font-size:11px; }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border-top:1px solid #dbe3e1; border-left:1px solid #dbe3e1; }
       .box, .item {
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        padding: 9px;
-        background: #f9fafb;
+        border: 0;
+        border-right: 1px solid #dbe3e1;
+        border-bottom: 1px solid #dbe3e1;
+        border-radius: 0;
+        padding: 7px 9px;
+        background: #fff;
       }
-      .box span, .item span { display: block; color: #6b7280; font-size: 12px; margin-top: 2px; }
-      p { margin: 4px 0 0; white-space: pre-wrap; }
-      pre { margin: 8px 0 0; white-space: pre-wrap; font-family: Arial, sans-serif; font-size: 12px; }
-      ul { margin: 8px 0 0; padding-left: 18px; }
-      li { margin-bottom: 8px; }
+      .item { margin-bottom:6px; border:1px solid #dbe3e1; }
+      .box strong, .item strong { color:#475569; font-size:8px; text-transform:uppercase; }
+      .box span, .item span { display: block; color: #111827; font-size: 10px; margin-top: 2px; }
+      .clinical-section > p, main > p { min-height:24px; margin:0; border:1px solid #dbe3e1; padding:7px 9px; white-space:pre-wrap; font-size:10.5px; }
+      p { margin: 3px 0 0; white-space: pre-wrap; }
+      pre { margin: 7px 0 0; white-space: pre-wrap; font-family: Arial, sans-serif; font-size: 10px; }
+      ul { margin: 6px 0 0; padding-left: 17px; font-size:10px; }
+      li { margin-bottom: 6px; }
       .clinical-section { break-inside: avoid; }
+      .signature { display:grid; grid-template-columns:1fr 1fr; gap:36px; margin-top:34px; }
+      .signature div { border-top:1px solid #64748b; padding-top:5px; text-align:center; color:#475569; font-size:9px; }
       @media print {
         body { background: white; }
         .toolbar { display: none; }
-        main { width: 100%; margin: 0; border: 0; border-radius: 0; padding: 0; }
+        main { width: 100%; min-height:auto; margin: 0; border: 0; border-radius: 0; padding: 0; }
         .box, .item { break-inside: avoid; }
       }
     </style>
@@ -283,6 +296,12 @@ export async function GET(
     <main>
       ${renderClinicDocumentHeader(branding, "Resumo clínico do atendimento")}
       <div class="muted" style="margin-top:8px">Gerado em ${escapeHtml(formatDateTime(new Date().toISOString()))}. Código de verificação: ${escapeHtml(detail.id.slice(0, 8).toUpperCase())}</div>
+
+      <div class="patient-banner">
+        <div><span>Paciente</span><strong>${escapeHtml(patientName)}</strong></div>
+        <div><span>Idade / nascimento</span><strong>${escapeHtml(formatDate(detail.patient?.birth_date))}</strong></div>
+        <div><span>Atendimento</span><strong>${escapeHtml(formatDateTime(detail.appointment?.starts_at))}</strong></div>
+      </div>
 
       <h2>Identificacao</h2>
       <div class="grid">
@@ -341,6 +360,11 @@ export async function GET(
 
       <h2>Linha do tempo resumida</h2>
       ${timeline ? `<ul>${timeline}</ul>` : '<p class="muted">Nenhum evento registrado.</p>'}
+
+      <div class="signature">
+        <div>${escapeHtml(professionalName)}<br />${escapeHtml(registry)}</div>
+        <div>Responsável pelo recebimento / paciente</div>
+      </div>
 
       ${renderClinicDocumentFooter(branding, "Documento clínico. O acesso foi registrado em auditoria com usuário, data e contexto da clínica.")}
     </main>

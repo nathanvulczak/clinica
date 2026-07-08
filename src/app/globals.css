@@ -65,6 +65,62 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.document-editor-page,
+.document-rendered-content {
+  overflow-wrap: anywhere;
+}
+
+.document-editor-page p,
+.document-rendered-content p {
+  margin: 0 0 0.75em;
+}
+
+.document-editor-page h1,
+.document-editor-page h2,
+.document-editor-page h3,
+.document-rendered-content h1,
+.document-rendered-content h2,
+.document-rendered-content h3 {
+  margin: 1em 0 0.45em;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.document-editor-page h1,
+.document-rendered-content h1 { font-size: 1.45em; }
+.document-editor-page h2,
+.document-rendered-content h2 { font-size: 1.25em; }
+.document-editor-page h3,
+.document-rendered-content h3 { font-size: 1.1em; }
+
+.document-editor-page ul,
+.document-editor-page ol,
+.document-rendered-content ul,
+.document-rendered-content ol {
+  margin: 0.75em 0;
+  padding-left: 1.5em;
+}
+
+.document-editor-page ul,
+.document-rendered-content ul { list-style: disc; }
+.document-editor-page ol,
+.document-rendered-content ol { list-style: decimal; }
+
+.document-editor-page blockquote,
+.document-rendered-content blockquote {
+  margin: 1em 0;
+  border-left: 2px solid var(--border);
+  padding-left: 1em;
+  color: var(--muted-foreground);
+}
+
+.clinical-context-panel > section {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
 /* ERP-like interaction: interface chrome is not accidentally selectable. */
 .app-interface,
 .app-interface * {

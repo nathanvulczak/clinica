@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, ClipboardCheck, Eye, LockKeyhole } from "lucide-react";
+import { ArrowLeft, Eye, LockKeyhole } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { RealtimeClinicSync } from "@/components/app/realtime-clinic-sync";
 import { Button } from "@/components/ui/button";
@@ -87,22 +87,8 @@ export default async function MedicalRecordPage({
         }
       />
 
-      <div className="grid gap-5">
-        <div className="grid gap-3 rounded-lg border bg-muted/20 px-4 py-3 lg:grid-cols-[1fr_auto] lg:items-center">
-          <div>
-            <p className="text-sm font-medium">Registro clínico auditável</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Salve rascunhos durante a consulta. Ao finalizar, o atendimento será concluído e
-              seguirá para os próximos fluxos administrativos e financeiros.
-            </p>
-          </div>
-          <div className="grid justify-items-end gap-1.5"><div className="flex items-center gap-2 text-sm text-muted-foreground"><ClipboardCheck className="size-4 text-primary" />Auditoria ativa</div><RealtimeClinicSync clinicId={activeClinic.id} tables={["clinical_encounters"]} /></div>
-        </div>
-
-        {detail.status === "consultation_completed" ? (
-          <section className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-4 py-3"><p className="text-sm font-medium text-emerald-900">Consulta concluída</p><p className="mt-1 text-sm text-emerald-800">Correções permanecem disponíveis conforme permissão, sempre com motivo e auditoria.</p></section>
-        ) : null}
-
+      <div className="grid gap-4">
+        <RealtimeClinicSync clinicId={activeClinic.id} tables={["clinical_encounters"]} />
         <MedicalRecordForm detail={detail} preferences={preferences} documentBranding={documentBranding} clinicalFormWorkspace={clinicalFormWorkspace} diagnosticSummary={diagnosticSummary} />
         <InventoryConsumptionPanel
           items={inventoryCare.items}

@@ -34,6 +34,12 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalFooter, ModalSection } from "@/components/ui/modal";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useToast } from "@/components/ui/toast";
+import { RichDocumentEditor } from "@/features/documents/components/rich-document-editor";
+import {
+  DEFAULT_DOCUMENT_PAGE_SETTINGS,
+  normalizeDocumentPageSettings,
+  type DocumentPageSettings,
+} from "@/features/documents/document-editor";
 import {
   cancelGeneratedDocumentAction,
   createGeneratedDocumentAction,
@@ -62,6 +68,18 @@ const inputClass =
 const textareaClass =
   "w-full rounded-md border bg-background px-3 py-2 text-sm outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring";
 const pageSize = 10;
+
+function toDocumentHtml(value: string) {
+  if (/<\/?[a-z][\s\S]*>/i.test(value)) return value;
+  const escape = (part: string) => part
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+  return value
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p>${escape(paragraph).replaceAll("\n", "<br />")}</p>`)
+    .join("");
+}
 
 const typeLabels: Record<DocumentTemplateType, string> = {
   service_contract: "Contrato",
@@ -151,6 +169,9 @@ function TemplateForm({
 }) {
   const [state, action, pending] = useActionState(saveDocumentTemplateAction, {});
   const [content, setContent] = useState(template?.content ?? "");
+  const [pageSettings, setPageSettings] = useState<DocumentPageSettings>(
+    normalizeDocumentPageSettings(template?.page_settings),
+  );
   const [fileName, setFileName] = useState(template?.accepted_file_name ?? "");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const complete = useCallback(() => onCompleted?.(), [onCompleted]);
@@ -208,10 +229,18 @@ function TemplateForm({
           <input ref={fileInputRef} type="file" accept=".txt,.md,text/plain,text/markdown" className="hidden" onChange={(event) => event.target.files?.[0] && void readFile(event.target.files[0])} />
         </div>
         {fileName ? <p className="text-xs text-muted-foreground">Arquivo carregado: {fileName}</p> : null}
-        <label className="grid gap-1.5 text-xs font-medium">
-          Conteúdo do modelo
-          <textarea name="content" value={content} onChange={(event) => setContent(event.target.value)} className={`${textareaClass} min-h-[320px] font-mono text-xs leading-5`} required />
-        </label>
+        <div className="grid gap-1.5">
+          <div>
+            <p className="text-xs font-medium">Conteúdo do modelo</p>
+            <p className="mt-1 text-xs text-muted-foreground">Edite como um documento A4. Formatação e margens serão preservadas na emissão.</p>
+          </div>
+          <RichDocumentEditor
+            value={content}
+            onChange={setContent}
+            settings={pageSettings}
+            onSettingsChange={setPageSettings}
+          />
+        </div>
       </ModalSection>
       <ModalFooter>
         <Button disabled={pending}><Save />{pending ? "Salvando..." : template ? "Salvar nova versão" : "Criar modelo"}</Button>
@@ -310,6 +339,10 @@ function IssueDocumentModal({
   });
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [pageSettings, setPageSettings] = useState<DocumentPageSettings>(
+    DEFAULT_DOCUMENT_PAGE_SETTINGS,
+  );
+  const [expanded, setExpanded] = useState(false);
   const documentIntentRef = useRef<HTMLInputElement>(null);
 
   const resetAndClose = useCallback(() => {
@@ -328,7 +361,8 @@ function IssueDocumentModal({
   function applyTemplate(next: IssueSelections, template = selectedTemplate) {
     if (!template) return;
     setTitle(template.name);
-    setContent(replaceVariables(template.content, data, next));
+    setContent(toDocumentHtml(replaceVariables(template.content, data, next)));
+    setPageSettings(normalizeDocumentPageSettings(template.page_settings));
   }
 
   function selectTemplate(templateId: string) {
@@ -384,7 +418,7 @@ function IssueDocumentModal({
   const canContinue = Boolean(selectedTemplate);
 
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Emitir documento" description="Vincule o contexto quando necessário, revise o conteúdo e emita com rastreabilidade." size="xl">
+    <Modal open={open} onOpenChange={onOpenChange} title="Emitir documento" description="Vincule o contexto, edite em formato A4 e emita com rastreabilidade." size="xl" expandable expanded={expanded} onExpandedChange={setExpanded}>
       <form action={action} className="grid gap-4">
         <input type="hidden" name="template_id" value={selections.templateId} />
         <input type="hidden" name="patient_id" value={selections.patientId} />
@@ -393,6 +427,9 @@ function IssueDocumentModal({
         <input type="hidden" name="professional_member_id" value={selections.professionalId} />
         <input type="hidden" name="financial_entry_id" value={selections.financialId} />
         <input ref={documentIntentRef} type="hidden" name="document_intent" defaultValue="issued" />
+        <input type="hidden" name="title" value={title} />
+        <input type="hidden" name="content" value={content} />
+        <input type="hidden" name="page_settings" value={JSON.stringify(pageSettings)} />
 
         <div className="grid grid-cols-3 gap-2 border-b pb-4">
           {["Contexto", "Conteúdo", "Revisão"].map((label, index) => {
@@ -510,8 +547,15 @@ function IssueDocumentModal({
               <div><p className="text-sm font-semibold">Conteúdo final</p><p className="text-xs text-muted-foreground">Variáveis conhecidas foram preenchidas. Revise os campos entre chaves que restaram.</p></div>
               <Button type="button" variant="outline" size="sm" onClick={() => applyTemplate(selections)}><FileCheck2 /> Reaplicar modelo</Button>
             </div>
-            <label className="grid gap-1.5 text-xs font-medium">Título<input name="title" value={title} onChange={(event) => setTitle(event.target.value)} className={inputClass} required /></label>
-            <label className="grid gap-1.5 text-xs font-medium">Texto do documento<textarea name="content" value={content} onChange={(event) => setContent(event.target.value)} className={`${textareaClass} min-h-[360px] leading-6`} required /></label>
+            <label className="grid gap-1.5 text-xs font-medium">Título<input value={title} onChange={(event) => setTitle(event.target.value)} className={inputClass} required /></label>
+            <RichDocumentEditor
+              name="content_editor"
+              value={content}
+              onChange={setContent}
+              settings={pageSettings}
+              onSettingsChange={setPageSettings}
+              minHeight={520}
+            />
             <div className="grid gap-3 lg:grid-cols-2">
               <label className="grid gap-1.5 text-xs font-medium">Validade, se aplicável<input type="date" name="expires_at" className={inputClass} /></label>
               <label className="grid gap-1.5 text-xs font-medium">Observação interna<input name="observations" className={inputClass} placeholder="Não aparece no corpo do documento" /></label>
@@ -526,9 +570,17 @@ function IssueDocumentModal({
               <div><span className="text-muted-foreground">Paciente</span><p className="mt-1 font-medium">{data.patients.find((item) => item.id === selections.patientId)?.full_name || "Sem vínculo"}</p></div>
               <div><span className="text-muted-foreground">Profissional</span><p className="mt-1 font-medium">{data.professionals.find((item) => item.id === selections.professionalId)?.full_name || "Sem vínculo"}</p></div>
             </div>
-            <article className="mx-auto w-full max-w-[760px] border bg-white px-10 py-9 text-slate-900 shadow-sm">
+            <article
+              className="document-rendered-content selectable mx-auto w-full max-w-[794px] border bg-white text-slate-900 shadow-sm"
+              style={{
+                padding: `${pageSettings.marginTop}mm ${pageSettings.marginRight}mm ${pageSettings.marginBottom}mm ${pageSettings.marginLeft}mm`,
+                fontFamily: pageSettings.fontFamily === "serif" ? "Georgia, 'Times New Roman', serif" : "Arial, sans-serif",
+                fontSize: `${pageSettings.fontSize}pt`,
+                lineHeight: pageSettings.lineHeight,
+              }}
+            >
               <p className="text-center text-lg font-semibold">{title}</p>
-              <div className="mt-7 whitespace-pre-wrap text-sm leading-7">{content}</div>
+              <div className="mt-7" dangerouslySetInnerHTML={{ __html: content }} />
             </article>
             <div className="flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900">
               <ShieldCheck className="mt-0.5 size-4 shrink-0" />
@@ -604,7 +656,7 @@ function DocumentDetail({
 
       <section>
         <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Conteúdo preservado</p>
-        <div className="selectable max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-md border bg-background p-4 text-sm leading-6">{document.content}</div>
+        <div className="document-rendered-content selectable max-h-[460px] overflow-y-auto rounded-md border bg-background p-5 text-sm leading-6" dangerouslySetInnerHTML={{ __html: document.content }} />
       </section>
 
       <section>

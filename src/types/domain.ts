@@ -607,6 +607,7 @@ export type DocumentTemplate = {
   description: string | null;
   legal_basis: string | null;
   content: string;
+  page_settings: import("@/features/documents/document-editor").DocumentPageSettings;
   accepted_file_url: string | null;
   accepted_file_name: string | null;
   active: boolean;

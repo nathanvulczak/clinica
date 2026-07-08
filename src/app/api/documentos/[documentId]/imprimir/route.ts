@@ -11,6 +11,8 @@ import {
   renderClinicDocumentFooter,
   renderClinicDocumentHeader,
 } from "@/services/documents/clinic-document-branding";
+import { sanitizeDocumentContent } from "@/services/documents/document-content";
+import { normalizeDocumentPageSettings } from "@/features/documents/document-editor";
 
 function formatDate(value?: string | null, includeTime = false) {
   if (!value) return "Não informado";
@@ -45,7 +47,7 @@ export async function GET(
   const [{ data: document }, branding] = await Promise.all([
     admin
       .from("generated_documents")
-      .select("id, clinic_id, title, content, status, document_number, issued_at, expires_at, cancelled_at, cancellation_reason, created_at, patient:patients(full_name, social_name, cpf), appointment:appointments(starts_at, appointment_type), professional:clinic_members(profile:profiles!clinic_members_user_id_fkey(full_name)), template:document_templates(name, template_type)")
+      .select("id, clinic_id, title, content, metadata, status, document_number, issued_at, expires_at, cancelled_at, cancellation_reason, created_at, patient:patients(full_name, social_name, cpf), appointment:appointments(starts_at, appointment_type), professional:clinic_members(profile:profiles!clinic_members_user_id_fkey(full_name)), template:document_templates(name, template_type)")
       .eq("id", documentId)
       .eq("clinic_id", activeClinic.id)
       .is("deleted_at", null)
@@ -91,7 +93,15 @@ export async function GET(
     profile?: { full_name?: string } | null;
   } | null;
   const template = document.template as unknown as { name?: string; template_type?: string } | null;
-  const content = escapeHtml(document.content).replaceAll("\n", "<br />");
+  const content = sanitizeDocumentContent(document.content);
+  const metadata = document.metadata && typeof document.metadata === "object"
+    ? (document.metadata as Record<string, unknown>)
+    : {};
+  const pageSettings = normalizeDocumentPageSettings(metadata.page_settings);
+  const pageSize = pageSettings.orientation === "landscape" ? "A4 landscape" : "A4 portrait";
+  const fontFamily = pageSettings.fontFamily === "serif"
+    ? "Georgia, 'Times New Roman', serif"
+    : "Arial, sans-serif";
   const cancelled = document.status === "cancelled";
 
   const html = `<!doctype html>
@@ -101,7 +111,7 @@ export async function GET(
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(document.title)}</title>
     <style>
-      @page { size: A4 portrait; margin: 16mm; }
+      @page { size: ${pageSize}; margin: ${pageSettings.marginTop}mm ${pageSettings.marginRight}mm ${pageSettings.marginBottom}mm ${pageSettings.marginLeft}mm; }
       ${clinicDocumentCss}
       * { box-sizing: border-box; }
       body { margin: 0; background: #f1f5f9; color: #111827; font-family: Arial, sans-serif; }
@@ -109,12 +119,17 @@ export async function GET(
       .toolbar strong { display:block; font-size:13px; }
       .toolbar span { color:#64748b; font-size:11px; }
       .toolbar button { border:0; border-radius:6px; background:#0f766e; color:white; padding:9px 13px; font-size:12px; font-weight:700; cursor:pointer; }
-      main { position:relative; width:min(210mm, calc(100% - 32px)); min-height:297mm; margin:22px auto; border:1px solid #dbe3e8; background:white; padding:16mm; box-shadow:0 10px 30px rgb(15 23 42 / 8%); }
+      main { position:relative; width:min(${pageSettings.orientation === "landscape" ? "297mm" : "210mm"}, calc(100% - 32px)); min-height:${pageSettings.orientation === "landscape" ? "210mm" : "297mm"}; margin:22px auto; border:1px solid #dbe3e8; background:white; padding:${pageSettings.marginTop}mm ${pageSettings.marginRight}mm ${pageSettings.marginBottom}mm ${pageSettings.marginLeft}mm; box-shadow:0 10px 30px rgb(15 23 42 / 8%); }
       .meta { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:14px 0 22px; }
       .meta div { border:1px solid #e2e8f0; border-radius:5px; padding:8px; }
       .meta span { display:block; color:#64748b; font-size:8px; text-transform:uppercase; }
       .meta strong { display:block; margin-top:3px; font-size:10px; overflow-wrap:anywhere; }
-      .document-content { min-height:180mm; color:#111827; font-family:Georgia, 'Times New Roman', serif; font-size:11.5pt; line-height:1.62; overflow-wrap:anywhere; }
+      .document-content { min-height:140mm; color:#111827; font-family:${fontFamily}; font-size:${pageSettings.fontSize}pt; line-height:${pageSettings.lineHeight}; overflow-wrap:anywhere; }
+      .document-content p { margin:0 0 .75em; }
+      .document-content h1, .document-content h2, .document-content h3 { margin:1em 0 .45em; line-height:1.25; }
+      .document-content h1 { font-size:1.45em; } .document-content h2 { font-size:1.25em; } .document-content h3 { font-size:1.1em; }
+      .document-content blockquote { margin:1em 0; padding-left:1em; border-left:2px solid #cbd5e1; color:#475569; }
+      .document-content table { width:100%; border-collapse:collapse; } .document-content th, .document-content td { border:1px solid #cbd5e1; padding:6px; vertical-align:top; }
       .watermark { position:absolute; inset:42% 0 auto; color:rgb(185 28 28 / 12%); font-size:64px; font-weight:800; text-align:center; transform:rotate(-24deg); pointer-events:none; }
       .cancel-note { margin:12px 0; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; padding:9px; font-size:10px; }
       @media print { body { background:white; } .toolbar { display:none; } main { width:100%; min-height:auto; margin:0; border:0; padding:0; box-shadow:none; } }
