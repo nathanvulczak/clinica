@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(10);
+select plan(11);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -180,6 +180,21 @@ select is(
   (select count(*)::integer from public.generated_documents),
   0,
   'usuario sem vinculo nao visualiza documentos da clinica'
+);
+
+select set_config('request.jwt.claim.sub', '81000000-0000-0000-0000-000000000001', true);
+update public.document_templates
+set content = E'TITULO\\n\\nPaciente: {{paciente_nome}} e conteudo documental suficiente para emissao segura e rastreavel.'
+where clinic_id = '82000000-0000-0000-0000-000000000001'
+  and id = (select id from public.document_templates where clinic_id = '82000000-0000-0000-0000-000000000001' order by created_at limit 1);
+
+select ok(
+  not exists (
+    select 1 from public.document_templates
+    where clinic_id = '82000000-0000-0000-0000-000000000001'
+      and position(chr(92) || 'n' in content) > 0
+  ),
+  'modelos convertem sequencias literais de quebra de linha antes de salvar'
 );
 
 select * from finish();

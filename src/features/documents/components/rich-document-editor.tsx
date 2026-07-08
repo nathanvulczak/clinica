@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   DEFAULT_DOCUMENT_PAGE_SETTINGS,
+  normalizeDocumentText,
   type DocumentPageSettings,
 } from "@/features/documents/document-editor";
 
@@ -32,9 +33,10 @@ function escapeHtml(value: string) {
 }
 
 function editorHtml(value: string) {
-  if (!value) return "<p><br /></p>";
-  if (/<\/?[a-z][\s\S]*>/i.test(value)) return value;
-  return value
+  const normalized = normalizeDocumentText(value);
+  if (!normalized) return "<p><br /></p>";
+  if (/<\/?[a-z][\s\S]*>/i.test(normalized)) return normalized;
+  return normalized
     .split(/\n{2,}/)
     .map((paragraph) => `<p>${escapeHtml(paragraph).replaceAll("\n", "<br />")}</p>`)
     .join("");
@@ -203,4 +205,3 @@ export function RichDocumentEditor({
     </div>
   );
 }
-

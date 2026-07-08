@@ -1,4 +1,4 @@
-import { Building2, CalendarClock, CreditCard, ReceiptText } from "lucide-react";
+import { CalendarClock, CheckCircle2, CreditCard, ExternalLink, ReceiptText, ShieldCheck } from "lucide-react";
 import { redirect } from "next/navigation";
 import { redirectToCustomerPortalAction } from "@/features/billing/actions";
 import { BillingStatusToast } from "@/features/billing/components/billing-status-toast";
@@ -22,14 +22,6 @@ const statusLabels: Record<SubscriptionStatus | "inactive", string> = {
   past_due: "Pagamento pendente",
   canceled: "Cancelada",
   inactive: "Inativa",
-};
-
-const statusDescriptions: Record<SubscriptionStatus | "inactive", string> = {
-  active: "Acesso liberado até o próximo ciclo da assinatura.",
-  trialing: "Acesso liberado durante o período de teste.",
-  past_due: "Acesso pode ser mantido até o fim do ciclo pago, mas exige atenção ao pagamento.",
-  canceled: "A assinatura foi cancelada e seguirá as regras do ciclo pago.",
-  inactive: "Nenhum plano ativo foi encontrado para este usuário.",
 };
 
 function getBillingMessage(billing?: string, target?: string) {
@@ -100,77 +92,29 @@ export default async function AssinaturaPage({
       />
       <BillingNotice message={billingMessage} details={params.details} />
 
-      <div className="mb-6 grid gap-4 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Plano atual</CardTitle>
-            <CreditCard className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold capitalize">{currentPlan?.name ?? "Pendente"}</p>
-            <p className="text-xs text-muted-foreground">
-              {currentPlan ? `${formatCurrencyBRL(currentPlan.priceCents)} / mês` : "Assinatura ainda não ativa"}
-            </p>
-          </CardContent>
-        </Card>
+      <section className="mb-6 overflow-hidden rounded-lg border bg-card">
+        <div className="grid gap-4 border-b px-4 py-4 lg:grid-cols-[1.2fr_1fr] lg:items-center">
+          <div className="flex items-center gap-3"><div className="grid size-10 place-items-center rounded-md bg-primary/10 text-primary"><CreditCard className="size-5" /></div><div><div className="flex items-center gap-2"><h2 className="text-lg font-semibold">Plano {currentPlan?.name ?? "pendente"}</h2><Badge className={status === "active" || status === "trialing" ? "bg-emerald-500/10 text-emerald-700" : status === "past_due" ? "bg-amber-500/10 text-amber-700" : "bg-muted text-muted-foreground"}>{statusLabels[status]}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{currentPlan ? `${formatCurrencyBRL(currentPlan.priceCents)} por mês · cobrança gerenciada pela Stripe` : "Escolha um plano para ativar a operação."}</p></div></div>
+          <div><div className="flex items-center justify-between text-xs"><span className="text-muted-foreground">Clínicas utilizadas</span><strong className="tabular-nums">{activeClinicsCount} de {limit || 0}</strong></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-[width] duration-150" style={{ width: `${limit ? Math.min(100, (activeClinicsCount / limit) * 100) : 0}%` }} /></div><p className="mt-1.5 text-[11px] text-muted-foreground">{limit > activeClinicsCount ? `${limit - activeClinicsCount} clínica(s) ainda disponível(is) neste plano.` : "Limite atual utilizado."}</p></div>
+        </div>
+        <div className="grid lg:grid-cols-3">
+          <div className="flex gap-3 px-4 py-3"><CalendarClock className="mt-0.5 size-4 text-primary" /><div><p className="text-xs font-medium">Próximo ciclo</p><p className="mt-1 text-sm font-semibold">{formatDateBr(subscription?.current_period_end)}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{subscription?.cancel_at_period_end ? "Cancelamento programado." : "Renovação mensal automática."}</p></div></div>
+          <div className="flex gap-3 border-t px-4 py-3 lg:border-l lg:border-t-0"><ReceiptText className="mt-0.5 size-4 text-primary" /><div><p className="text-xs font-medium">Histórico financeiro</p><p className="mt-1 text-sm font-semibold">{invoices.length} fatura(s)</p><p className="mt-0.5 text-[11px] text-muted-foreground">Pagamentos sincronizados por webhook.</p></div></div>
+          <div className="flex gap-3 border-t px-4 py-3 lg:border-l lg:border-t-0"><ShieldCheck className="mt-0.5 size-4 text-primary" /><div><p className="text-xs font-medium">Integração</p><p className="mt-1 flex items-center gap-1.5 text-sm font-semibold"><CheckCircle2 className="size-3.5 text-emerald-600" />Stripe conectada</p><p className="mt-0.5 text-[11px] text-muted-foreground">Assinatura e faturas rastreáveis.</p></div></div>
+        </div>
+      </section>
 
-        <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Uso de clínicas</CardTitle>
-            <Building2 className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold">
-              {activeClinicsCount}
-              <span className="text-base text-muted-foreground"> / {limit || "-"}</span>
-            </p>
-            <p className="text-xs text-muted-foreground">limite aplicado ao plano contratado</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Status</CardTitle>
-            <ReceiptText className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold">{statusLabels[status]}</p>
-            <p className="text-xs text-muted-foreground">{statusDescriptions[status]}</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Próximo ciclo</CardTitle>
-            <CalendarClock className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold">{formatDateBr(subscription?.current_period_end)}</p>
-            <p className="text-xs text-muted-foreground">
-              {subscription?.cancel_at_period_end ? "Cancelamento programado ao fim do ciclo." : "Planos mensais recorrentes."}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>Transparência Stripe</CardTitle>
-          <CardDescription>IDs e faturas são mantidos para rastreabilidade de assinatura e pagamentos.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-2 text-sm md:grid-cols-3">
-          <InfoLine label="Customer ID" value={subscription?.stripe_customer_id ?? "não salvo"} />
-          <InfoLine label="Subscription ID" value={subscription?.stripe_subscription_id ?? "não salvo"} />
-          <InfoLine label="Fim do ciclo pago" value={formatDateTimeBr(subscription?.current_period_end)} />
-        </CardContent>
-      </Card>
+      <details className="mb-6 rounded-lg border bg-card">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Dados técnicos e rastreabilidade Stripe</summary>
+        <div className="grid gap-2 border-t p-4 text-sm md:grid-cols-3"><InfoLine label="Customer ID" value={subscription?.stripe_customer_id ?? "não salvo"} /><InfoLine label="Subscription ID" value={subscription?.stripe_subscription_id ?? "não salvo"} /><InfoLine label="Fim do ciclo pago" value={formatDateTimeBr(subscription?.current_period_end)} /></div>
+      </details>
 
       {billingAuthorization.canManage ? (
         <section className="mb-8 grid gap-4">
           <div>
-            <h2 className="text-lg font-semibold">Alterar plano</h2>
+            <h2 className="text-base font-semibold">Planos disponíveis</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Upgrades e downgrades passam pelo portal da Stripe. Downgrades respeitam o limite de clínicas ativas.
+              O plano atual não pode ser assinado novamente. Downgrades respeitam o limite de clínicas ativas e alterações são confirmadas no portal seguro da Stripe.
             </p>
           </div>
           <PlanCards
@@ -203,7 +147,7 @@ export default async function AssinaturaPage({
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border">
-              <div className="grid min-w-[820px] grid-cols-[160px_150px_150px_1fr_160px] bg-muted px-4 py-3 text-xs font-medium uppercase text-muted-foreground">
+              <div className="grid min-w-[820px] grid-cols-[160px_150px_150px_1fr_160px] bg-muted px-4 py-2.5 text-xs font-medium uppercase text-muted-foreground">
                 <span>Data</span>
                 <span>Status</span>
                 <span>Valor pago</span>
@@ -221,7 +165,7 @@ export default async function AssinaturaPage({
                       {invoice.hosted_invoice_url ? (
                         <Button asChild size="sm" variant="outline">
                           <a href={invoice.hosted_invoice_url} target="_blank" rel="noreferrer">
-                            Abrir
+                            Abrir <ExternalLink />
                           </a>
                         </Button>
                       ) : null}

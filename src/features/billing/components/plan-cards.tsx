@@ -24,7 +24,7 @@ export function PlanCards({
   const currentPlanLimit = PLANS.find((plan) => plan.slug === currentPlan)?.maxClinics ?? 0;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
+    <div className="grid gap-3 lg:grid-cols-3">
       {PLANS.map((plan) => {
         const isCurrent = hasActiveSubscription && currentPlan === plan.slug;
         const isDowngrade = hasActiveSubscription && plan.maxClinics < currentPlanLimit;
@@ -34,7 +34,7 @@ export function PlanCards({
         return (
           <Card
             key={plan.slug}
-            className={plan.highlighted || selected === plan.slug ? "border-primary shadow-md" : undefined}
+            className={plan.highlighted || selected === plan.slug ? "border-primary bg-primary/[0.025]" : undefined}
           >
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
@@ -43,12 +43,12 @@ export function PlanCards({
               </div>
               <CardDescription>{plan.description}</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-4">
+            <CardContent className="grid gap-3">
               <div>
-                <span className="text-3xl font-semibold">{formatCurrencyBRL(plan.priceCents)}</span>
+                <span className="text-2xl font-semibold tabular-nums">{formatCurrencyBRL(plan.priceCents)}</span>
                 <span className="text-sm text-muted-foreground"> / mês</span>
               </div>
-              <ul className="grid gap-2 text-sm text-muted-foreground">
+              <ul className="grid gap-1.5 text-[13px] text-muted-foreground">
                 <li className="flex items-center gap-2 text-foreground">
                   <Check className="size-4 text-primary" />
                   Até {plan.maxClinics} clínica{plan.maxClinics > 1 ? "s" : ""}

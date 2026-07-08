@@ -1,6 +1,7 @@
 import "server-only";
 
 import sanitizeHtml from "sanitize-html";
+import { normalizeDocumentText } from "@/features/documents/document-editor";
 
 const allowedTags = [
   "p",
@@ -45,7 +46,8 @@ function plainTextToHtml(value: string) {
 }
 
 export function sanitizeDocumentContent(value: string) {
-  const source = /<\/?[a-z][\s\S]*>/i.test(value) ? value : plainTextToHtml(value);
+  const normalized = normalizeDocumentText(value);
+  const source = /<\/?[a-z][\s\S]*>/i.test(normalized) ? normalized : plainTextToHtml(normalized);
   return sanitizeHtml(source, {
     allowedTags,
     allowedAttributes: {
@@ -70,4 +72,3 @@ export function documentContentText(value: string) {
     .replace(/\s+/g, " ")
     .trim();
 }
-

@@ -226,9 +226,35 @@ export type MedicalRecordReports = {
 };
 
 export type PatientMedicalOverview = {
-  patient: { id: string; full_name: string; social_name: string | null; phone: string | null } | null;
+  patient: {
+    id: string;
+    full_name: string;
+    social_name: string | null;
+    birth_date: string | null;
+    cpf: string | null;
+    phone: string | null;
+    email: string | null;
+    clinical_alerts: string | null;
+  } | null;
   records: MedicalRecordListItem[];
   comments: PatientClinicalComment[];
+  nursing_assessments: Array<{
+    id: string;
+    encounter_id: string;
+    status: string;
+    risk_level: string;
+    systolic_bp: number | null;
+    diastolic_bp: number | null;
+    heart_rate: number | null;
+    temperature_c: number | null;
+    oxygen_saturation: number | null;
+    weight_kg: number | null;
+    bmi: number | null;
+    completed_at: string | null;
+    created_at: string;
+  }>;
+  document_count: number;
+  attachment_count: number;
 };
 
 export const defaultMedicalRecordPreferences = (clinicId = ""): MedicalRecordPreferences => ({
@@ -755,22 +781,53 @@ export async function listPatientMedicalOverviews(
 
   const patientIds = [...new Set(records.map((record) => record.patient_id))];
   const admin = createSupabaseAdminClient();
-  const { data: comments } = await admin
-    .from("patient_clinical_comments")
-    .select(
-      "id, patient_id, encounter_id, medical_record_id, professional_member_id, comment, visibility, created_at, created_by",
-    )
-    .eq("clinic_id", clinicId)
-    .in("patient_id", patientIds)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(200);
+  const [
+    { data: comments },
+    { data: patients },
+    { data: nursingAssessments },
+    { data: documents },
+    { data: attachments },
+  ] = await Promise.all([
+    admin
+      .from("patient_clinical_comments")
+      .select("id, patient_id, encounter_id, medical_record_id, professional_member_id, comment, visibility, created_at, created_by")
+      .eq("clinic_id", clinicId)
+      .in("patient_id", patientIds)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(300),
+    admin
+      .from("patients")
+      .select("id, full_name, social_name, birth_date, cpf, phone, email, clinical_alerts")
+      .eq("clinic_id", clinicId)
+      .in("id", patientIds)
+      .is("deleted_at", null),
+    admin
+      .from("nursing_assessments")
+      .select("id, patient_id, encounter_id, status, risk_level, systolic_bp, diastolic_bp, heart_rate, temperature_c, oxygen_saturation, weight_kg, bmi, completed_at, created_at")
+      .eq("clinic_id", clinicId)
+      .in("patient_id", patientIds)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(300),
+    admin
+      .from("medical_prescriptions")
+      .select("id, patient_id")
+      .eq("clinic_id", clinicId)
+      .in("patient_id", patientIds),
+    admin
+      .from("medical_record_attachments")
+      .select("id, patient_id")
+      .eq("clinic_id", clinicId)
+      .in("patient_id", patientIds),
+  ]);
 
   const authorIds = [...new Set((comments ?? []).map((comment) => comment.created_by).filter(Boolean))];
   const { data: authors } = authorIds.length
     ? await admin.from("profiles").select("id, full_name").in("id", authorIds)
     : { data: [] };
   const authorMap = new Map((authors ?? []).map((item) => [item.id, item]));
+  const patientMap = new Map((patients ?? []).map((item) => [item.id, item]));
   const byPatient = new Map<string, PatientMedicalOverview>();
 
   for (const record of records) {
@@ -780,12 +837,34 @@ export async function listPatientMedicalOverviews(
       continue;
     }
     byPatient.set(record.patient_id, {
-      patient: record.patient
-        ? { ...record.patient, phone: null }
-        : { id: record.patient_id, full_name: "Paciente", social_name: null, phone: null },
+      patient: patientMap.get(record.patient_id) ?? {
+        id: record.patient_id,
+        full_name: record.patient?.full_name ?? "Paciente",
+        social_name: record.patient?.social_name ?? null,
+        birth_date: null,
+        cpf: null,
+        phone: null,
+        email: null,
+        clinical_alerts: null,
+      },
       records: [record],
       comments: [],
+      nursing_assessments: [],
+      document_count: 0,
+      attachment_count: 0,
     });
+  }
+
+  for (const assessment of nursingAssessments ?? []) {
+    byPatient.get(assessment.patient_id)?.nursing_assessments.push(assessment);
+  }
+  for (const document of documents ?? []) {
+    const overview = byPatient.get(document.patient_id);
+    if (overview) overview.document_count += 1;
+  }
+  for (const attachment of attachments ?? []) {
+    const overview = byPatient.get(attachment.patient_id);
+    if (overview) overview.attachment_count += 1;
   }
 
   for (const comment of (comments ?? []) as PatientClinicalComment[]) {

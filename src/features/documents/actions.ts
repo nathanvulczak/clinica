@@ -259,7 +259,7 @@ export async function createGeneratedDocumentAction(
     page_settings: formData.get("page_settings")?.toString(),
     status: formData.get("document_intent") || formData.get("status"),
     expires_at: formData.get("expires_at") || undefined,
-    observations: formData.get("observations"),
+    observations: formData.get("observations") || undefined,
   });
   if (!parsed.success) {
     const fieldLabels: Record<string, string> = {
@@ -271,10 +271,16 @@ export async function createGeneratedDocumentAction(
       professional_member_id: "profissional",
       title: "título",
       content: "conteúdo",
+      page_settings: "configuração da página",
       status: "tipo de emissão",
       expires_at: "validade",
+      observations: "observação interna",
     };
     const issue = parsed.error.issues[0];
+    console.warn("document.issue.validation_failed", {
+      field: issue?.path.join("."),
+      code: issue?.code,
+    });
     const field = fieldLabels[String(issue?.path[0] ?? "")];
     return { error: issue?.message && !/^Invalid/i.test(issue.message) ? issue.message : `Revise o campo ${field ?? "do documento"} antes de emitir.` };
   }

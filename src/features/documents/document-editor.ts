@@ -20,6 +20,10 @@ export const DEFAULT_DOCUMENT_PAGE_SETTINGS: DocumentPageSettings = {
   orientation: "portrait",
 };
 
+export function normalizeDocumentText(value: string) {
+  return value.replace(/\\r\\n|\\n|\\r/g, "\n");
+}
+
 function numberInRange(value: unknown, fallback: number, minimum: number, maximum: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
@@ -47,4 +51,3 @@ export function parseDocumentPageSettings(value: string | null | undefined) {
     return DEFAULT_DOCUMENT_PAGE_SETTINGS;
   }
 }
-

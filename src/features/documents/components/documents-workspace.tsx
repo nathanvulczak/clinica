@@ -37,6 +37,7 @@ import { useToast } from "@/components/ui/toast";
 import { RichDocumentEditor } from "@/features/documents/components/rich-document-editor";
 import {
   DEFAULT_DOCUMENT_PAGE_SETTINGS,
+  normalizeDocumentText,
   normalizeDocumentPageSettings,
   type DocumentPageSettings,
 } from "@/features/documents/document-editor";
@@ -70,12 +71,13 @@ const textareaClass =
 const pageSize = 10;
 
 function toDocumentHtml(value: string) {
-  if (/<\/?[a-z][\s\S]*>/i.test(value)) return value;
+  const normalized = normalizeDocumentText(value);
+  if (/<\/?[a-z][\s\S]*>/i.test(normalized)) return normalized;
   const escape = (part: string) => part
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
-  return value
+  return normalized
     .split(/\n{2,}/)
     .map((paragraph) => `<p>${escape(paragraph).replaceAll("\n", "<br />")}</p>`)
     .join("");
@@ -342,6 +344,8 @@ function IssueDocumentModal({
   const [pageSettings, setPageSettings] = useState<DocumentPageSettings>(
     DEFAULT_DOCUMENT_PAGE_SETTINGS,
   );
+  const [expiresAt, setExpiresAt] = useState("");
+  const [observations, setObservations] = useState("");
   const [expanded, setExpanded] = useState(false);
   const documentIntentRef = useRef<HTMLInputElement>(null);
 
@@ -430,6 +434,8 @@ function IssueDocumentModal({
         <input type="hidden" name="title" value={title} />
         <input type="hidden" name="content" value={content} />
         <input type="hidden" name="page_settings" value={JSON.stringify(pageSettings)} />
+        <input type="hidden" name="expires_at" value={expiresAt} />
+        <input type="hidden" name="observations" value={observations} />
 
         <div className="grid grid-cols-3 gap-2 border-b pb-4">
           {["Contexto", "Conteúdo", "Revisão"].map((label, index) => {
@@ -557,8 +563,8 @@ function IssueDocumentModal({
               minHeight={520}
             />
             <div className="grid gap-3 lg:grid-cols-2">
-              <label className="grid gap-1.5 text-xs font-medium">Validade, se aplicável<input type="date" name="expires_at" className={inputClass} /></label>
-              <label className="grid gap-1.5 text-xs font-medium">Observação interna<input name="observations" className={inputClass} placeholder="Não aparece no corpo do documento" /></label>
+              <label className="grid gap-1.5 text-xs font-medium">Validade, se aplicável<input type="date" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} className={inputClass} /></label>
+              <label className="grid gap-1.5 text-xs font-medium">Observação interna<input value={observations} onChange={(event) => setObservations(event.target.value)} className={inputClass} placeholder="Não aparece no corpo do documento" /></label>
             </div>
           </div>
         ) : null}

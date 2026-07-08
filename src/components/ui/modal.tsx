@@ -1,7 +1,6 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useId } from "react";
 import { Maximize2, Minimize2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -36,14 +35,11 @@ export function Modal({
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 }) {
-  const descriptionId = useId();
-
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/35 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in data-[state=closed]:fade-out data-[state=open]:duration-100 data-[state=closed]:duration-75 motion-reduce:animate-none" />
         <Dialog.Content
-          aria-describedby={descriptionId}
           className={cn(
             "fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border bg-card shadow-[0_18px_55px_rgb(15_23_42/0.16)] outline-none will-change-transform",
             "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in data-[state=open]:zoom-in-[0.99] data-[state=closed]:fade-out data-[state=closed]:zoom-out-[0.99] data-[state=open]:duration-150 data-[state=closed]:duration-100 motion-reduce:animate-none",
@@ -56,11 +52,11 @@ export function Modal({
             <div className="min-w-0">
               <Dialog.Title className="text-[17px] font-semibold">{title}</Dialog.Title>
               {description ? (
-                <Dialog.Description id={descriptionId} className="mt-1 text-[13px] leading-5 text-muted-foreground">
+                <Dialog.Description className="mt-1 text-[13px] leading-5 text-muted-foreground">
                   {description}
                 </Dialog.Description>
               ) : (
-                <Dialog.Description id={descriptionId} className="sr-only">
+                <Dialog.Description className="sr-only">
                   Janela de ação do sistema.
                 </Dialog.Description>
               )}

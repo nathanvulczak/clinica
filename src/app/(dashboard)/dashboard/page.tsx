@@ -1,6 +1,8 @@
 import { ACTIVE_CARE_STATUSES } from "@/config/clinical-workflow";
 import { PLAN_LIMITS } from "@/config/plans";
 import { DashboardWorkspace } from "@/features/dashboard/components/dashboard-workspace";
+import { SetupChecklist } from "@/features/onboarding/components/setup-checklist";
+import { getClinicSetupProgress } from "@/features/onboarding/setup-progress";
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { getClinicBrandingSettings } from "@/repositories/clinic-branding";
 import { listClinicMembers } from "@/repositories/clinics";
@@ -31,7 +33,7 @@ export default async function DashboardPage({
     getCurrentProfile(),
   ]);
   const today = todayInSaoPaulo();
-  const [subscription, members, appointments, encounters, financial, preferences, branding] = await Promise.all([
+  const [subscription, members, appointments, encounters, financial, preferences, branding, setupSteps] = await Promise.all([
     billingAuthorization.canView && billingAuthorization.ownerUserId
       ? getCurrentSubscription(billingAuthorization.ownerUserId)
       : Promise.resolve(null),
@@ -43,6 +45,7 @@ export default async function DashboardPage({
     activeClinic ? getFinancialWorkspace(activeClinic.id, { scope: "overview" }) : Promise.resolve(null),
     getDashboardPreferences(activeClinic?.id),
     activeClinic ? getClinicBrandingSettings(activeClinic.id) : Promise.resolve(null),
+    getClinicSetupProgress(activeClinic, authorization.role === "clinic_owner" || authorization.role === "clinic_admin"),
   ]);
   const planLimit = subscription?.plan_slug ? PLAN_LIMITS[subscription.plan_slug as PlanSlug] : null;
   const canCreateClinic = billingAuthorization.initialSignup || authorization.can("clinics", "create");
@@ -61,7 +64,8 @@ export default async function DashboardPage({
     }));
 
   return (
-    <DashboardWorkspace
+    <>
+      <DashboardWorkspace
       accessDenied={params.access === "denied"}
       deniedModule={params.module}
       activeClinicId={activeClinic?.id ?? null}
@@ -90,6 +94,8 @@ export default async function DashboardPage({
         cashConfirmedCents: financial?.metrics.receivablePaidCents ?? 0,
       }}
       nextAppointments={nextAppointments}
-    />
+      />
+      <SetupChecklist steps={setupSteps} />
+    </>
   );
 }
