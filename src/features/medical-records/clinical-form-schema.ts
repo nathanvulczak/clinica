@@ -1,3 +1,5 @@
+import { normalizeClinicalSpecialtySlug } from "@/config/clinical-specialties";
+
 export type ClinicalFieldType =
   | "text"
   | "textarea"
@@ -41,7 +43,22 @@ export type ClinicalFormDefinition = {
   sections: ClinicalFormSection[];
 };
 
-export type ClinicalFormResponseValue = string | number | boolean | string[] | null;
+export type ClinicalFormResponseMetadata =
+  | string
+  | number
+  | boolean
+  | null
+  | string[]
+  | ClinicalFormResponseMetadata[]
+  | { [key: string]: ClinicalFormResponseMetadata };
+
+export type ClinicalFormResponseValue =
+  | string
+  | number
+  | boolean
+  | string[]
+  | ClinicalFormResponseMetadata
+  | null;
 export type ClinicalFormResponses = Record<string, ClinicalFormResponseValue>;
 
 const fieldTypes = new Set<ClinicalFieldType>([
@@ -121,26 +138,39 @@ export function parseClinicalFormDefinition(value: unknown): ClinicalFormDefinit
 }
 
 export function normalizeSpecialtySlug(value: string | null | undefined) {
-  const normalized = value
-    ?.normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase("pt-BR")
-    .trim();
-  if (!normalized) return "general_medicine";
-  if (/cardio/.test(normalized)) return "cardiology";
-  if (/pediatr/.test(normalized)) return "pediatrics";
-  if (/gineco|obstetr/.test(normalized)) return "gynecology_obstetrics";
-  if (/psico|psiquiatr|saude mental/.test(normalized)) return "mental_health";
-  if (/odonto|dent/.test(normalized)) return "dentistry";
-  if (/fisio|reabilita/.test(normalized)) return "physiotherapy";
-  if (/dermato/.test(normalized)) return "dermatology";
-  return "general_medicine";
+  return normalizeClinicalSpecialtySlug(value);
 }
 
 function hasResponse(value: ClinicalFormResponseValue | undefined) {
   if (value === null || value === undefined || value === "") return false;
   if (Array.isArray(value)) return value.length > 0;
   return true;
+}
+
+function sanitizeClinicalMetadata(value: unknown, depth = 0): ClinicalFormResponseMetadata | undefined {
+  if (depth > 4) return undefined;
+  if (value === null) return null;
+  if (typeof value === "string") return value.trim().slice(0, 1200);
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value === "boolean") return value;
+  if (Array.isArray(value)) {
+    const sanitized = value
+      .slice(0, 80)
+      .map((item) => sanitizeClinicalMetadata(item, depth + 1))
+      .filter((item): item is ClinicalFormResponseMetadata => item !== undefined);
+    return sanitized;
+  }
+
+  const source = asObject(value);
+  if (!source) return undefined;
+
+  const entries = Object.entries(source).slice(0, 80).flatMap(([key, entryValue]) => {
+    if (!/^[a-zA-Z0-9_.:-]{1,80}$/.test(key)) return [];
+    const sanitized = sanitizeClinicalMetadata(entryValue, depth + 1);
+    return sanitized === undefined ? [] : [[key, sanitized] as const];
+  });
+
+  return Object.fromEntries(entries);
 }
 
 export function validateClinicalFormResponses(
@@ -185,6 +215,12 @@ export function validateClinicalFormResponses(
       }
       responses[field.key] = value;
     }
+  }
+
+  for (const [key, value] of Object.entries(source)) {
+    if (!key.startsWith("_")) continue;
+    const sanitized = sanitizeClinicalMetadata(value);
+    if (sanitized !== undefined) responses[key] = sanitized;
   }
 
   return { responses, errors };

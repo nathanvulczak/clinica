@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(9);
+select plan(10);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -101,8 +101,8 @@ insert into public.clinical_encounters (
 
 select is(
   (select count(*)::integer from public.clinical_form_templates where clinic_id = '92000000-0000-0000-0000-000000000001'),
-  8,
-  'nova clinica recebe oito pacotes de especialidade'
+  12,
+  'nova clinica recebe doze pacotes de especialidade'
 );
 select ok(
   (select relrowsecurity from pg_class where oid = 'public.clinical_form_instances'::regclass),
@@ -199,7 +199,13 @@ select ok(
       'clinical_responses', jsonb_build_object(
         'symptom_onset', 'Inicio ha dois dias',
         'general_condition', 'good',
-        'habits', jsonb_build_array('physical_activity')
+        'habits', jsonb_build_array('physical_activity'),
+        '_visual_maps', jsonb_build_object(
+          'general_medicine', jsonb_build_object(
+            'preset', 'none',
+            'entries', jsonb_build_object()
+          )
+        )
       )
     ), true, 'Consulta especializada concluida.'
   ) is not null,
@@ -214,6 +220,14 @@ select is(
 select ok(
   (select count(*) from public.clinical_observations where encounter_id = '96000000-0000-0000-0000-000000000001') >= 3,
   'respostas geram observacoes estruturadas'
+);
+select ok(
+  (
+    select responses ? '_visual_maps'
+    from public.clinical_form_instances
+    where encounter_id = '96000000-0000-0000-0000-000000000001'
+  ),
+  'metadados visuais do formulario permanecem salvos na instancia clinica'
 );
 
 select * from finish();

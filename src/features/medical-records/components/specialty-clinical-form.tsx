@@ -14,9 +14,11 @@ import { Badge } from "@/components/ui/badge";
 import {
   clinicalFormCompletion,
   type ClinicalFormField,
+  type ClinicalFormResponseMetadata,
   type ClinicalFormResponseValue,
   type ClinicalFormResponses,
 } from "@/features/medical-records/clinical-form-schema";
+import { ClinicalImmersionMap } from "@/features/medical-records/components/clinical-immersion-map";
 import type { ClinicalFormTemplate, ClinicalFormWorkspace } from "@/repositories/clinical-forms";
 
 const inputClass = "h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-65";
@@ -32,6 +34,12 @@ const sourceLabels: Record<ClinicalFormWorkspace["selectionSource"], string> = {
 
 function valueAsString(value: ClinicalFormResponseValue | undefined) {
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function metadataObject(value: ClinicalFormResponseValue | undefined): Record<string, ClinicalFormResponseMetadata> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, ClinicalFormResponseMetadata>)
+    : {};
 }
 
 function ClinicalField({
@@ -174,6 +182,7 @@ export function SpecialtyClinicalForm({
     );
   }
 
+  const selectedSpecialtySlug = selectedTemplate.specialty_slug;
   const currentSection = definition.sections.find((section) => section.key === activeSection) ?? definition.sections[0];
   const completion = clinicalFormCompletion(definition, responses);
   const templateLocked = disabled || Boolean(workspace.instance && workspace.instance.status !== "draft");
@@ -182,11 +191,22 @@ export function SpecialtyClinicalForm({
     const value = responses[field.key];
     return typeof value === "string" && field.alert_values?.includes(value);
   });
+  const visualMaps = metadataObject(responses._visual_maps);
 
   function selectTemplate(template: ClinicalFormTemplate) {
     setSelectedTemplateId(template.id);
     setResponses({});
     setActiveSection(template.definition.sections[0]?.key ?? "");
+  }
+
+  function updateVisualMap(value: ClinicalFormResponseMetadata) {
+    setResponses((current) => ({
+      ...current,
+      _visual_maps: {
+        ...metadataObject(current._visual_maps),
+        [selectedSpecialtySlug]: value,
+      },
+    }));
   }
 
   return (
@@ -227,6 +247,15 @@ export function SpecialtyClinicalForm({
       </div>
 
       {warnings.length ? <div className="mx-4 mt-3 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><div><p className="font-semibold">Atenção clínica necessária</p><p className="mt-0.5">{warnings.map((field) => field.label).join(", ")}. Avalie e registre a conduta antes de concluir.</p></div></div> : null}
+
+      <div className="px-4 pt-3">
+        <ClinicalImmersionMap
+          specialtySlug={selectedSpecialtySlug}
+          value={visualMaps[selectedSpecialtySlug]}
+          disabled={disabled}
+          onChange={updateVisualMap}
+        />
+      </div>
 
       <div className="grid min-h-[360px] lg:grid-cols-[210px_1fr]">
         <nav className="border-b bg-muted/10 p-2 lg:border-b-0 lg:border-r">

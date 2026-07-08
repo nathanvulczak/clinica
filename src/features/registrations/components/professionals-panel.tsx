@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { ROLE_LABELS } from "@/config/permissions";
 import { SCHEDULE_BLOCK_TYPE_LABELS } from "@/config/schedule";
+import { getClinicalSpecialtyLabel } from "@/config/clinical-specialties";
 import {
   AvailabilityForm,
   DeleteRegistrationButton,
@@ -158,7 +159,9 @@ export function ProfessionalsPanel({
                     {professionalProfile?.active === false ? <Badge>Inativo na operação</Badge> : null}
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {professionalProfile?.specialty ?? "Especialidade não informada"}
+                    {professionalProfile?.specialty
+                      ? getClinicalSpecialtyLabel(professionalProfile.specialty)
+                      : "Especialidade não informada"}
                   </p>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     {professional.profile?.email ? (

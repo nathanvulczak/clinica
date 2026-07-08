@@ -19,6 +19,11 @@ import {
   formatPostalCode,
   normalizeEmail,
 } from "@/lib/formatters";
+import {
+  CLINICAL_SPECIALTY_OPTIONS,
+  getClinicalSpecialty,
+  normalizeClinicalSpecialtySlug,
+} from "@/config/clinical-specialties";
 import type {
   ClinicRoom,
   ClinicService,
@@ -862,7 +867,12 @@ export function ProfessionalProfileForm({
   const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction, pending] = useActionState(saveProfessionalProfileAction, {});
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [specialty, setSpecialty] = useState(
+    normalizeClinicalSpecialtySlug(professionalProfile?.specialty),
+  );
+  const [councilType, setCouncilType] = useState(professionalProfile?.council_type ?? "");
   const canSubmit = !disabled && !pending;
+  const selectedSpecialty = getClinicalSpecialty(specialty);
 
   useRegistrationToast(
     state,
@@ -882,13 +892,26 @@ export function ProfessionalProfileForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-2">
           <Label htmlFor={`specialty-${professional.id}`}>Especialidade principal</Label>
-          <Input
+          <Select
             id={`specialty-${professional.id}`}
             name="specialty"
-            defaultValue={professionalProfile?.specialty ?? ""}
-            placeholder="Ex.: Cardiologia"
+            value={specialty}
+            onChange={(event) => {
+              const next = normalizeClinicalSpecialtySlug(event.target.value);
+              setSpecialty(next);
+              if (!councilType.trim()) {
+                setCouncilType(getClinicalSpecialty(next).suggestedCouncil);
+              }
+            }}
             disabled={!canSubmit}
-          />
+          >
+            {CLINICAL_SPECIALTY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+          <p className="text-xs text-muted-foreground">{selectedSpecialty.description}</p>
         </div>
         <div className="grid gap-2">
           <Label htmlFor={`rqe-${professional.id}`}>RQE / qualificação</Label>
@@ -907,7 +930,8 @@ export function ProfessionalProfileForm({
           <Input
             id={`council-type-${professional.id}`}
             name="council_type"
-            defaultValue={professionalProfile?.council_type ?? ""}
+            value={councilType}
+            onChange={(event) => setCouncilType(event.target.value.toUpperCase())}
             placeholder="CRM, CRO, COREN, CRP..."
             disabled={!canSubmit}
           />
