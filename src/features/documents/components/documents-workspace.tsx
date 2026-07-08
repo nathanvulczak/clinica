@@ -32,6 +32,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalFooter, ModalSection } from "@/components/ui/modal";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useToast } from "@/components/ui/toast";
 import {
   cancelGeneratedDocumentAction,
@@ -412,10 +413,18 @@ function IssueDocumentModal({
                 <p className="text-sm font-semibold">Modelo documental</p>
                 <p className="text-xs text-muted-foreground">O modelo define a base, mas o texto final sempre pode ser revisado.</p>
               </div>
-              <select value={selections.templateId} onChange={(event) => selectTemplate(event.target.value)} className={inputClass} required>
-                <option value="">Selecione um modelo ativo</option>
-                {data.templates.filter((item) => item.active).map((template) => <option key={template.id} value={template.id}>{typeLabels[template.template_type]} · {template.name}</option>)}
-              </select>
+              <SearchableSelect
+                value={selections.templateId}
+                onValueChange={selectTemplate}
+                placeholder="Selecione um modelo ativo"
+                searchPlaceholder="Pesquisar modelo ou tipo"
+                options={data.templates.filter((item) => item.active).map((template) => ({
+                  value: template.id,
+                  label: `${typeLabels[template.template_type]} · ${template.name}`,
+                  description: template.description ?? undefined,
+                  searchText: `${template.template_type} ${template.name} ${template.description ?? ""}`,
+                }))}
+              />
               {selectedTemplate ? <div className="rounded-md border bg-muted/15 p-3 text-xs"><p className="font-medium">{selectedTemplate.description}</p><p className="mt-1 leading-5 text-muted-foreground">{selectedTemplate.legal_basis || "Sem orientação complementar cadastrada."}</p></div> : null}
             </section>
 
@@ -425,40 +434,71 @@ function IssueDocumentModal({
                 <p className="text-xs text-muted-foreground">Todos os vínculos são opcionais. Selecione uma consulta para preencher paciente e profissional automaticamente.</p>
               </div>
               {data.access.canUseSchedule ? (
-                <label className="grid gap-1.5 text-xs font-medium">
-                  Consulta relacionada
-                  <select value={selections.appointmentId} onChange={(event) => selectAppointment(event.target.value)} className={inputClass}>
-                    <option value="">Documento avulso, sem consulta</option>
-                    {activeAppointments.map((appointment) => <option key={appointment.id} value={appointment.id}>{appointmentLabel(appointment, data.patients)}</option>)}
-                  </select>
-                </label>
+                <SearchableSelect
+                  label="Consulta relacionada"
+                  value={selections.appointmentId}
+                  onValueChange={selectAppointment}
+                  searchPlaceholder="Pesquisar data, paciente ou serviço"
+                  options={[
+                    { value: "", label: "Documento avulso, sem consulta" },
+                    ...activeAppointments.map((appointment) => ({
+                      value: appointment.id,
+                      label: appointmentLabel(appointment, data.patients),
+                      searchText: appointmentLabel(appointment, data.patients),
+                    })),
+                  ]}
+                />
               ) : null}
               <div className="grid gap-3 lg:grid-cols-2">
                 {data.access.canUsePatients ? (
-                  <label className="grid gap-1.5 text-xs font-medium">
-                    Paciente
-                    <select value={selections.patientId} onChange={(event) => updateSelection("patientId", event.target.value)} className={inputClass}>
-                      <option value="">Sem vínculo com paciente</option>
-                      {data.patients.map((patient) => <option key={patient.id} value={patient.id}>{patientLabel(patient)}</option>)}
-                    </select>
-                  </label>
+                  <SearchableSelect
+                    label="Paciente"
+                    value={selections.patientId}
+                    onValueChange={(value) => updateSelection("patientId", value)}
+                    searchPlaceholder="Pesquisar nome, CPF ou e-mail"
+                    options={[
+                      { value: "", label: "Sem vínculo com paciente" },
+                      ...data.patients.map((patient) => ({
+                        value: patient.id,
+                        label: patientLabel(patient),
+                        description: patient.email || undefined,
+                        searchText: `${patient.full_name} ${patient.social_name ?? ""} ${patient.cpf ?? ""} ${patient.email ?? ""}`,
+                      })),
+                    ]}
+                  />
                 ) : null}
-                <label className="grid gap-1.5 text-xs font-medium">
-                  Profissional responsável
-                  <select value={selections.professionalId} onChange={(event) => updateSelection("professionalId", event.target.value)} className={inputClass}>
-                    <option value="">Sem profissional específico</option>
-                    {data.professionals.map((professional) => <option key={professional.id} value={professional.id}>{professionalLabel(professional)}</option>)}
-                  </select>
-                </label>
+                <SearchableSelect
+                  label="Profissional responsável"
+                  value={selections.professionalId}
+                  onValueChange={(value) => updateSelection("professionalId", value)}
+                  searchPlaceholder="Pesquisar profissional ou registro"
+                  options={[
+                    { value: "", label: "Sem profissional específico" },
+                    ...data.professionals.map((professional) => ({
+                      value: professional.id,
+                      label: professionalLabel(professional),
+                      searchText: `${professional.full_name} ${professional.council_type ?? ""} ${professional.council_number ?? ""} ${professional.council_state ?? ""}`,
+                    })),
+                  ]}
+                />
               </div>
               {data.access.canUseFinancial ? (
-                <label className="grid gap-1.5 text-xs font-medium">
-                  Lançamento financeiro
-                  <select value={selections.financialId} onChange={(event) => updateSelection("financialId", event.target.value)} className={inputClass}>
-                    <option value="">Sem vínculo financeiro</option>
-                    {data.financialEntries.filter((entry) => !selections.patientId || !entry.patient_id || entry.patient_id === selections.patientId).map((entry) => <option key={entry.id} value={entry.id}>{financialLabel(entry)}</option>)}
-                  </select>
-                </label>
+                <SearchableSelect
+                  label="Lançamento financeiro"
+                  value={selections.financialId}
+                  onValueChange={(value) => updateSelection("financialId", value)}
+                  searchPlaceholder="Pesquisar descrição, valor ou vencimento"
+                  options={[
+                    { value: "", label: "Sem vínculo financeiro" },
+                    ...data.financialEntries
+                      .filter((entry) => !selections.patientId || !entry.patient_id || entry.patient_id === selections.patientId)
+                      .map((entry) => ({
+                        value: entry.id,
+                        label: financialLabel(entry),
+                        searchText: `${entry.description} ${entry.amount_cents} ${entry.due_date}`,
+                      })),
+                  ]}
+                />
               ) : null}
             </section>
           </div>
@@ -503,8 +543,8 @@ function IssueDocumentModal({
             <Button type="button" disabled={!canContinue || (step === 2 && (!title.trim() || content.trim().length < 40))} onClick={() => setStep((current) => current + 1)}>Continuar <ChevronRight /></Button>
           ) : (
             <div className="flex gap-2">
-              <Button type="submit" variant="outline" disabled={pending} onClick={() => { if (documentIntentRef.current) documentIntentRef.current.value = "draft"; }}><Save /> {pending ? "Salvando..." : "Salvar rascunho"}</Button>
-              <Button type="submit" disabled={pending} onClick={() => { if (documentIntentRef.current) documentIntentRef.current.value = "issued"; }}><FileCheck2 /> {pending ? "Emitindo..." : "Emitir documento"}</Button>
+              <Button type="submit" name="document_intent" value="draft" variant="outline" disabled={pending} onClick={() => { if (documentIntentRef.current) documentIntentRef.current.value = "draft"; }}><Save /> {pending ? "Salvando..." : "Salvar rascunho"}</Button>
+              <Button type="submit" name="document_intent" value="issued" disabled={pending} onClick={() => { if (documentIntentRef.current) documentIntentRef.current.value = "issued"; }}><FileCheck2 /> {pending ? "Emitindo..." : "Emitir documento"}</Button>
             </div>
           )}
         </ModalFooter>

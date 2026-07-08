@@ -1087,7 +1087,32 @@ export async function saveFinancialEntryAction(
     line_items_json: formData.get("line_items_json"),
     notes: formData.get("notes"),
   });
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados invalidos." };
+  if (!parsed.success) {
+    const fieldLabels: Record<string, string> = {
+      entry_type: "tipo do lançamento",
+      patient_id: "paciente",
+      vendor_id: "fornecedor",
+      professional_member_id: "profissional",
+      category_id: "categoria",
+      cost_center_id: "centro de custo",
+      health_plan_id: "convênio",
+      document_type: "tipo de documento",
+      description: "descrição",
+      document_number: "número do documento",
+      issue_date: "emissão",
+      due_date: "vencimento",
+      competence_date: "competência",
+      amount: "valor",
+      discount: "desconto",
+      freight: "frete",
+      addition: "acréscimos",
+      line_items_json: "itens do documento",
+    };
+    const issue = parsed.error.issues[0];
+    const field = fieldLabels[String(issue?.path[0] ?? "")];
+    const message = issue?.message && !/^Invalid/i.test(issue.message) ? issue.message : `Revise o campo ${field ?? "do lançamento"} antes de salvar.`;
+    return { error: message };
+  }
   const parsedItems = parseFinancialEntryItems(parsed.data.line_items_json);
   if ("error" in parsedItems) return { error: parsedItems.error };
   const lineItems = parsed.data.entry_type === "payable" ? parsedItems.items : [];

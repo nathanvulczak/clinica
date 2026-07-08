@@ -6,6 +6,7 @@ import { Building2, Calculator, CalendarCheck, Check, CreditCard, Landmark, Lock
 import { Button } from "@/components/ui/button";
 import { CnpjLookupInput, type CompanyLookupResult } from "@/components/forms/cnpj-lookup-input";
 import { Modal } from "@/components/ui/modal";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -712,29 +713,10 @@ export function FinancialEntryForm({
   const [items, setItems] = useState<PayableItemDraft[]>(() =>
     entry?.items?.length ? entry.items.map((item, index) => createPayableItemDraft(item, index)) : [createPayableItemDraft()],
   );
-  const inventoryDatalistId = "financial-payable-inventory-items";
   const inventoryById = useMemo(() => new Map(inventoryItems.map((item) => [item.id, item])), [inventoryItems]);
 
   function inventoryOptionLabel(item: InventoryItem) {
     return item.sku ? `${item.sku} - ${item.name}` : item.name;
-  }
-
-  function findInventoryItem(value: string) {
-    const normalized = value.trim().toLowerCase();
-    if (!normalized) return null;
-
-    return (
-      inventoryItems.find((item) => {
-        const candidates = [
-          item.id,
-          item.sku ?? "",
-          item.name,
-          inventoryOptionLabel(item),
-          item.sku ? `${item.sku} ${item.name}` : "",
-        ];
-        return candidates.some((candidate) => candidate.trim().toLowerCase() === normalized);
-      }) ?? null
-    );
   }
 
   function patchItem(id: string, patch: Partial<Omit<PayableItemDraft, "id">>) {
@@ -812,42 +794,62 @@ export function FinancialEntryForm({
         <label className="grid gap-2 text-sm font-medium">
           <span>Centro de custo</span>
           <span className="flex min-w-0 gap-2">
-            <Select name="cost_center_id" defaultValue={entry?.cost_center_id ?? "none"} className="min-w-0 flex-1">
-              <option value="none">Não informado</option>
-              {costCenters.map((costCenter) => (
-                <option key={costCenter.id} value={costCenter.id}>
-                  {costCenter.code ? `${costCenter.code} - ${costCenter.name}` : costCenter.name}
-                </option>
-              ))}
-            </Select>
+            <SearchableSelect
+              name="cost_center_id"
+              defaultValue={entry?.cost_center_id ?? "none"}
+              className="min-w-0 flex-1"
+              placeholder="Não informado"
+              searchPlaceholder="Pesquisar código ou centro"
+              options={[
+                { value: "none", label: "Não informado" },
+                ...costCenters.map((costCenter) => ({
+                  value: costCenter.id,
+                  label: costCenter.code ? `${costCenter.code} - ${costCenter.name}` : costCenter.name,
+                  searchText: `${costCenter.code ?? ""} ${costCenter.name}`,
+                })),
+              ]}
+            />
             <Button type="button" size="sm" variant="outline" onClick={() => setQuickCreate("cost-center")}>Cadastrar</Button>
           </span>
         </label>
         {effectiveType === "receivable" ? (
-          <label className="grid gap-2 text-sm font-medium">
-            Convênio
-            <Select name="health_plan_id" defaultValue={entry?.health_plan_id ?? "none"}>
-              <option value="none">Particular / não informado</option>
-              {healthPlans.map((healthPlan) => (
-                <option key={healthPlan.id} value={healthPlan.id}>
-                  {healthPlan.name}
-                </option>
-              ))}
-            </Select>
-          </label>
+          <SearchableSelect
+            name="health_plan_id"
+            label="Convênio"
+            defaultValue={entry?.health_plan_id ?? "none"}
+            placeholder="Particular / não informado"
+            searchPlaceholder="Pesquisar convênio, CNPJ ou ANS"
+            options={[
+              { value: "none", label: "Particular / não informado" },
+              ...healthPlans.map((healthPlan) => ({
+                value: healthPlan.id,
+                label: healthPlan.name,
+                description: healthPlan.ans_registration ? `ANS ${healthPlan.ans_registration}` : undefined,
+                searchText: `${healthPlan.name} ${healthPlan.document ?? ""} ${healthPlan.ans_registration ?? ""}`,
+              })),
+            ]}
+          />
         ) : null}
         {effectiveType === "payable" ? (
           <label className="grid gap-2 text-sm font-medium">
             <span>Fornecedor</span>
             <span className="flex min-w-0 gap-2">
-              <Select name="vendor_id" defaultValue={entry?.vendor_id ?? "none"} className="min-w-0 flex-1">
-                <option value="none">Não informado</option>
-                {vendors.map((vendor) => (
-                  <option key={vendor.id} value={vendor.id}>
-                    {vendor.name}
-                  </option>
-                ))}
-              </Select>
+              <SearchableSelect
+                name="vendor_id"
+                defaultValue={entry?.vendor_id ?? "none"}
+                className="min-w-0 flex-1"
+                placeholder="Não informado"
+                searchPlaceholder="Pesquisar fornecedor, CPF ou CNPJ"
+                options={[
+                  { value: "none", label: "Não informado" },
+                  ...vendors.map((vendor) => ({
+                    value: vendor.id,
+                    label: vendor.name,
+                    description: vendor.document ? formatCpfOrCnpj(vendor.document) : undefined,
+                    searchText: `${vendor.name} ${vendor.document ?? ""} ${vendor.email ?? ""}`,
+                  })),
+                ]}
+              />
               <Button type="button" size="sm" variant="outline" onClick={() => setQuickCreate("vendor")}>Cadastrar</Button>
             </span>
           </label>
@@ -885,13 +887,6 @@ export function FinancialEntryForm({
               </Button>
             </div>
           </div>
-          <datalist id={inventoryDatalistId}>
-            {inventoryItems.map((inventoryItem) => (
-              <option key={inventoryItem.id} value={inventoryOptionLabel(inventoryItem)}>
-                {inventoryItem.category ? `${inventoryItem.category} · ${inventoryItem.unit}` : inventoryItem.unit}
-              </option>
-            ))}
-          </datalist>
           {!inventoryItems.length ? (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
               Cadastre os itens em Cadastros &gt; Itens antes de lançar documentos a pagar.
@@ -900,44 +895,35 @@ export function FinancialEntryForm({
           <div className="grid gap-2">
             {items.map((item) => {
               const selectedInventoryItem = item.inventory_item_id !== "none" ? inventoryById.get(item.inventory_item_id) : null;
-              const inventoryValue = item.inventory_code || (selectedInventoryItem ? inventoryOptionLabel(selectedInventoryItem) : "");
               const controlsStock = selectedInventoryItem?.generate_stock ?? item.generate_stock;
               const lineTotal = Math.round(Number(item.quantity.replace(",", ".")) * inputToCents(item.unit_amount));
               return (
                 <div key={item.id} className="grid gap-3 rounded-md border bg-background p-3">
                   <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.4fr)_minmax(96px,.45fr)_minmax(120px,.55fr)_minmax(120px,.5fr)_auto] xl:items-end">
-                    <label className="grid gap-1.5 text-[13px] font-medium">
-                      Item cadastrado
-                      <input
-                        list={inventoryDatalistId}
-                        value={inventoryValue}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          const found = findInventoryItem(value);
-                          patchItem(item.id, {
-                            inventory_code: value,
-                            description: found?.name ?? value,
-                            inventory_item_id: found?.id ?? "none",
-                            generate_stock: found?.generate_stock ?? false,
-                            inventory_location_id: found?.generate_stock ? item.inventory_location_id : "none",
-                            batch_number: found?.generate_stock ? item.batch_number : "",
-                            expires_at: found?.generate_stock ? item.expires_at : "",
-                          });
-                        }}
-                        onBlur={(event) => {
-                          const found = findInventoryItem(event.target.value);
-                          if (!found) return;
-                          patchItem(item.id, {
-                            inventory_code: inventoryOptionLabel(found),
-                            description: found.name,
-                            inventory_item_id: found.id,
-                            generate_stock: found.generate_stock,
-                          });
-                        }}
-                        placeholder="Código/SKU ou nome do item"
-                        className="h-9 rounded-md border bg-background px-3 text-[13px] font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      />
-                    </label>
+                    <SearchableSelect
+                      label="Item cadastrado"
+                      value={selectedInventoryItem?.id ?? ""}
+                      onValueChange={(value) => {
+                        const found = inventoryById.get(value);
+                        patchItem(item.id, {
+                          inventory_code: found ? inventoryOptionLabel(found) : "",
+                          description: found?.name ?? "",
+                          inventory_item_id: found?.id ?? "none",
+                          generate_stock: found?.generate_stock ?? false,
+                          inventory_location_id: found?.generate_stock ? item.inventory_location_id : "none",
+                          batch_number: found?.generate_stock ? item.batch_number : "",
+                          expires_at: found?.generate_stock ? item.expires_at : "",
+                        });
+                      }}
+                      placeholder="Código/SKU ou nome do item"
+                      searchPlaceholder="Pesquisar código, SKU ou nome"
+                      options={inventoryItems.map((inventoryItem) => ({
+                        value: inventoryItem.id,
+                        label: inventoryOptionLabel(inventoryItem),
+                        description: inventoryItem.category ? `${inventoryItem.category} · ${inventoryItem.unit}` : inventoryItem.unit,
+                        searchText: `${inventoryItem.sku ?? ""} ${inventoryItem.name} ${inventoryItem.category ?? ""}`,
+                      }))}
+                    />
                     <QuantityInput value={item.quantity} onChange={(value) => updateItem(item.id, "quantity", value)} />
                     <CurrencyInput value={item.unit_amount} onChange={(value) => updateItem(item.id, "unit_amount", value)} label="Unitário" />
                     <div className="rounded-md border bg-muted/20 px-2.5 py-2 text-[13px]">
@@ -1103,17 +1089,22 @@ export function FinancialRecurringEntryForm({
       <div className="grid gap-4 lg:grid-cols-2">
         <Field name="description" label="Descrição" defaultValue={recurringEntry?.description} required />
         <MoneyInput name="amount" label="Valor previsto" defaultValue={centsToInput(recurringEntry?.amount_cents)} required />
-        <label className="grid gap-2 text-sm font-medium">
-          Fornecedor
-          <Select name="vendor_id" defaultValue={recurringEntry?.vendor_id ?? "none"}>
-            <option value="none">Não informado</option>
-            {vendors.map((vendor) => (
-              <option key={vendor.id} value={vendor.id}>
-                {vendor.name}
-              </option>
-            ))}
-          </Select>
-        </label>
+        <SearchableSelect
+          name="vendor_id"
+          label="Fornecedor"
+          defaultValue={recurringEntry?.vendor_id ?? "none"}
+          placeholder="Não informado"
+          searchPlaceholder="Pesquisar fornecedor, CPF ou CNPJ"
+          options={[
+            { value: "none", label: "Não informado" },
+            ...vendors.map((vendor) => ({
+              value: vendor.id,
+              label: vendor.name,
+              description: vendor.document ? formatCpfOrCnpj(vendor.document) : undefined,
+              searchText: `${vendor.name} ${vendor.document ?? ""} ${vendor.email ?? ""}`,
+            })),
+          ]}
+        />
         <label className="grid gap-2 text-sm font-medium">
           Categoria
           <Select name="category_id" defaultValue={recurringEntry?.category_id ?? "none"}>
@@ -1127,17 +1118,21 @@ export function FinancialRecurringEntryForm({
               ))}
           </Select>
         </label>
-        <label className="grid gap-2 text-sm font-medium">
-          Centro de custo
-          <Select name="cost_center_id" defaultValue={recurringEntry?.cost_center_id ?? "none"}>
-            <option value="none">Não informado</option>
-            {costCenters.map((costCenter) => (
-              <option key={costCenter.id} value={costCenter.id}>
-                {costCenter.name}
-              </option>
-            ))}
-          </Select>
-        </label>
+        <SearchableSelect
+          name="cost_center_id"
+          label="Centro de custo"
+          defaultValue={recurringEntry?.cost_center_id ?? "none"}
+          placeholder="Não informado"
+          searchPlaceholder="Pesquisar código ou centro"
+          options={[
+            { value: "none", label: "Não informado" },
+            ...costCenters.map((costCenter) => ({
+              value: costCenter.id,
+              label: costCenter.code ? `${costCenter.code} - ${costCenter.name}` : costCenter.name,
+              searchText: `${costCenter.code ?? ""} ${costCenter.name}`,
+            })),
+          ]}
+        />
         <label className="grid gap-2 text-sm font-medium">
           Frequência
           <Select name="frequency" defaultValue={recurringEntry?.frequency ?? "monthly"}>

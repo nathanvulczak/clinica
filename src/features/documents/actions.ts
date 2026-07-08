@@ -29,6 +29,14 @@ const optionalDate = z
   .or(z.literal(""))
   .transform((value) => value || null);
 
+const optionalTitle = z
+  .string()
+  .trim()
+  .max(180, "Use um título com até 180 caracteres.")
+  .optional()
+  .or(z.literal(""))
+  .transform((value) => value || null);
+
 const templateTypeSchema = z.enum([
   "service_contract",
   "lgpd_consent",
@@ -57,7 +65,7 @@ const generatedDocumentSchema = z.object({
   encounter_id: optionalUuid,
   financial_entry_id: optionalUuid,
   professional_member_id: optionalUuid,
-  title: z.string().trim().min(3, "Informe o título do documento.").max(180),
+  title: optionalTitle,
   content: z.string().trim().min(40, "Revise o conteúdo antes de salvar.").max(40000),
   status: z.enum(["draft", "issued"]).optional().default("issued"),
   expires_at: optionalDate,
@@ -257,6 +265,16 @@ export async function createGeneratedDocumentAction(
     return { error: "Seu perfil não possui permissão para emitir documentos." };
   }
 
+  const admin = createSupabaseAdminClient();
+  const { data: template } = await admin
+    .from("document_templates")
+    .select("name")
+    .eq("id", parsed.data.template_id)
+    .eq("clinic_id", context.activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle<{ name: string }>();
+  const documentTitle = parsed.data.title || template?.name || "Documento emitido";
+
   const payload = {
     clinic_id: context.activeClinic.id,
     template_id: parsed.data.template_id,
@@ -265,7 +283,7 @@ export async function createGeneratedDocumentAction(
     encounter_id: parsed.data.encounter_id,
     financial_entry_id: parsed.data.financial_entry_id,
     professional_member_id: parsed.data.professional_member_id,
-    title: parsed.data.title,
+    title: documentTitle,
     content: parsed.data.content,
     status: parsed.data.status,
     expires_at: parsed.data.expires_at,
@@ -290,7 +308,7 @@ export async function createGeneratedDocumentAction(
       appointment_id: parsed.data.appointment_id,
       encounter_id: parsed.data.encounter_id,
       financial_entry_id: parsed.data.financial_entry_id,
-      title: parsed.data.title,
+      title: documentTitle,
       status: parsed.data.status,
     },
     level: parsed.data.patient_id ? "security" : "info",

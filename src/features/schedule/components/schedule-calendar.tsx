@@ -24,6 +24,8 @@ import {
   ChevronRight,
   Clock3,
   MapPin,
+  Maximize2,
+  Minimize2,
   PanelsTopLeft,
   SlidersHorizontal,
   UserRound,
@@ -341,9 +343,22 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
   const [selection, setSelection] = useState<CalendarSelection | null>(null);
   const [professionalsOpen, setProfessionalsOpen] = useState(false);
   const [draftProfessionalIds, setDraftProfessionalIds] = useState(props.panelProfessionalIds);
+  const [expanded, setExpanded] = useState(false);
   const previousDate = getAdjacentCalendarDate(props.date, props.view, -1);
   const nextDate = getAdjacentCalendarDate(props.date, props.view, 1);
   const today = getTodayInputDate();
+  const calendarHeight = expanded
+    ? "calc(100vh - 155px)"
+    : props.focusMode
+      ? "calc(100vh - 250px)"
+      : "auto";
+  const calendarContentHeight = expanded
+    ? "auto"
+    : props.focusMode
+      ? "auto"
+      : props.view === "month"
+        ? 690
+        : 760;
 
   useEffect(() => {
     if (searchParams.has("view")) {
@@ -469,7 +484,12 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
   }
 
   return (
-    <section className="grid gap-3">
+    <>
+    {expanded ? <div className="fixed inset-0 z-40 bg-background/70 backdrop-blur-sm" onClick={() => setExpanded(false)} /> : null}
+    <section className={cn(
+      "grid gap-3",
+      expanded && "fixed inset-3 z-50 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg border bg-background p-3 shadow-2xl",
+    )}>
       <header className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="icon" title="Período anterior" className="size-8">
@@ -485,6 +505,16 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={expanded ? "secondary" : "outline"}
+            className="h-8"
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {expanded ? <Minimize2 /> : <Maximize2 />}
+            {expanded ? "Recolher agenda" : "Expandir agenda"}
+          </Button>
           {props.view === "clinic" ? (
             <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => setProfessionalsOpen(true)}>
               <SlidersHorizontal />Profissionais ({props.panelProfessionalIds.length})
@@ -508,18 +538,20 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
       </header>
 
       {props.view === "clinic" ? (
-        <ClinicPanel
-          date={props.date}
-          appointments={props.appointments}
-          blocks={props.blocks}
-          professionals={props.professionals}
-          visibleIds={props.panelProfessionalIds}
-          scheduleSettings={props.scheduleSettings}
-          canManage={props.canManage}
-          onSelect={setSelection}
-        />
+        <div className={cn(expanded && "min-h-0 overflow-auto")}>
+          <ClinicPanel
+            date={props.date}
+            appointments={props.appointments}
+            blocks={props.blocks}
+            professionals={props.professionals}
+            visibleIds={props.panelProfessionalIds}
+            scheduleSettings={props.scheduleSettings}
+            canManage={props.canManage}
+            onSelect={setSelection}
+          />
+        </div>
       ) : (
-        <div className="schedule-fullcalendar overflow-hidden rounded-lg border bg-background p-2">
+        <div className={cn("schedule-fullcalendar overflow-hidden rounded-lg border bg-background p-2", expanded && "min-h-0")}>
           <FullCalendar
             key={`${props.view}:${props.date}:${props.professionalId}`}
             plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
@@ -559,8 +591,8 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
             slotEventOverlap={false}
             dayMaxEvents={4}
             navLinks
-            height={props.focusMode ? "calc(100vh - 250px)" : "auto"}
-            contentHeight={props.focusMode ? "auto" : props.view === "month" ? 690 : 760}
+            height={calendarHeight}
+            contentHeight={calendarContentHeight}
             expandRows
             stickyHeaderDates
             progressiveEventRendering
@@ -626,5 +658,6 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
         </ModalFooter>
       </Modal>
     </section>
+    </>
   );
 }

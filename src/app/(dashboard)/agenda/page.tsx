@@ -303,7 +303,7 @@ export default async function AgendaPage({
                 href={`/agenda?date=${date}&view=${view}&professional_id=${professionalId}&status=${status}${expandedOptions ? "" : "&options=expanded"}`}
               >
                 <ChevronDown className={expandedOptions ? "rotate-180 transition-transform" : "transition-transform"} />
-                {expandedOptions ? "Recolher opções" : "Expandir opções"}
+                {expandedOptions ? "Ocultar detalhes" : "Mostrar detalhes"}
               </Link>
             </Button>
           </div>
@@ -343,9 +343,6 @@ export default async function AgendaPage({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge className="border bg-background text-foreground">{activeClinic.trade_name}</Badge>
-                <Badge className="bg-primary/10 text-primary">
-                  {scheduleAccess.canManage ? "Visão ampla da clínica" : "Minha agenda"}
-                </Badge>
               </div>
               <div className="mt-4 grid gap-2 md:grid-cols-4">
                 {[
