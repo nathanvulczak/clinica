@@ -705,6 +705,23 @@ export async function moveCalendarAppointmentAction(input: unknown): Promise<Sch
     };
   }
 
+  await admin.from("appointment_workflow_events").insert({
+    clinic_id: activeClinic.id,
+    appointment_id: previous.id,
+    from_status: previous.status,
+    to_status: previous.status,
+    notes: `Agenda ajustada: ${parsed.data.reason}`,
+    metadata: {
+      movement_reason: parsed.data.reason,
+      previous_starts_at: previous.starts_at,
+      previous_ends_at: previous.ends_at,
+      starts_at: parsed.data.startsAt,
+      ends_at: parsed.data.endsAt,
+    },
+    created_by: user.id,
+    updated_by: user.id,
+  });
+
   await logAuditEvent({
     clinicId: activeClinic.id,
     userId: user.id,
@@ -713,8 +730,8 @@ export async function moveCalendarAppointmentAction(input: unknown): Promise<Sch
     recordTable: "appointments",
     recordId: previous.id,
     oldValues: { starts_at: previous.starts_at, ends_at: previous.ends_at },
-    newValues: updatePayload,
-    notes: "Horário alterado por arraste ou redimensionamento no calendário.",
+    newValues: { ...updatePayload, movement_reason: parsed.data.reason },
+    notes: parsed.data.reason,
   });
 
   revalidatePath("/agenda");

@@ -11,6 +11,7 @@ import {
   CircleDot,
   Clock3,
   Download,
+  Eye,
   FileSearch,
   FileText,
   FlaskConical,
@@ -39,7 +40,12 @@ import {
 } from "@/features/diagnostics/actions";
 import { getClinicalSpecialtyExperience, getClinicalSpecialtyLabel } from "@/config/clinical-specialties";
 import { formatCpf } from "@/lib/formatters";
-import type { DiagnosticItem, DiagnosticOrder, DiagnosticsWorkspace as WorkspaceData } from "@/repositories/diagnostics";
+import type {
+  DiagnosticAttachment,
+  DiagnosticItem,
+  DiagnosticOrder,
+  DiagnosticsWorkspace as WorkspaceData,
+} from "@/repositories/diagnostics";
 
 const inputClass = "h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const textareaClass = "min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -107,6 +113,68 @@ function dateTime(value?: string | null) {
 function formatSize(value: number) {
   if (value < 1024 * 1024) return `${Math.max(Math.round(value / 1024), 1)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function attachmentPreviewKind(attachment: DiagnosticAttachment) {
+  if (attachment.mime_type.startsWith("image/")) return "image";
+  if (attachment.mime_type === "application/pdf") return "pdf";
+  if (attachment.mime_type.startsWith("text/")) return "text";
+  return "download";
+}
+
+function ResultSparkline({
+  rows,
+}: {
+  rows: Array<{ value_numeric: number | null; flag: string; resulted_at: string }>;
+}) {
+  const numericRows = rows
+    .filter((row) => row.value_numeric !== null)
+    .sort((left, right) => new Date(left.resulted_at).getTime() - new Date(right.resulted_at).getTime());
+
+  if (numericRows.length < 2) {
+    return (
+      <div className="grid h-10 place-items-center rounded-md border bg-muted/20 text-[11px] text-muted-foreground">
+        Sem série numérica
+      </div>
+    );
+  }
+
+  const values = numericRows.map((row) => row.value_numeric ?? 0);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = Math.max(max - min, 1);
+  const points = numericRows
+    .map((row, index) => {
+      const x = numericRows.length === 1 ? 50 : (index / (numericRows.length - 1)) * 100;
+      const y = 34 - (((row.value_numeric ?? 0) - min) / spread) * 28;
+      return `${x},${y}`;
+    })
+    .join(" ");
+  const latest = numericRows.at(-1);
+
+  return (
+    <div className="rounded-md border bg-background px-2 py-1">
+      <svg viewBox="0 0 100 38" className="h-10 w-full" aria-hidden="true">
+        <polyline fill="none" stroke="currentColor" strokeWidth="2.5" points={points} className="text-primary" />
+        {numericRows.map((row, index) => {
+          const x = numericRows.length === 1 ? 50 : (index / (numericRows.length - 1)) * 100;
+          const y = 34 - (((row.value_numeric ?? 0) - min) / spread) * 28;
+          return (
+            <circle
+              key={`${row.resulted_at}-${index}`}
+              cx={x}
+              cy={y}
+              r={row.flag === "critical" ? 3.4 : 2.4}
+              className={row.flag === "critical" ? "fill-destructive" : "fill-primary"}
+            />
+          );
+        })}
+      </svg>
+      <p className="truncate text-[10px] text-muted-foreground">
+        {numericRows.length} ponto(s) · último {latest?.value_numeric}
+      </p>
+    </div>
+  );
 }
 
 function orderHasAnyResult(order: DiagnosticOrder) {
@@ -232,6 +300,64 @@ function AttachmentModal({ order, open, onOpenChange }: { order: DiagnosticOrder
   );
 }
 
+function AttachmentPreviewModal({
+  attachment,
+  open,
+  onOpenChange,
+}: {
+  attachment: DiagnosticAttachment;
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
+}) {
+  const kind = attachmentPreviewKind(attachment);
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      title={attachment.title}
+      description={`${attachmentTypeLabels[attachment.attachment_type] ?? "Arquivo"} · ${attachment.file_name} · ${formatSize(attachment.file_size)}`}
+      className="max-w-[min(1120px,calc(100vw-3rem))]"
+    >
+      <div className="grid gap-3">
+        {attachment.notes ? (
+          <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+            {attachment.notes}
+          </div>
+        ) : null}
+        {!attachment.signed_url ? (
+          <div className="grid h-72 place-items-center rounded-md border bg-muted/20 text-sm text-muted-foreground">
+            O link seguro deste arquivo expirou. Atualize a página para gerar uma nova visualização.
+          </div>
+        ) : kind === "image" ? (
+          <div className="grid max-h-[70vh] place-items-center overflow-auto rounded-md border bg-muted/10 p-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={attachment.signed_url} alt={attachment.title} className="max-h-[66vh] max-w-full rounded-md object-contain" />
+          </div>
+        ) : kind === "pdf" || kind === "text" ? (
+          <iframe
+            src={attachment.signed_url}
+            title={attachment.title}
+            className="h-[70vh] w-full rounded-md border bg-background"
+          />
+        ) : (
+          <div className="grid h-72 place-items-center rounded-md border bg-muted/20 text-center text-sm text-muted-foreground">
+            <div>
+              <p>Este tipo de arquivo não possui preview interno.</p>
+              <Button asChild className="mt-3" variant="outline">
+                <a href={attachment.signed_url} target="_blank" rel="noreferrer">
+                  <Download />
+                  Abrir arquivo
+                </a>
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function DeliveryButton({ order }: { order: DiagnosticOrder }) {
   const router = useRouter();
   const [state, action, pending] = useActionState(markDiagnosticOrderDeliveredAction, {});
@@ -253,6 +379,7 @@ function OrderTable({ orders, data }: { orders: DiagnosticOrder[]; data: Workspa
   const [selected, setSelected] = useState<{ order: DiagnosticOrder; item: DiagnosticItem } | null>(null);
   const [transitionOrder, setTransitionOrder] = useState<DiagnosticOrder | null>(null);
   const [attachmentOrder, setAttachmentOrder] = useState<DiagnosticOrder | null>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<DiagnosticAttachment | null>(null);
   const [state, action, pending] = useActionState(transitionDiagnosticOrderAction, {});
   const done = useCallback(() => { setTransitionOrder(null); router.refresh(); }, [router]);
   useActionToast(state, done);
@@ -269,7 +396,30 @@ function OrderTable({ orders, data }: { orders: DiagnosticOrder[]; data: Workspa
             <td className="px-3 py-2.5"><Badge className={statusClass(order.status)}>{statusLabels[order.status]}</Badge></td>
             <td className="px-3 py-2.5 text-xs text-muted-foreground">{order.request_delivered_at ? `Entregue em ${dateTime(order.request_delivered_at)}` : order.request_printed_at ? `Impresso em ${dateTime(order.request_printed_at)}` : "Ainda não entregue"}</td>
             <td className="px-3 py-2.5"><div className="flex max-w-[280px] flex-wrap gap-1">{order.items.slice(0, 4).map((item) => <button key={item.id} type="button" onClick={() => setSelected({ order, item })} disabled={!data.access.canEdit} className="rounded border bg-background px-2 py-1 text-[11px] hover:border-primary/50">{item.name}</button>)}{order.items.length > 4 ? <span className="px-1 py-1 text-[11px] text-muted-foreground">+{order.items.length - 4}</span> : null}</div></td>
-            <td className="px-3 py-2.5 text-xs">{latestAttachment ? <div><p className="font-medium">{latestAttachment.title}</p><p className="text-[11px] text-muted-foreground">{order.attachments.length} arquivo(s) · {formatSize(latestAttachment.file_size)}</p></div> : <span className="text-muted-foreground">Nenhum laudo anexado</span>}</td>
+            <td className="px-3 py-2.5 text-xs">
+              {latestAttachment ? (
+                <div className="grid gap-1.5">
+                  <div>
+                    <p className="font-medium">{latestAttachment.title}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {order.attachments.length} arquivo(s) · {formatSize(latestAttachment.file_size)}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-fit px-2 text-[11px]"
+                    onClick={() => setPreviewAttachment(latestAttachment)}
+                  >
+                    <Eye className="size-3.5" />
+                    Visualizar
+                  </Button>
+                </div>
+              ) : (
+                <span className="text-muted-foreground">Nenhum laudo anexado</span>
+              )}
+            </td>
             <td className="px-3 py-2.5 text-xs text-muted-foreground">{dateTime(order.completed_at || order.collected_at || order.created_at)}</td>
             <td className="sticky right-0 bg-card px-3 py-2.5"><div className="flex justify-end gap-1.5">
               <Button asChild size="sm" variant="outline"><a href={`/api/exames/${order.id}/solicitacao`} target="_blank" rel="noreferrer"><Download />Imprimir</a></Button>
@@ -284,6 +434,7 @@ function OrderTable({ orders, data }: { orders: DiagnosticOrder[]; data: Workspa
     </div>
     {selected ? <ResultModal order={selected.order} item={selected.item} open onOpenChange={(value) => !value && setSelected(null)} canApprove={data.access.canApprove || data.access.canManage} /> : null}
     {attachmentOrder ? <AttachmentModal order={attachmentOrder} open onOpenChange={(value) => !value && setAttachmentOrder(null)} /> : null}
+    {previewAttachment ? <AttachmentPreviewModal attachment={previewAttachment} open onOpenChange={(value) => !value && setPreviewAttachment(null)} /> : null}
     {transitionOrder ? <Modal open onOpenChange={(value) => !value && setTransitionOrder(null)} title="Atualizar etapa" description={`${transitionOrder.order_number} · alterações excepcionais exigem justificativa`} size="sm"><form action={action} className="grid gap-3"><input type="hidden" name="order_id" value={transitionOrder.id} /><label className="grid gap-1.5 text-xs font-medium">Nova etapa<select name="next_status" className={inputClass}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="grid gap-1.5 text-xs font-medium">Motivo, quando aplicável<textarea name="reason" className={textareaClass} /></label><ModalFooter><Button type="button" variant="outline" onClick={() => setTransitionOrder(null)}>Cancelar</Button><Button disabled={pending}>Confirmar alteração</Button></ModalFooter></form></Modal> : null}
   </>;
 }
@@ -325,7 +476,36 @@ function DiagnosticsComparisonPanel({ timeline }: { timeline: WorkspaceData["pat
           const latest = rows[0];
           const previous = rows[1];
           const delta = latest.value_numeric !== null && previous?.value_numeric !== null ? latest.value_numeric - previous.value_numeric : null;
-          return <article key={`${latest.patient_id}-${latest.exam_name}`} className="grid gap-3 px-4 py-3 lg:grid-cols-[1fr_170px_130px] lg:items-center"><div><p className="text-sm font-medium">{latest.exam_name}</p><p className="text-xs text-muted-foreground">{latest.patient_name} · {latest.order_number}</p></div><div className="text-xs"><p className="font-semibold tabular-nums">{latest.value_numeric !== null ? `${latest.value_numeric} ${latest.unit ?? ""}` : latest.value_text ?? "Resultado textual"}</p><p className="text-muted-foreground">{dateTime(latest.resulted_at)}</p></div><div className="text-right text-xs">{delta !== null ? <Badge className={Math.abs(delta) > 0 ? "bg-sky-500/10 text-sky-700" : "bg-muted text-muted-foreground"}>{delta > 0 ? "+" : ""}{delta.toFixed(2)}</Badge> : <span className="text-muted-foreground">{previous ? "Comparativo textual" : "Primeiro resultado"}</span>}</div></article>;
+          return (
+            <article
+              key={`${latest.patient_id}-${latest.exam_name}`}
+              className="grid gap-3 px-4 py-3 lg:grid-cols-[1fr_170px_210px_130px] lg:items-center"
+            >
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium">{latest.exam_name}</p>
+                  {latest.flag === "critical" ? <Badge className="bg-destructive/10 text-destructive">Crítico</Badge> : null}
+                </div>
+                <p className="text-xs text-muted-foreground">{latest.patient_name} · {latest.order_number}</p>
+              </div>
+              <div className="text-xs">
+                <p className="font-semibold tabular-nums">
+                  {latest.value_numeric !== null ? `${latest.value_numeric} ${latest.unit ?? ""}` : latest.value_text ?? "Resultado textual"}
+                </p>
+                <p className="text-muted-foreground">{dateTime(latest.resulted_at)}</p>
+              </div>
+              <ResultSparkline rows={rows} />
+              <div className="text-right text-xs">
+                {delta !== null ? (
+                  <Badge className={Math.abs(delta) > 0 ? "bg-sky-500/10 text-sky-700" : "bg-muted text-muted-foreground"}>
+                    {delta > 0 ? "+" : ""}{delta.toFixed(2)}
+                  </Badge>
+                ) : (
+                  <span className="text-muted-foreground">{previous ? "Comparativo textual" : "Primeiro resultado"}</span>
+                )}
+              </div>
+            </article>
+          );
         }) : <div className="px-4 py-8 text-center text-sm text-muted-foreground">Os comparativos aparecem conforme resultados forem lançados.</div>}
       </div>
     </section>

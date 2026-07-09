@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
@@ -29,6 +29,7 @@ import {
   Maximize2,
   Minimize2,
   PanelsTopLeft,
+  RefreshCw,
   SlidersHorizontal,
   UserRound,
 } from "lucide-react";
@@ -41,7 +42,7 @@ import {
   toInputDate,
   type CalendarViewMode,
 } from "@/features/schedule/calendar";
-import { formatTimeBr, getTodayInputDate } from "@/lib/dates";
+import { formatDateTimeBr, formatTimeBr, getTodayInputDate } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import type {
   AppointmentSummary,
@@ -66,6 +67,19 @@ type CalendarSelection = {
   startTime: string;
   duration: number;
   professionalId?: string;
+};
+
+type PendingMovement = {
+  appointmentId: string;
+  startsAt: string;
+  endsAt: string;
+  previousStartsAt: string;
+  previousEndsAt: string;
+  patientName: string;
+  professionalName: string;
+  roomName: string;
+  operation: "move" | "resize";
+  revert: () => void;
 };
 
 type ScheduleCalendarProps = {
@@ -297,6 +311,8 @@ function ClinicPanel({
   appointments,
   blocks,
   professionals,
+  rooms,
+  professionalProfiles,
   visibleIds,
   scheduleSettings,
   canManage,
@@ -306,6 +322,8 @@ function ClinicPanel({
   appointments: AppointmentSummary[];
   blocks: ScheduleBlock[];
   professionals: ScheduleProfessional[];
+  rooms: ClinicRoom[];
+  professionalProfiles: ProfessionalOperationalProfile[];
   visibleIds: string[];
   scheduleSettings: ScheduleSettings[];
   canManage: boolean;
@@ -330,12 +348,18 @@ function ClinicPanel({
         <div className="sticky left-0 z-20 border-b border-r bg-muted/80 px-2 py-2 text-xs font-medium text-muted-foreground">Hora</div>
         {dayProfessionals.map((professional) => {
           const count = appointments.filter((item) => item.professional_member_id === professional.id).length;
+          const profile = professionalProfiles.find((item) => item.professional_member_id === professional.id);
+          const defaultRoom = profile?.default_room_id
+            ? rooms.find((room) => room.id === profile.default_room_id)?.name
+            : null;
           return (
             <div key={professional.id} className="border-b border-r bg-muted/80 px-3 py-2 last:border-r-0">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate text-xs font-semibold">{professional.profile?.full_name ?? "Profissional"}</p>
-                  <p className="truncate text-[11px] text-muted-foreground">{count} compromisso(s)</p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {defaultRoom ? `${defaultRoom} · ` : ""}{count} compromisso(s)
+                  </p>
                 </div>
                 <Badge className="h-5 shrink-0 border bg-background px-1.5 text-[10px] text-foreground">{professional.role === "doctor" ? "Médico" : "Profissional"}</Badge>
               </div>
@@ -415,11 +439,13 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
-  const [, startTransition] = useTransition();
   const [selection, setSelection] = useState<CalendarSelection | null>(null);
   const [professionalsOpen, setProfessionalsOpen] = useState(false);
   const [draftProfessionalIds, setDraftProfessionalIds] = useState(props.panelProfessionalIds);
   const [expanded, setExpanded] = useState(false);
+  const [pendingMovement, setPendingMovement] = useState<PendingMovement | null>(null);
+  const [movementReason, setMovementReason] = useState("");
+  const [movementSaving, setMovementSaving] = useState(false);
   const previousDate = getAdjacentCalendarDate(props.date, props.view, -1);
   const nextDate = getAdjacentCalendarDate(props.date, props.view, 1);
   const today = getTodayInputDate();
@@ -523,20 +549,66 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
       });
       return;
     }
-    startTransition(async () => {
-      const result = await moveCalendarAppointmentAction({
-        appointmentId: arg.event.id,
-        startsAt: arg.event.start?.toISOString(),
-        endsAt: arg.event.end?.toISOString(),
-      });
-      if (result.error) arg.revert();
+    const appointment = props.appointments.find((item) => item.id === arg.event.id);
+    if (!appointment) {
+      arg.revert();
       toast({
-        title: result.success ?? "Ação não concluída",
-        description: result.error ?? "O novo horário foi validado e registrado na auditoria.",
-        variant: result.error ? "destructive" : "default",
+        title: "Movimentação bloqueada",
+        description: "Não foi possível identificar o compromisso na agenda atual.",
+        variant: "destructive",
       });
-      if (!result.error) router.refresh();
+      return;
+    }
+    setMovementReason("");
+    setPendingMovement({
+      appointmentId: appointment.id,
+      startsAt: arg.event.start.toISOString(),
+      endsAt: arg.event.end.toISOString(),
+      previousStartsAt: appointment.starts_at,
+      previousEndsAt: appointment.ends_at,
+      patientName: appointment.patient?.social_name || appointment.patient?.full_name || "Paciente",
+      professionalName: professionalName(props.professionals, appointment.professional_member_id),
+      roomName: appointment.room?.name ?? "Consultório a definir",
+      operation: "endDelta" in arg ? "resize" : "move",
+      revert: () => arg.revert(),
     });
+  }
+
+  function cancelPendingMovement() {
+    if (movementSaving) return;
+    pendingMovement?.revert();
+    setPendingMovement(null);
+    setMovementReason("");
+  }
+
+  async function confirmPendingMovement() {
+    if (!pendingMovement) return;
+    if (movementReason.trim().length < 3) {
+      toast({
+        title: "Informe o motivo",
+        description: "A agenda precisa de uma justificativa para registrar a movimentação.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const movement = pendingMovement;
+    setMovementSaving(true);
+    const result = await moveCalendarAppointmentAction({
+      appointmentId: movement.appointmentId,
+      startsAt: movement.startsAt,
+      endsAt: movement.endsAt,
+      reason: movementReason,
+    });
+    if (result.error) movement.revert();
+    toast({
+      title: result.success ?? "Ação não concluída",
+      description: result.error ?? "O novo horário foi validado, justificado e registrado na auditoria.",
+      variant: result.error ? "destructive" : "default",
+    });
+    setMovementSaving(false);
+    setPendingMovement(null);
+    setMovementReason("");
+    if (!result.error) router.refresh();
   }
 
   function movementAllowed(start: Date, end: Date, draggedId?: string, selectedProfessionalId?: string) {
@@ -635,6 +707,8 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
             appointments={props.appointments}
             blocks={props.blocks}
             professionals={props.professionals}
+            rooms={props.rooms}
+            professionalProfiles={props.professionalProfiles}
             visibleIds={props.panelProfessionalIds}
             scheduleSettings={props.scheduleSettings}
             canManage={props.canManage}
@@ -700,6 +774,64 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
         </p>
         <p className="flex items-center gap-1.5"><Check className="size-3.5 text-emerald-600" />Conflitos e alterações são validados no servidor.</p>
       </div>
+
+      <Modal
+        open={Boolean(pendingMovement)}
+        onOpenChange={(open) => {
+          if (!open) cancelPendingMovement();
+        }}
+        title={pendingMovement?.operation === "resize" ? "Confirmar ajuste de duração" : "Confirmar novo horário"}
+        description="A alteração será validada no servidor e ficará registrada no histórico operacional e na auditoria."
+        size="lg"
+      >
+        {pendingMovement ? (
+          <div className="grid gap-4">
+            <div className="grid gap-3 rounded-md border bg-muted/20 p-3 text-sm md:grid-cols-2">
+              <div>
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Paciente</p>
+                <p className="mt-1 font-medium">{pendingMovement.patientName}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Profissional</p>
+                <p className="mt-1 font-medium">{pendingMovement.professionalName}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Consultório</p>
+                <p className="mt-1 font-medium">{pendingMovement.roomName}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Novo horário</p>
+                <p className="mt-1 font-medium">
+                  {formatDateTimeBr(pendingMovement.startsAt)} até {formatTimeBr(pendingMovement.endsAt)}
+                </p>
+              </div>
+            </div>
+            <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+              Horário anterior: {formatDateTimeBr(pendingMovement.previousStartsAt)} até {formatTimeBr(pendingMovement.previousEndsAt)}
+            </div>
+            <label className="grid gap-2 text-sm font-medium">
+              Motivo da alteração
+              <textarea
+                value={movementReason}
+                onChange={(event) => setMovementReason(event.target.value)}
+                className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="Ex.: solicitação do paciente, ajuste de encaixe, atraso operacional"
+                disabled={movementSaving}
+                autoFocus
+              />
+            </label>
+            <ModalFooter>
+              <Button type="button" variant="outline" onClick={cancelPendingMovement} disabled={movementSaving}>
+                Cancelar
+              </Button>
+              <Button type="button" onClick={confirmPendingMovement} disabled={movementSaving || movementReason.trim().length < 3}>
+                {movementSaving ? <RefreshCw className="animate-spin" /> : <Check />}
+                {movementSaving ? "Validando..." : "Confirmar alteração"}
+              </Button>
+            </ModalFooter>
+          </div>
+        ) : null}
+      </Modal>
 
       <AppointmentModal
         professionals={props.professionals}

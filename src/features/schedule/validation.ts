@@ -34,6 +34,7 @@ export const moveCalendarAppointmentSchema = z
     appointmentId: z.string().uuid("Compromisso não identificado."),
     startsAt: z.string().datetime({ offset: true }),
     endsAt: z.string().datetime({ offset: true }),
+    reason: z.string().trim().min(3, "Informe o motivo da movimentação.").max(500),
   })
   .refine((data) => new Date(data.endsAt).getTime() > new Date(data.startsAt).getTime(), {
     message: "O fim do compromisso deve ser posterior ao início.",
