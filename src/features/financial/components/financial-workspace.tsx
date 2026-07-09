@@ -1231,6 +1231,13 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
         </div>
       </header>
 
+      <FinancialControlTower
+        data={data}
+        rows={rows}
+        pendingRows={pendingRows}
+        activeView={activeView}
+      />
+
       {showFilters ? <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3">
         <div>
           <p className="font-medium">Filtros rápidos</p>
@@ -1334,6 +1341,82 @@ function ReconciliationPanel({ data, activeView }: { data: FinancialWorkspaceDat
       <Modal open={Boolean(detailing)} onOpenChange={(open) => { if (!open) setDetailing(null); }} title="Detalhes da conciliação" description="Resumo somente para consulta. Nenhum dado pode ser alterado aqui." className="max-w-5xl">{detailing ? <ReconciliationDetail reconciliation={detailing} rows={rows.filter(({ payment }) => payment.reconciliation_id === detailing.id)} /> : null}</Modal>
       <Modal open={Boolean(reversing)} onOpenChange={(open) => { if (!open) setReversing(null); }} title="Reabrir conciliação" description="Use somente para correção auditada de movimentos já conferidos." className="max-w-lg">{reversing ? <ReverseReconciliationForm reconciliation={reversing} onCompleted={() => setReversing(null)} /> : null}</Modal>
     </div>
+  );
+}
+
+function FinancialControlTower({
+  data,
+  rows,
+  pendingRows,
+  activeView,
+}: {
+  data: FinancialWorkspaceData;
+  rows: MovementRow[];
+  pendingRows: MovementRow[];
+  activeView: FinancialSubsection;
+}) {
+  const divergences = data.bankImports.reduce(
+    (sum, batch) => sum + batch.items.filter((item) => item.status === "pending").length,
+    0,
+  );
+  const pendingImports = data.bankImports.filter((item) => item.status !== "completed").length;
+  const closedMonths = data.monthlyClosings.filter((item) => item.status === "closed").length;
+  const lastClosing = data.monthlyClosings[0] ?? null;
+  const approvedCommissions = data.commissions
+    .filter((item) => item.status === "approved" && !item.settlement_id)
+    .reduce((sum, item) => sum + item.commission_cents, 0);
+  const periodNet = rows.reduce(
+    (sum, row) => sum + (row.payment.direction === "in" ? row.payment.net_amount_cents : -row.payment.net_amount_cents),
+    0,
+  );
+  const reconciliationReadiness = pendingRows.length === 0
+    ? "Período limpo"
+    : `${pendingRows.length} pendência(s)`;
+  const activeLabel =
+    activeView === "imports"
+      ? "Foco em importação"
+      : activeView === "dre"
+        ? "Foco em resultado"
+        : activeView === "monthly-close"
+          ? "Foco em fechamento"
+          : activeView === "close-period"
+            ? "Foco em conferência"
+            : "Controle financeiro";
+
+  return (
+    <section className="grid gap-2 rounded-lg border bg-card/80 p-3 lg:grid-cols-[1.05fr_repeat(4,minmax(0,1fr))]">
+      <div className="rounded-md bg-primary/5 p-3">
+        <p className="text-[11px] font-semibold uppercase text-primary">Central financeira</p>
+        <p className="mt-1 text-sm font-semibold">{activeLabel}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          Conciliação, importação, DRE e fechamento trabalham juntos para proteger caixa, auditoria e competência.
+        </p>
+      </div>
+      <div className="rounded-md border bg-background p-3">
+        <p className="text-[11px] font-medium uppercase text-muted-foreground">Pronto para conciliar</p>
+        <p className="mt-1 text-sm font-semibold">{reconciliationReadiness}</p>
+        <p className="mt-1 text-xs text-muted-foreground">Movimentos confirmados sem fechamento.</p>
+      </div>
+      <div className="rounded-md border bg-background p-3">
+        <p className="text-[11px] font-medium uppercase text-muted-foreground">Importações</p>
+        <p className="mt-1 text-sm font-semibold">{pendingImports} em revisão</p>
+        <p className={divergences ? "mt-1 text-xs text-amber-700" : "mt-1 text-xs text-muted-foreground"}>
+          {divergences ? `${divergences} divergência(s) abertas` : "Sem divergências abertas"}
+        </p>
+      </div>
+      <div className="rounded-md border bg-background p-3">
+        <p className="text-[11px] font-medium uppercase text-muted-foreground">Competência</p>
+        <p className="mt-1 text-sm font-semibold">{lastClosing ? formatMonth(lastClosing.period_month) : "Sem fechamento"}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{closedMonths} período(s) protegido(s).</p>
+      </div>
+      <div className="rounded-md border bg-background p-3">
+        <p className="text-[11px] font-medium uppercase text-muted-foreground">Resultado filtrado</p>
+        <p className="mt-1 text-sm font-semibold tabular-nums">{formatCurrencyBRL(periodNet)}</p>
+        <p className={approvedCommissions ? "mt-1 text-xs text-amber-700" : "mt-1 text-xs text-muted-foreground"}>
+          {approvedCommissions ? `${formatCurrencyBRL(approvedCommissions)} em comissões aprovadas` : "Sem repasse aprovado pendente"}
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -2171,14 +2254,36 @@ function FinancialDrePanel({ data }: { data: FinancialWorkspaceData }) {
   const netRevenue = grossRevenue - deductions;
   const operatingExpenses = expenses.reduce((sum, entry) => sum + totalEntryCents(entry), 0);
   const result = netRevenue - operatingExpenses;
+  const receivedRevenue = revenues.reduce((sum, entry) => sum + entry.paid_cents, 0);
+  const paidExpenses = expenses.reduce((sum, entry) => sum + entry.paid_cents, 0);
+  const cashResult = receivedRevenue - paidExpenses;
+  const expenseRatio = netRevenue > 0 ? Math.round((operatingExpenses / netRevenue) * 100) : 0;
   const categoryMap = new Map(data.categories.map((item) => [item.id, item.name]));
   const categoryRows = [...new Map(entries.map((entry) => [entry.category_id ?? `${entry.entry_type}-uncategorized`, { id: entry.category_id ?? `${entry.entry_type}-uncategorized`, name: entry.category_id ? categoryMap.get(entry.category_id) ?? "Categoria" : "Sem categoria", direction: entry.entry_type, value: 0 }])).values()];
   for (const row of categoryRows) row.value = entries.filter((entry) => (entry.category_id ?? `${entry.entry_type}-uncategorized`) === row.id).reduce((sum, entry) => sum + totalEntryCents(entry), 0);
   const scale = Math.max(...categoryRows.map((item) => item.value), 1);
+  const topExpense = categoryRows
+    .filter((item) => item.direction === "payable")
+    .sort((a, b) => b.value - a.value)[0];
   return (
     <div className="grid gap-4">
       <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3"><div><p className="font-medium">Regime de competência</p><p className="text-sm text-muted-foreground">Resultado gerencial dos lançamentos com competência no período.</p></div><label className="flex items-center gap-2 text-sm font-medium">Competência<input type="month" value={month} onChange={(event) => setMonth(event.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm font-normal" /></label></section>
       <div className="grid gap-3 lg:grid-cols-4"><MetricCard label="Receita bruta" value={formatCurrencyBRL(grossRevenue)} description="Faturamento do período" /><MetricCard label="Deduções" value={formatCurrencyBRL(deductions)} description="Descontos concedidos" tone="warning" /><MetricCard label="Despesas operacionais" value={formatCurrencyBRL(operatingExpenses)} description="Custos e despesas lançados" /><MetricCard label="Resultado gerencial" value={formatCurrencyBRL(result)} description={result >= 0 ? "Superávit operacional" : "Déficit operacional"} tone={result >= 0 ? "success" : "warning"} /></div>
+      <section className="grid gap-3 rounded-lg border bg-card p-3 lg:grid-cols-4">
+        <InfoBox label="Realizado em caixa" value={formatCurrencyBRL(cashResult)} />
+        <InfoBox label="Receita recebida" value={formatCurrencyBRL(receivedRevenue)} />
+        <InfoBox label="Despesas pagas" value={formatCurrencyBRL(paidExpenses)} />
+        <InfoBox label="Peso das despesas" value={netRevenue > 0 ? `${expenseRatio}% da receita líquida` : "Sem receita líquida"} />
+        <div className="rounded-md border bg-muted/15 p-3 lg:col-span-4">
+          <p className="text-xs font-medium text-muted-foreground">Leitura gerencial</p>
+          <p className="mt-1 text-sm">
+            {result >= 0
+              ? `O período está positivo em ${formatCurrencyBRL(result)} no regime de competência.`
+              : `O período está negativo em ${formatCurrencyBRL(Math.abs(result))}; revise despesas, glosas e recebimentos em aberto.`}
+            {topExpense ? ` Maior grupo de despesa: ${topExpense.name} (${formatCurrencyBRL(topExpense.value)}).` : ""}
+          </p>
+        </div>
+      </section>
       <section className="rounded-lg border bg-card"><div className="border-b p-3.5"><p className="font-medium">Demonstração do resultado</p><p className="mt-1 text-sm text-muted-foreground">{formatMonth(`${month}-01`)} | valores por competência.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-[13px]"><tbody><tr className="border-b bg-muted/20"><td className="px-3 py-2.5 font-medium">Receita bruta</td><td className="px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(grossRevenue)}</td></tr><tr className="border-b"><td className="px-3 py-2.5 text-muted-foreground">(-) Deduções e descontos</td><td className="px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(-deductions)}</td></tr><tr className="border-b bg-emerald-500/5"><td className="px-3 py-2.5 font-medium">Receita líquida</td><td className="px-3 py-2.5 text-right font-medium tabular-nums">{formatCurrencyBRL(netRevenue)}</td></tr><tr className="border-b"><td className="px-3 py-2.5 text-muted-foreground">(-) Custos e despesas operacionais</td><td className="px-3 py-2.5 text-right tabular-nums">{formatCurrencyBRL(-operatingExpenses)}</td></tr><tr className={result >= 0 ? "bg-emerald-500/10" : "bg-amber-500/10"}><td className="px-3 py-3 font-semibold">Resultado do período</td><td className="px-3 py-3 text-right font-semibold tabular-nums">{formatCurrencyBRL(result)}</td></tr></tbody></table></div></section>
       <section className="rounded-lg border bg-card"><div className="border-b p-3.5"><p className="font-medium">Composição por categoria</p></div><div className="grid gap-3 p-4">{categoryRows.length ? categoryRows.sort((a, b) => b.value - a.value).map((row) => <div key={row.id} className="grid gap-1.5"><div className="flex items-center justify-between gap-3 text-[13px]"><span>{row.name}</span><span className="font-medium tabular-nums">{formatCurrencyBRL(row.value)}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className={row.direction === "receivable" ? "h-full bg-emerald-500" : "h-full bg-amber-500"} style={{ width: `${Math.max((row.value / scale) * 100, 2)}%` }} /></div></div>) : <p className="py-6 text-center text-sm text-muted-foreground">Nenhum lançamento para esta competência.</p>}</div></section>
     </div>
@@ -2526,6 +2631,8 @@ function CommissionsPanel({ data, activeView }: { data: FinancialWorkspaceData; 
         <MetricCard label="Produção recebida" value={formatCurrencyBRL(totalReceived)} description={`${rows.length} profissional(is)`} />
       </div>
 
+      <CommissionWorkflowGuide data={data} />
+
       {activeView === "rules" ? (
         <section className="rounded-lg border bg-card">
           <div className="border-b p-4"><p className="font-medium">Regras de comissão</p><p className="mt-1 text-sm text-muted-foreground">A regra mais específica por profissional e serviço tem prioridade.</p></div>
@@ -2549,6 +2656,53 @@ function CommissionsPanel({ data, activeView }: { data: FinancialWorkspaceData; 
       <Modal open={Boolean(statusCommission)} onOpenChange={(open) => { if (!open) setStatusTarget(null); }} title={statusTarget?.action === "approve" ? "Aprovar comissão" : "Cancelar comissão"} className="max-w-lg">{statusCommission && statusTarget ? <CommissionStatusForm commission={statusCommission} actionType={statusTarget.action} onCompleted={() => setStatusTarget(null)} /> : null}</Modal>
       <Modal open={Boolean(settlementTargetId)} onOpenChange={(open) => { if (!open) setSettlementTargetId(null); }} title="Programar acerto de comissão" description="Agrupe o período e gere uma conta a pagar rastreável para o profissional." className="max-w-2xl"><CommissionSettlementForm commission={settlementCommission} professionals={data.professionals} onCompleted={() => setSettlementTargetId(null)} /></Modal>
     </div>
+  );
+}
+
+function CommissionWorkflowGuide({ data }: { data: FinancialWorkspaceData }) {
+  const activeRules = data.commissionRules.filter((item) => item.active).length;
+  const pending = data.commissions.filter((item) => item.status === "pending");
+  const approved = data.commissions.filter((item) => item.status === "approved");
+  const scheduled = data.commissionSettlements.filter((item) => item.status === "scheduled" || item.status === "approved");
+  const paid = data.commissionSettlements.filter((item) => item.status === "paid");
+  const stages = [
+    {
+      label: "1. Regras",
+      value: `${activeRules} ativa(s)`,
+      detail: "Percentual ou valor fixo por profissional, serviço ou regra geral.",
+    },
+    {
+      label: "2. Cálculo",
+      value: `${pending.length} pendente(s)`,
+      detail: "Gera comissão a partir de produção financeira sem duplicar origem.",
+    },
+    {
+      label: "3. Aprovação",
+      value: `${approved.length} aprovada(s)`,
+      detail: "Aprovar valida o repasse antes de criar o acerto financeiro.",
+    },
+    {
+      label: "4. Acerto",
+      value: `${scheduled.length} programado(s)`,
+      detail: "Acerto gera contas a pagar rastreável para o profissional.",
+    },
+    {
+      label: "5. Pagamento",
+      value: `${paid.length} pago(s)`,
+      detail: "Baixa e recibo encerram o ciclo com trilha de auditoria.",
+    },
+  ];
+
+  return (
+    <section className="grid gap-2 rounded-lg border bg-card p-3 lg:grid-cols-5">
+      {stages.map((stage) => (
+        <div key={stage.label} className="rounded-md bg-muted/20 p-3">
+          <p className="text-[11px] font-semibold uppercase text-muted-foreground">{stage.label}</p>
+          <p className="mt-1 text-sm font-semibold">{stage.value}</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{stage.detail}</p>
+        </div>
+      ))}
+    </section>
   );
 }
 

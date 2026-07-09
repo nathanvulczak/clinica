@@ -31,6 +31,8 @@ import { MedicalAttachmentsPanel } from "@/features/medical-records/components/m
 import { MedicalTimelinePanel } from "@/features/medical-records/components/medical-timeline-panel";
 import { SpecialtyClinicalForm } from "@/features/medical-records/components/specialty-clinical-form";
 import { SpecialtyExperiencePanel } from "@/features/medical-records/components/specialty-experience-panel";
+import { getClinicalSpecialty, getClinicalSpecialtyExperience } from "@/config/clinical-specialties";
+import { getClinicalFormAnalytics } from "@/features/medical-records/clinical-form-analytics";
 import {
   openMedicalRecordCorrectionAction,
   saveMedicalRecordAction,
@@ -196,6 +198,140 @@ function NursingSummary({ detail }: { detail: MedicalRecordEncounterDetail }) {
   );
 }
 
+type DiagnosticSummary = Array<Pick<DiagnosticOrder, "id" | "order_number" | "category" | "priority" | "status" | "created_at" | "items">>;
+
+function ClinicalDecisionBrief({
+  detail,
+  clinicalFormWorkspace,
+  diagnosticSummary,
+}: {
+  detail: MedicalRecordEncounterDetail;
+  clinicalFormWorkspace: ClinicalFormWorkspace | null;
+  diagnosticSummary: DiagnosticSummary;
+}) {
+  const selectedTemplate = clinicalFormWorkspace?.instance
+    ? clinicalFormWorkspace.templates.find((template) => template.id === clinicalFormWorkspace.instance?.template_id)
+    : null;
+  const specialty = getClinicalSpecialty(selectedTemplate?.specialty_slug ?? detail.professional_profile?.specialty);
+  const experience = getClinicalSpecialtyExperience(specialty.slug);
+  const analytics = clinicalFormWorkspace?.instance
+    ? getClinicalFormAnalytics(
+        clinicalFormWorkspace.instance.template_snapshot,
+        clinicalFormWorkspace.instance.responses,
+      )
+    : null;
+  const assessment = detail.nursing_assessment;
+  const pendingExamItems = diagnosticSummary.flatMap((order) =>
+    order.items.filter((item) => !item.results.some((result) => result.status === "final")),
+  );
+  const alteredExamItems = diagnosticSummary.flatMap((order) =>
+    order.items.filter((item) => item.results.some((result) => result.flag && result.flag !== "normal")),
+  );
+  const riskSignals = [
+    assessment?.risk_level && !["low", "normal", "green"].includes(assessment.risk_level) ? `Risco da triagem: ${assessment.risk_level}` : null,
+    assessment?.pain_score && assessment.pain_score >= 7 ? `Dor intensa: ${assessment.pain_score}/10` : null,
+    assessment?.systolic_bp && assessment.systolic_bp >= 160 ? `PA sistólica elevada: ${assessment.systolic_bp}` : null,
+    assessment?.oxygen_saturation && assessment.oxygen_saturation < 94 ? `SpO2 reduzida: ${assessment.oxygen_saturation}%` : null,
+    detail.patient?.clinical_alerts ? "Paciente possui alerta clínico cadastrado" : null,
+    assessment?.allergies ? "Alergias registradas na Enfermagem" : null,
+  ].filter(Boolean) as string[];
+  const nextActions = [
+    analytics?.missingRequiredFields.length
+      ? `Completar ${analytics.missingRequiredFields.length} campo(s) obrigatório(s) do layout ${specialty.shortLabel}.`
+      : null,
+    alteredExamItems.length ? `Revisar ${alteredExamItems.length} resultado(s) alterado(s) antes de finalizar.` : null,
+    pendingExamItems.length ? `${pendingExamItems.length} exame(s) ainda pendente(s) de resultado final.` : null,
+    !detail.prescriptions.length ? `Considerar documento sugerido: ${experience.documentTemplates[0]?.title ?? "orientações ao paciente"}.` : null,
+  ].filter(Boolean) as string[];
+
+  return (
+    <section className="grid gap-3 rounded-lg border bg-card p-3.5 xl:grid-cols-[1.15fr_1fr_1fr]">
+      <div className="rounded-md border bg-muted/15 p-3">
+        <div className="flex items-center gap-2">
+          <Sparkles className="size-4 text-primary" />
+          <p className="text-xs font-semibold uppercase text-muted-foreground">Briefing da especialidade</p>
+        </div>
+        <p className="mt-2 text-sm font-semibold">{specialty.shortLabel}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{specialty.description}</p>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {experience.keyIndicators.slice(0, 5).map((indicator) => (
+            <span key={indicator} className="rounded-md border bg-background px-2 py-1 text-[11px] text-muted-foreground">{indicator}</span>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-md border bg-background p-3">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="size-4 text-amber-600" />
+          <p className="text-xs font-semibold uppercase text-muted-foreground">Riscos e pendências</p>
+        </div>
+        <div className="mt-2 grid gap-1.5">
+          {riskSignals.slice(0, 5).map((signal) => (
+            <span key={signal} className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">{signal}</span>
+          ))}
+          {!riskSignals.length ? <span className="text-xs text-muted-foreground">Nenhum alerta crítico identificado nos dados já registrados.</span> : null}
+        </div>
+      </div>
+      <div className="rounded-md border bg-background p-3">
+        <div className="flex items-center gap-2">
+          <ClipboardCheck className="size-4 text-primary" />
+          <p className="text-xs font-semibold uppercase text-muted-foreground">Próximas ações úteis</p>
+        </div>
+        <div className="mt-2 grid gap-1.5">
+          {nextActions.slice(0, 5).map((action) => (
+            <span key={action} className="rounded-md bg-primary/5 px-2.5 py-1.5 text-xs text-primary">{action}</span>
+          ))}
+          {!nextActions.length ? <span className="text-xs text-muted-foreground">Fluxo bem documentado para este atendimento.</span> : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function LongitudinalClinicalSnapshot({ detail }: { detail: MedicalRecordEncounterDetail }) {
+  const latestEvents = detail.timeline.slice(0, 4);
+  const completedCorrections = detail.correction_requests.filter((item) => item.status === "applied").length;
+  const activeAttachments = detail.attachments.filter((item) => item.status === "active").length;
+  const completedDocuments = detail.document_events.filter((item) => item.event_type !== "deleted").length;
+
+  return (
+    <section className="grid gap-3 rounded-lg border bg-card p-3.5 xl:grid-cols-[1fr_1.35fr]">
+      <div>
+        <p className="text-xs font-semibold uppercase text-muted-foreground">Histórico longitudinal</p>
+        <p className="mt-1 text-sm font-semibold">Visão rápida do paciente neste atendimento</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          <div className="rounded-md border bg-muted/15 p-2.5">
+            <p className="text-[11px] text-muted-foreground">Documentos</p>
+            <p className="text-sm font-semibold tabular-nums">{completedDocuments}</p>
+          </div>
+          <div className="rounded-md border bg-muted/15 p-2.5">
+            <p className="text-[11px] text-muted-foreground">Anexos</p>
+            <p className="text-sm font-semibold tabular-nums">{activeAttachments}</p>
+          </div>
+          <div className="rounded-md border bg-muted/15 p-2.5">
+            <p className="text-[11px] text-muted-foreground">Correções</p>
+            <p className="text-sm font-semibold tabular-nums">{completedCorrections}</p>
+          </div>
+        </div>
+      </div>
+      <div className="grid gap-2">
+        {latestEvents.length ? latestEvents.map((event) => (
+          <div key={event.id} className="grid grid-cols-[112px_1fr] gap-3 rounded-md border bg-background px-3 py-2 text-xs">
+            <span className="text-muted-foreground">{formatDate(event.occurred_at)}</span>
+            <div className="min-w-0">
+              <p className="truncate font-medium">{event.title}</p>
+              <p className="truncate text-muted-foreground">{event.description}</p>
+            </div>
+          </div>
+        )) : (
+          <p className="rounded-md border bg-background px-3 py-4 text-center text-xs text-muted-foreground">
+            A linha do tempo será formada conforme enfermagem, consulta, documentos, anexos e correções forem registrados.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function MedicalRecordForm({
   detail,
   preferences,
@@ -207,7 +343,7 @@ export function MedicalRecordForm({
   preferences: MedicalRecordPreferences;
   documentBranding: ClinicDocumentBranding;
   clinicalFormWorkspace: ClinicalFormWorkspace | null;
-  diagnosticSummary: Array<Pick<DiagnosticOrder, "id" | "order_number" | "category" | "priority" | "status" | "created_at" | "items">>;
+  diagnosticSummary: DiagnosticSummary;
 }) {
   const record = detail.medical_record;
   const requiredFields = new Set<MedicalRecordFieldKey>(preferences.required_fields);
@@ -335,6 +471,14 @@ export function MedicalRecordForm({
           </label>
         ) : null}
       </section>
+
+      <ClinicalDecisionBrief
+        detail={detail}
+        clinicalFormWorkspace={clinicalFormWorkspace}
+        diagnosticSummary={diagnosticSummary}
+      />
+
+      <LongitudinalClinicalSnapshot detail={detail} />
 
       <div className={`grid items-start gap-4 ${contextOpen ? "xl:grid-cols-[minmax(0,1fr)_420px]" : "xl:grid-cols-[minmax(0,1fr)_48px]"}`}>
         <form ref={formRef} action={formAction} className="grid min-w-0 gap-4">

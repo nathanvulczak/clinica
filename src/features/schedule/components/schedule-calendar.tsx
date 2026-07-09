@@ -18,8 +18,10 @@ import type {
   EventInput,
 } from "@fullcalendar/core";
 import {
+  AlertTriangle,
   CalendarRange,
   Check,
+  CalendarCheck,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -164,6 +166,24 @@ function intervalsOverlap(startA: Date, endA: Date, startB: string, endB: string
   return startA.getTime() < new Date(endB).getTime() && endA.getTime() > new Date(startB).getTime();
 }
 
+function countPotentialConflicts(appointments: AppointmentSummary[]) {
+  let conflicts = 0;
+  for (let index = 0; index < appointments.length; index += 1) {
+    const current = appointments[index];
+    if (["cancelled", "no_show", "rescheduled"].includes(current.status)) continue;
+    for (let nextIndex = index + 1; nextIndex < appointments.length; nextIndex += 1) {
+      const next = appointments[nextIndex];
+      if (["cancelled", "no_show", "rescheduled"].includes(next.status)) continue;
+      const sameProfessional = current.professional_member_id === next.professional_member_id;
+      const sameRoom = Boolean(current.room_id && current.room_id === next.room_id);
+      if ((sameProfessional || sameRoom) && intervalsOverlap(new Date(current.starts_at), new Date(current.ends_at), next.starts_at, next.ends_at)) {
+        conflicts += 1;
+      }
+    }
+  }
+  return conflicts;
+}
+
 function businessHoursFor(
   professionalId: string,
   settings: ScheduleSettings[],
@@ -212,6 +232,62 @@ function CalendarEventContent({ event, timeText, view }: EventContentArg) {
           </p>
         </>
       ) : null}
+    </div>
+  );
+}
+
+function ScheduleOperationalStrip({
+  appointments,
+  blocks,
+  professionals,
+}: {
+  appointments: AppointmentSummary[];
+  blocks: ScheduleBlock[];
+  professionals: ScheduleProfessional[];
+}) {
+  const activeAppointments = appointments.filter((appointment) => !["cancelled", "no_show", "rescheduled"].includes(appointment.status));
+  const checkedIn = appointments.filter((appointment) => appointment.status === "checked_in").length;
+  const confirmed = appointments.filter((appointment) => appointment.status === "confirmed").length;
+  const scheduled = appointments.filter((appointment) => appointment.status === "scheduled").length;
+  const conflicts = countPotentialConflicts(appointments);
+  const professionalsWithAgenda = new Set(activeAppointments.map((appointment) => appointment.professional_member_id)).size;
+  const nextAppointment = activeAppointments
+    .filter((appointment) => new Date(appointment.starts_at).getTime() >= Date.now())
+    .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())[0];
+
+  return (
+    <div className="grid gap-2 rounded-md border bg-card p-2.5 text-xs xl:grid-cols-[1.15fr_repeat(5,minmax(0,1fr))]">
+      <div className="flex min-w-0 items-center gap-2 rounded-md bg-muted/25 px-3 py-2">
+        <CalendarCheck className="size-4 text-primary" />
+        <div className="min-w-0">
+          <p className="font-semibold">Operação da agenda</p>
+          <p className="truncate text-muted-foreground">
+            {nextAppointment
+              ? `Próximo: ${formatTimeBr(nextAppointment.starts_at)} · ${nextAppointment.patient?.social_name || nextAppointment.patient?.full_name || "Paciente"}`
+              : "Sem próximos atendimentos visíveis"}
+          </p>
+        </div>
+      </div>
+      {[
+        { label: "Ativos", value: activeAppointments.length, hint: `${scheduled} agendado(s)` },
+        { label: "Confirmados", value: confirmed, hint: `${checkedIn} chegada(s)` },
+        { label: "Profissionais", value: professionalsWithAgenda, hint: `${professionals.length} no filtro` },
+        { label: "Bloqueios", value: blocks.length, hint: "expediente/ausências" },
+      ].map((item) => (
+        <div key={item.label} className="rounded-md border bg-background px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase text-muted-foreground">{item.label}</p>
+          <p className="mt-1 text-base font-semibold tabular-nums">{item.value}</p>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.hint}</p>
+        </div>
+      ))}
+      <div className={`rounded-md border px-3 py-2 ${conflicts ? "border-destructive/30 bg-destructive/5" : "bg-background"}`}>
+        <p className="flex items-center gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
+          {conflicts ? <AlertTriangle className="size-3 text-destructive" /> : <Check className="size-3 text-emerald-600" />}
+          Conflitos
+        </p>
+        <p className={conflicts ? "mt-1 text-base font-semibold text-destructive" : "mt-1 text-base font-semibold text-emerald-700"}>{conflicts}</p>
+        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">profissional/consultório</p>
+      </div>
     </div>
   );
 }
@@ -438,6 +514,15 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
       arg.revert();
       return;
     }
+    if (!movementAllowed(arg.event.start, arg.event.end, arg.event.id)) {
+      arg.revert();
+      toast({
+        title: "Movimentação bloqueada",
+        description: "O horário escolhido conflita com outro compromisso, consultório ou bloqueio da agenda.",
+        variant: "destructive",
+      });
+      return;
+    }
     startTransition(async () => {
       const result = await moveCalendarAppointmentAction({
         appointmentId: arg.event.id,
@@ -536,6 +621,12 @@ export function ScheduleCalendar(props: ScheduleCalendarProps) {
           </div>
         </div>
       </header>
+
+      <ScheduleOperationalStrip
+        appointments={props.appointments}
+        blocks={props.blocks}
+        professionals={props.professionals}
+      />
 
       {props.view === "clinic" ? (
         <div className={cn(expanded && "min-h-0 overflow-auto")}>

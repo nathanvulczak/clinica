@@ -319,6 +319,113 @@ function financialLabel(entry: DocumentFinancialOption) {
   return `${entry.description} · ${formatMoney(entry.amount_cents)} · venc. ${new Date(`${entry.due_date}T12:00:00`).toLocaleDateString("pt-BR")}`;
 }
 
+function stripDocumentHtml(value: string) {
+  return value
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replaceAll("&nbsp;", " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function remainingVariables(value: string) {
+  return [...new Set([...value.matchAll(/{{\s*([\w_]+)\s*}}/g)].map((match) => match[1]))];
+}
+
+function DocumentQualityAssistant({
+  title,
+  content,
+  selections,
+  selectedTemplate,
+}: {
+  title: string;
+  content: string;
+  selections: IssueSelections;
+  selectedTemplate?: DocumentTemplate;
+}) {
+  const textLength = stripDocumentHtml(content).length;
+  const variables = remainingVariables(content);
+  const linkedContexts = [
+    selections.patientId ? "paciente" : null,
+    selections.appointmentId ? "consulta" : null,
+    selections.professionalId ? "profissional" : null,
+    selections.financialId ? "financeiro" : null,
+  ].filter(Boolean);
+  const checks = [
+    {
+      label: "Título",
+      ok: title.trim().length >= 3,
+      detail: title.trim().length >= 3 ? "Identificado" : "Informe um título claro.",
+    },
+    {
+      label: "Conteúdo",
+      ok: textLength >= 40,
+      detail: `${textLength} caracteres úteis`,
+    },
+    {
+      label: "Variáveis",
+      ok: variables.length === 0,
+      detail: variables.length ? `${variables.length} campo(s) para revisar` : "Sem marcações pendentes",
+    },
+    {
+      label: "Contexto",
+      ok: linkedContexts.length > 0,
+      detail: linkedContexts.length ? linkedContexts.join(", ") : "Documento avulso",
+    },
+  ];
+
+  return (
+    <section className="grid gap-2 rounded-md border bg-muted/15 p-3 lg:grid-cols-[1fr_1.2fr]">
+      <div>
+        <p className="text-xs font-semibold uppercase text-muted-foreground">Assistente de emissão</p>
+        <p className="mt-1 text-sm font-semibold">{selectedTemplate?.name ?? "Modelo ainda não selecionado"}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          Confere requisitos essenciais antes de gerar número, PDF e trilha documental.
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {checks.map((check) => (
+          <div key={check.label} className="flex items-start gap-2 rounded-md border bg-background p-2">
+            <span className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-[10px] ${check.ok ? "bg-emerald-600 text-white" : "bg-amber-500/15 text-amber-700"}`}>
+              {check.ok ? <Check className="size-3" /> : "!"}
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-medium">{check.label}</p>
+              <p className="truncate text-[11px] text-muted-foreground" title={check.detail}>{check.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      {variables.length ? (
+        <p className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 lg:col-span-2">
+          Revise no editor: {variables.map((variable) => `{{${variable}}}`).join(", ")}.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function DocumentModelPlaybook() {
+  const cards = [
+    ["Contratos", "Serviços, pacotes, ciência financeira e regras de cancelamento."],
+    ["Consentimentos", "LGPD, procedimentos, riscos, benefícios e autorização do paciente."],
+    ["Clínicos", "Declarações, recibos, orientações, encaminhamentos e anexos de atendimento."],
+    ["Rastreabilidade", "Versão do modelo, emissão, impressão, cancelamento e responsável."],
+  ];
+
+  return (
+    <section className="grid gap-2 rounded-md border bg-card p-3 lg:grid-cols-4">
+      {cards.map(([title, description]) => (
+        <div key={title} className="rounded-md bg-muted/20 p-3">
+          <p className="text-sm font-semibold">{title}</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function IssueDocumentModal({
   open,
   onOpenChange,
@@ -554,6 +661,12 @@ function IssueDocumentModal({
               <Button type="button" variant="outline" size="sm" onClick={() => applyTemplate(selections)}><FileCheck2 /> Reaplicar modelo</Button>
             </div>
             <label className="grid gap-1.5 text-xs font-medium">Título<input value={title} onChange={(event) => setTitle(event.target.value)} className={inputClass} required /></label>
+            <DocumentQualityAssistant
+              title={title}
+              content={content}
+              selections={selections}
+              selectedTemplate={selectedTemplate}
+            />
             <RichDocumentEditor
               name="content_editor"
               value={content}
@@ -571,6 +684,12 @@ function IssueDocumentModal({
 
         {step === 3 ? (
           <div className="grid gap-4">
+            <DocumentQualityAssistant
+              title={title}
+              content={content}
+              selections={selections}
+              selectedTemplate={selectedTemplate}
+            />
             <div className="grid gap-2 rounded-md border bg-muted/15 p-3 text-xs lg:grid-cols-3">
               <div><span className="text-muted-foreground">Modelo</span><p className="mt-1 font-medium">{selectedTemplate?.name}</p></div>
               <div><span className="text-muted-foreground">Paciente</span><p className="mt-1 font-medium">{data.patients.find((item) => item.id === selections.patientId)?.full_name || "Sem vínculo"}</p></div>
@@ -742,6 +861,8 @@ export function DocumentsWorkspace({ data, section }: { data: DocumentsWorkspace
         <div className="flex items-center justify-between rounded-md border bg-card px-3 py-2.5"><div><p className="text-lg font-semibold tabular-nums">{draftCount}</p><p className="text-xs text-muted-foreground">Rascunhos</p></div><Pencil className="size-4 text-amber-600" /></div>
         <div className="flex items-center justify-between rounded-md border bg-card px-3 py-2.5"><div><p className="text-lg font-semibold tabular-nums">{data.generatedDocuments.length}</p><p className="text-xs text-muted-foreground">Histórico total</p></div><History className="size-4 text-primary" /></div>
       </section>
+
+      {section !== "history" ? <DocumentModelPlaybook /> : null}
 
       {section === "history" ? (
         <section className="overflow-hidden rounded-md border bg-card">

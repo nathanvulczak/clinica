@@ -247,6 +247,8 @@ export async function createGeneratedDocumentAction(
   _state: DocumentsActionState,
   formData: FormData,
 ): Promise<DocumentsActionState> {
+  const rawTitle = formData.get("title");
+  const normalizedTitle = typeof rawTitle === "string" ? rawTitle.trim().slice(0, 180) : "";
   const parsed = generatedDocumentSchema.safeParse({
     template_id: formData.get("template_id"),
     patient_id: formData.get("patient_id") || undefined,
@@ -254,7 +256,7 @@ export async function createGeneratedDocumentAction(
     encounter_id: formData.get("encounter_id") || undefined,
     financial_entry_id: formData.get("financial_entry_id") || undefined,
     professional_member_id: formData.get("professional_member_id") || undefined,
-    title: formData.get("title") ?? undefined,
+    title: normalizedTitle || undefined,
     content: formData.get("content") ?? "",
     page_settings: formData.get("page_settings")?.toString(),
     status: formData.get("document_intent") || formData.get("status"),
