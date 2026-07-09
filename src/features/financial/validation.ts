@@ -239,6 +239,8 @@ export const settleEntrySchema = z.object({
   payment_method_id: optionalUuid,
   card_machine_id: optionalUuid,
   amount: currencyString,
+  settlement_interest: optionalCurrencyString,
+  settlement_discount: optionalCurrencyString,
   paid_at: z.string().optional().transform((value) => value || new Date().toISOString()),
   notes: optionalText,
 });
@@ -260,6 +262,8 @@ export const settleEntryBatchSchema = z.object({
   account_id: optionalUuid,
   payment_method_id: optionalUuid,
   card_machine_id: optionalUuid,
+  settlement_interest: optionalCurrencyString,
+  settlement_discount: optionalCurrencyString,
   paid_at: z.string().optional().transform((value) => value || new Date().toISOString()),
   notes: optionalText,
 });

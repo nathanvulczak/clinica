@@ -123,10 +123,12 @@ function MoneyInput({
 }
 
 function CurrencyInput({
+  name,
   value,
   onChange,
   label,
 }: {
+  name?: string;
   value: string;
   onChange: (value: string) => void;
   label: string;
@@ -135,6 +137,7 @@ function CurrencyInput({
     <label className="grid gap-2 text-sm font-medium">
       {label}
       <input
+        name={name}
         value={value}
         onChange={(event) => onChange(formatCurrencyInput(event.target.value))}
         onBlur={() => {
@@ -1286,17 +1289,28 @@ export function SettleEntryForm({
 }) {
   const [state, action, pending] = useActionState(settleFinancialEntryAction, {});
   useActionToast(state, onCompleted);
+  const [amount, setAmount] = useState(centsToInput(entryOpenCents));
+  const [interest, setInterest] = useState("0,00");
+  const [discount, setDiscount] = useState("0,00");
+  const finalAmountCents = Math.max(inputToCents(amount) + inputToCents(interest) - inputToCents(discount), 0);
 
   return (
     <form action={action} className="grid gap-4">
       <input type="hidden" name="entry_id" value={entryId} />
       <div className="grid gap-4 lg:grid-cols-2">
-        <MoneyInput
+        <CurrencyInput
+          value={amount}
+          onChange={setAmount}
           name="amount"
-          label="Valor da baixa"
-          required
-          defaultValue={String((entryOpenCents / 100).toFixed(2)).replace(".", ",")}
+          label="Valor base da baixa"
         />
+        <div className="rounded-md border bg-muted/15 p-3 text-sm">
+          <p className="text-xs font-medium text-muted-foreground">Total efetivamente pago</p>
+          <p className="mt-1 text-base font-semibold tabular-nums">{formatCurrencyBRL(finalAmountCents)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Valor base + juros/multa - desconto.</p>
+        </div>
+        <CurrencyInput value={interest} onChange={setInterest} name="settlement_interest" label="Juros / multa na baixa" />
+        <CurrencyInput value={discount} onChange={setDiscount} name="settlement_discount" label="Desconto na baixa" />
         <Field name="paid_at" label="Data/hora" type="datetime-local" />
         <label className="grid gap-2 text-sm font-medium">
           Conta/caixa
@@ -1332,9 +1346,12 @@ export function SettleEntryForm({
           </Select>
         </label>
       </div>
+      <div className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+        Juros e descontos informados aqui atualizam o lançamento financeiro e entram nos relatórios/DRE. Movimentos conciliados continuam protegidos.
+      </div>
       <TextArea name="notes" label="Observações" />
       <div className="flex justify-end">
-        <Button disabled={pending}>
+        <Button disabled={pending || finalAmountCents <= 0}>
           <Save />
           {pending ? "Baixando..." : "Confirmar baixa"}
         </Button>
@@ -1359,6 +1376,9 @@ export function SettleEntriesBatchForm({
   const [state, action, pending] = useActionState(settleFinancialEntriesBatchAction, {});
   useActionToast(state, onCompleted);
   const total = entries.reduce((sum, entry) => sum + entry.open_cents, 0);
+  const [interest, setInterest] = useState("0,00");
+  const [discount, setDiscount] = useState("0,00");
+  const finalTotal = Math.max(total + inputToCents(interest) - inputToCents(discount), 0);
 
   return (
     <form action={action} className="grid gap-4">
@@ -1366,6 +1386,7 @@ export function SettleEntriesBatchForm({
       <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
         Você está baixando <strong className="text-foreground">{entries.length} conta(s)</strong>, totalizando{" "}
         <strong className="text-foreground">{formatCurrencyBRL(total)}</strong>. Cada baixa será auditada individualmente.
+        <span className="mt-1 block text-xs">Total ajustado para pagamento: <strong className="text-foreground">{formatCurrencyBRL(finalTotal)}</strong>.</span>
       </div>
       <div className="max-h-52 overflow-auto rounded-md border">
         {entries.map((entry) => (
@@ -1379,6 +1400,8 @@ export function SettleEntriesBatchForm({
         ))}
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
+        <CurrencyInput value={interest} onChange={setInterest} name="settlement_interest" label="Juros / multa total do lote" />
+        <CurrencyInput value={discount} onChange={setDiscount} name="settlement_discount" label="Desconto total do lote" />
         <Field name="paid_at" label="Data/hora da baixa" type="datetime-local" />
         <label className="grid gap-2 text-sm font-medium">
           Conta/caixa

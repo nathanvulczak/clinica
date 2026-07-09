@@ -75,6 +75,28 @@ function percentToBps(value: number) {
   return Math.round(value * 100);
 }
 
+function distributeCentsByWeight(totalCents: number, rows: Array<{ id: string; weight: number }>) {
+  const result = new Map<string, number>();
+  if (totalCents <= 0 || rows.length === 0) {
+    rows.forEach((row) => result.set(row.id, 0));
+    return result;
+  }
+  const totalWeight = rows.reduce((sum, row) => sum + row.weight, 0);
+  if (totalWeight <= 0) {
+    rows.forEach((row) => result.set(row.id, 0));
+    return result;
+  }
+  let distributed = 0;
+  rows.forEach((row, index) => {
+    const value = index === rows.length - 1
+      ? totalCents - distributed
+      : Math.floor((totalCents * row.weight) / totalWeight);
+    distributed += value;
+    result.set(row.id, value);
+  });
+  return result;
+}
+
 function parseFinancialEntryItems(raw: string | undefined) {
   let parsedJson: unknown;
   try {
@@ -1516,6 +1538,8 @@ export async function settleFinancialEntryAction(
     payment_method_id: formData.get("payment_method_id") || undefined,
     card_machine_id: formData.get("card_machine_id") || undefined,
     amount: formData.get("amount"),
+    settlement_interest: formData.get("settlement_interest"),
+    settlement_discount: formData.get("settlement_discount"),
     paid_at: formData.get("paid_at"),
     notes: formData.get("notes"),
   });
@@ -1542,8 +1566,20 @@ export async function settleFinancialEntryAction(
 
   const total = entry.amount_cents - entry.discount_cents + (entry.freight_cents ?? 0) + entry.addition_cents;
   const openAmount = Math.max(total - entry.paid_cents, 0);
-  const amount = parseCurrencyToCents(parsed.data.amount);
-  if (amount > openAmount) return { error: "O valor baixado não pode ultrapassar o saldo em aberto." };
+  const baseAmount = parseCurrencyToCents(parsed.data.amount);
+  const settlementInterest = parseCurrencyToCents(parsed.data.settlement_interest);
+  const settlementDiscount = parseCurrencyToCents(parsed.data.settlement_discount);
+  const amount = baseAmount + settlementInterest - settlementDiscount;
+  if (baseAmount > openAmount) {
+    return { error: "O valor baixado nao pode ultrapassar o saldo em aberto." };
+  }
+  if (amount <= 0) return { error: "O valor final da baixa precisa ser maior que zero." };
+  const nextDiscountCents = entry.discount_cents + settlementDiscount;
+  const nextAdditionCents = entry.addition_cents + settlementInterest;
+  const adjustedTotal = entry.amount_cents - nextDiscountCents + (entry.freight_cents ?? 0) + nextAdditionCents;
+  if (adjustedTotal < entry.paid_cents + amount) {
+    return { error: "Os ajustes da baixa ultrapassam o saldo do lancamento." };
+  }
 
   const payment = await createPayment({
     admin,
@@ -1561,10 +1597,16 @@ export async function settleFinancialEntryAction(
   if (payment.error) return { error: payment.error };
 
   const nextPaid = entry.paid_cents + amount;
-  const nextStatus = nextPaid >= total ? "paid" : "partial";
+  const nextStatus = nextPaid >= adjustedTotal ? "paid" : "partial";
   await admin
     .from("financial_entries")
-    .update({ paid_cents: nextPaid, status: nextStatus, updated_by: context.user.id })
+    .update({
+      discount_cents: nextDiscountCents,
+      addition_cents: nextAdditionCents,
+      paid_cents: nextPaid,
+      status: nextStatus,
+      updated_by: context.user.id,
+    })
     .eq("id", entry.id);
 
   if (entry.encounter_id && entry.entry_type === "receivable" && nextStatus === "paid") {
@@ -1620,7 +1662,13 @@ export async function settleFinancialEntryAction(
     recordTable: "financial_payments",
     recordId: payment.paymentId,
     oldValues: entry,
-    newValues: { amount_cents: amount, status: nextStatus },
+    newValues: {
+      amount_cents: amount,
+      base_amount_cents: baseAmount,
+      settlement_interest_cents: settlementInterest,
+      settlement_discount_cents: settlementDiscount,
+      status: nextStatus,
+    },
     level: "security",
     notes: "Baixa financeira registrada.",
   });
@@ -1631,8 +1679,15 @@ export async function settleFinancialEntryAction(
     entryId: entry.id,
     eventType: "settled",
     oldValues: entry,
-    newValues: { payment_id: payment.paymentId, amount_cents: amount, status: nextStatus },
-    notes: "Baixa financeira registrada.",
+    newValues: {
+      payment_id: payment.paymentId,
+      amount_cents: amount,
+      base_amount_cents: baseAmount,
+      settlement_interest_cents: settlementInterest,
+      settlement_discount_cents: settlementDiscount,
+      status: nextStatus,
+    },
+    notes: settlementInterest || settlementDiscount ? "Baixa financeira registrada com juros/desconto." : "Baixa financeira registrada.",
   });
 
   revalidateFinancial();
@@ -1648,6 +1703,8 @@ export async function settleFinancialEntriesBatchAction(
     account_id: formData.get("account_id") || undefined,
     payment_method_id: formData.get("payment_method_id") || undefined,
     card_machine_id: formData.get("card_machine_id") || undefined,
+    settlement_interest: formData.get("settlement_interest"),
+    settlement_discount: formData.get("settlement_discount"),
     paid_at: formData.get("paid_at"),
     notes: formData.get("notes"),
   });
@@ -1685,13 +1742,42 @@ export async function settleFinancialEntriesBatchAction(
     return { error: "Uma das contas selecionadas possui movimento conciliado. Reabra a conciliação antes de baixar em lote." };
   }
 
+  const payableRows = (entries as FinancialEntry[])
+    .filter((entry) => !["paid", "cancelled", "refunded"].includes(entry.status))
+    .map((entry) => {
+      const total = entry.amount_cents - entry.discount_cents + (entry.freight_cents ?? 0) + entry.addition_cents;
+      const openAmount = Math.max(total - entry.paid_cents, 0);
+      return { entry, openAmount };
+    })
+    .filter((row) => row.openAmount > 0);
+  const totalOpenAmount = payableRows.reduce((sum, row) => sum + row.openAmount, 0);
+  const settlementInterest = parseCurrencyToCents(parsed.data.settlement_interest);
+  const settlementDiscount = parseCurrencyToCents(parsed.data.settlement_discount);
+  if (totalOpenAmount + settlementInterest - settlementDiscount <= 0) {
+    return { error: "O valor final da baixa em lote precisa ser maior que zero." };
+  }
+  const interestShares = distributeCentsByWeight(
+    settlementInterest,
+    payableRows.map((row) => ({ id: row.entry.id, weight: row.openAmount })),
+  );
+  const discountShares = distributeCentsByWeight(
+    settlementDiscount,
+    payableRows.map((row) => ({ id: row.entry.id, weight: row.openAmount })),
+  );
+  if (payableRows.some((row) => row.openAmount + (interestShares.get(row.entry.id) ?? 0) - (discountShares.get(row.entry.id) ?? 0) <= 0)) {
+    return { error: "O desconto do lote zera uma das contas. Faça esta baixa individualmente para manter a auditoria clara." };
+  }
+
   let settledCount = 0;
   let totalSettled = 0;
-  for (const entry of entries as FinancialEntry[]) {
-    if (["paid", "cancelled", "refunded"].includes(entry.status)) continue;
-    const total = entry.amount_cents - entry.discount_cents + (entry.freight_cents ?? 0) + entry.addition_cents;
-    const openAmount = Math.max(total - entry.paid_cents, 0);
-    if (openAmount <= 0) continue;
+  for (const { entry, openAmount } of payableRows) {
+    const entryInterest = interestShares.get(entry.id) ?? 0;
+    const entryDiscount = discountShares.get(entry.id) ?? 0;
+    const amount = openAmount + entryInterest - entryDiscount;
+    if (amount <= 0) continue;
+    const nextDiscountCents = entry.discount_cents + entryDiscount;
+    const nextAdditionCents = entry.addition_cents + entryInterest;
+    const adjustedTotal = entry.amount_cents - nextDiscountCents + (entry.freight_cents ?? 0) + nextAdditionCents;
 
     const payment = await createPayment({
       admin,
@@ -1699,7 +1785,7 @@ export async function settleFinancialEntriesBatchAction(
       userId: context.user.id,
       entryId: entry.id,
       entryType: entry.entry_type,
-      amountCents: openAmount,
+      amountCents: amount,
       accountId: parsed.data.account_id,
       paymentMethodId: parsed.data.payment_method_id,
       cardMachineId: parsed.data.card_machine_id,
@@ -1710,7 +1796,13 @@ export async function settleFinancialEntriesBatchAction(
 
     await admin
       .from("financial_entries")
-      .update({ paid_cents: total, status: "paid", updated_by: context.user.id })
+      .update({
+        discount_cents: nextDiscountCents,
+        addition_cents: nextAdditionCents,
+        paid_cents: adjustedTotal,
+        status: "paid",
+        updated_by: context.user.id,
+      })
       .eq("id", entry.id);
 
     await logAuditEvent({
@@ -1721,7 +1813,14 @@ export async function settleFinancialEntriesBatchAction(
       recordTable: "financial_payments",
       recordId: payment.paymentId,
       oldValues: entry,
-      newValues: { amount_cents: openAmount, status: "paid", batch: true },
+      newValues: {
+        amount_cents: amount,
+        base_amount_cents: openAmount,
+        settlement_interest_cents: entryInterest,
+        settlement_discount_cents: entryDiscount,
+        status: "paid",
+        batch: true,
+      },
       level: "security",
       notes: "Baixa financeira em lote registrada.",
     });
@@ -1732,12 +1831,20 @@ export async function settleFinancialEntriesBatchAction(
       entryId: entry.id,
       eventType: "settled",
       oldValues: entry,
-      newValues: { payment_id: payment.paymentId, amount_cents: openAmount, status: "paid", batch: true },
-      notes: "Baixa financeira em lote registrada.",
+      newValues: {
+        payment_id: payment.paymentId,
+        amount_cents: amount,
+        base_amount_cents: openAmount,
+        settlement_interest_cents: entryInterest,
+        settlement_discount_cents: entryDiscount,
+        status: "paid",
+        batch: true,
+      },
+      notes: entryInterest || entryDiscount ? "Baixa financeira em lote registrada com juros/desconto." : "Baixa financeira em lote registrada.",
     });
 
     settledCount += 1;
-    totalSettled += openAmount;
+    totalSettled += amount;
   }
 
   if (!settledCount) return { error: "As contas selecionadas não possuem saldo em aberto para baixa." };

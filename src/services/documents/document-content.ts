@@ -51,7 +51,7 @@ export function sanitizeDocumentContent(value: string) {
   return sanitizeHtml(source, {
     allowedTags,
     allowedAttributes: {
-      "*": ["style", "align"],
+      "*": ["style", "align", "class", "data-doc-variable"],
       td: ["colspan", "rowspan", "style", "align"],
       th: ["colspan", "rowspan", "style", "align"],
     },

@@ -7,6 +7,7 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  Braces,
   IndentDecrease,
   IndentIncrease,
   Italic,
@@ -42,6 +43,12 @@ function editorHtml(value: string) {
     .join("");
 }
 
+export type DocumentEditorVariable = {
+  key: string;
+  label: string;
+  description?: string;
+};
+
 function ToolButton({
   label,
   command,
@@ -69,6 +76,10 @@ function ToolButton({
   );
 }
 
+function variableChipHtml(variable: DocumentEditorVariable) {
+  return `<span data-doc-variable="${escapeHtml(variable.key)}" contenteditable="false" class="document-variable-chip">{{${escapeHtml(variable.key)}}}</span>&nbsp;`;
+}
+
 export function RichDocumentEditor({
   value,
   onChange,
@@ -76,6 +87,7 @@ export function RichDocumentEditor({
   onSettingsChange,
   name = "content",
   minHeight = 560,
+  variables = [],
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -83,6 +95,7 @@ export function RichDocumentEditor({
   onSettingsChange: (settings: DocumentPageSettings) => void;
   name?: string;
   minHeight?: number;
+  variables?: DocumentEditorVariable[];
 }) {
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -98,6 +111,14 @@ export function RichDocumentEditor({
     settingValue: DocumentPageSettings[K],
   ) {
     onSettingsChange({ ...settings, [key]: settingValue });
+  }
+
+  function insertVariable(variable: DocumentEditorVariable) {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus();
+    document.execCommand("insertHTML", false, variableChipHtml(variable));
+    onChange(editor.innerHTML);
   }
 
   const pageWidth = settings.orientation === "portrait" ? 794 : 1123;
@@ -137,6 +158,29 @@ export function RichDocumentEditor({
           <option value="blockquote">Citação</option>
         </select>
       </div>
+
+      {variables.length ? (
+        <div className="grid gap-2 border-b bg-background px-3 py-2">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase text-muted-foreground">
+            <Braces className="size-3.5 text-primary" />
+            Variáveis disponíveis
+          </div>
+          <div className="flex max-h-20 flex-wrap gap-1.5 overflow-auto pr-1">
+            {variables.map((variable) => (
+              <button
+                key={variable.key}
+                type="button"
+                className="rounded-md border bg-muted/30 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
+                title={variable.description ?? variable.label}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => insertVariable(variable)}
+              >
+                {variable.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid border-b bg-card/80 px-3 py-2 lg:grid-cols-[repeat(4,minmax(82px,1fr))_130px_130px_140px] lg:items-end">
         {([
@@ -180,7 +224,7 @@ export function RichDocumentEditor({
 
       <div className="max-h-[66vh] overflow-auto p-4 lg:p-6">
         <div
-          className="document-editor-page selectable mx-auto bg-white text-slate-950 shadow-[0_8px_24px_rgb(15_23_42/0.08)] outline-none transition-[width,padding] duration-150"
+          className="document-editor-page selectable mx-auto bg-white text-slate-950 shadow-[0_8px_24px_rgb(15_23_42/0.08)] outline-none transition-[width,padding] duration-150 [&_[data-doc-variable]]:inline-flex [&_[data-doc-variable]]:rounded-md [&_[data-doc-variable]]:border [&_[data-doc-variable]]:border-primary/25 [&_[data-doc-variable]]:bg-primary/10 [&_[data-doc-variable]]:px-1.5 [&_[data-doc-variable]]:py-0.5 [&_[data-doc-variable]]:font-mono [&_[data-doc-variable]]:text-[0.9em] [&_[data-doc-variable]]:font-semibold [&_[data-doc-variable]]:text-primary"
           style={{
             width: `min(100%, ${pageWidth}px)`,
             minHeight: pageMinHeight,

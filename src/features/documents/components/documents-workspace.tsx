@@ -34,7 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalFooter, ModalSection } from "@/components/ui/modal";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useToast } from "@/components/ui/toast";
-import { RichDocumentEditor } from "@/features/documents/components/rich-document-editor";
+import { RichDocumentEditor, type DocumentEditorVariable } from "@/features/documents/components/rich-document-editor";
 import {
   DEFAULT_DOCUMENT_PAGE_SETTINGS,
   normalizeDocumentText,
@@ -69,6 +69,29 @@ const inputClass =
 const textareaClass =
   "w-full rounded-md border bg-background px-3 py-2 text-sm outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-ring";
 const pageSize = 10;
+
+const DOCUMENT_VARIABLES: DocumentEditorVariable[] = [
+  { key: "clinica_nome", label: "Clínica", description: "Nome fantasia ou razão social da clínica." },
+  { key: "clinica_razao_social", label: "Razão social", description: "Razão social da clínica." },
+  { key: "clinica_documento", label: "CNPJ/CPF clínica", description: "Documento da clínica formatado." },
+  { key: "clinica_contato", label: "Contato clínica", description: "Telefone e e-mail da clínica." },
+  { key: "clinica_cidade", label: "Cidade/UF", description: "Cidade e estado da clínica." },
+  { key: "paciente_nome", label: "Paciente", description: "Nome social ou nome completo do paciente." },
+  { key: "paciente_nome_civil", label: "Nome civil", description: "Nome civil do paciente." },
+  { key: "paciente_cpf", label: "CPF paciente", description: "CPF do paciente formatado." },
+  { key: "paciente_telefone", label: "Telefone paciente", description: "Telefone do paciente formatado." },
+  { key: "paciente_email", label: "E-mail paciente", description: "E-mail cadastrado do paciente." },
+  { key: "profissional_nome", label: "Profissional", description: "Nome do profissional responsável." },
+  { key: "profissional_registro", label: "Registro", description: "Conselho, número e UF do profissional." },
+  { key: "servico_nome", label: "Serviço", description: "Serviço ou procedimento da consulta." },
+  { key: "consulta_data", label: "Data consulta", description: "Data da consulta." },
+  { key: "consulta_hora", label: "Hora consulta", description: "Horário da consulta." },
+  { key: "valor", label: "Valor", description: "Valor do lançamento financeiro." },
+  { key: "valor_pago", label: "Valor pago", description: "Valor já pago no financeiro." },
+  { key: "vencimento", label: "Vencimento", description: "Vencimento do lançamento financeiro." },
+  { key: "cidade_data", label: "Cidade e data", description: "Cidade da clínica e data por extenso." },
+  { key: "data_emissao", label: "Data emissão", description: "Data atual de emissão." },
+];
 
 function toDocumentHtml(value: string) {
   const normalized = normalizeDocumentText(value);
@@ -241,6 +264,7 @@ function TemplateForm({
             onChange={setContent}
             settings={pageSettings}
             onSettingsChange={setPageSettings}
+            variables={DOCUMENT_VARIABLES}
           />
         </div>
       </ModalSection>
@@ -298,7 +322,11 @@ function replaceVariables(
     cidade_data: `${clinic?.city || "Local"}, ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })}`,
     data_emissao: new Date().toLocaleDateString("pt-BR"),
   };
-  return source.replace(/{{\s*([\w_]+)\s*}}/g, (match, key: string) => variables[key] || match);
+  const withVisualChipsResolved = source.replace(
+    /<span\b[^>]*data-doc-variable=["']([\w_]+)["'][^>]*>\s*{{\s*[\w_]+\s*}}\s*<\/span>/gi,
+    (match, key: string) => variables[key] || match,
+  );
+  return withVisualChipsResolved.replace(/{{\s*([\w_]+)\s*}}/g, (match, key: string) => variables[key] || match);
 }
 
 function patientLabel(patient: DocumentPatientOption) {
@@ -671,10 +699,11 @@ function IssueDocumentModal({
               name="content_editor"
               value={content}
               onChange={setContent}
-              settings={pageSettings}
-              onSettingsChange={setPageSettings}
-              minHeight={520}
-            />
+            settings={pageSettings}
+            onSettingsChange={setPageSettings}
+            minHeight={520}
+            variables={DOCUMENT_VARIABLES}
+          />
             <div className="grid gap-3 lg:grid-cols-2">
               <label className="grid gap-1.5 text-xs font-medium">Validade, se aplicável<input type="date" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} className={inputClass} /></label>
               <label className="grid gap-1.5 text-xs font-medium">Observação interna<input value={observations} onChange={(event) => setObservations(event.target.value)} className={inputClass} placeholder="Não aparece no corpo do documento" /></label>
