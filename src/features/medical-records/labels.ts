@@ -4,7 +4,7 @@ import type { MedicalPrescriptionStatus, MedicalRecordStatus } from "@/repositor
 
 export const MEDICAL_RECORD_STATUS_LABELS: Record<MedicalRecordStatus, string> = {
   draft: "Rascunho",
-  completed: "Concluido",
+  completed: "Concluído",
   corrected: "Corrigido",
 };
 
@@ -13,7 +13,7 @@ export const MEDICAL_DOCUMENT_STATUS_LABELS: Record<MedicalPrescriptionStatus, s
   issued: "Emitido",
   cancelled: "Cancelado",
   corrected: "Corrigido",
-  deleted: "Excluido",
+  deleted: "Excluído",
 };
 
 export const MEDICAL_DOCUMENT_EVENT_LABELS: Record<string, string> = {
@@ -21,22 +21,22 @@ export const MEDICAL_DOCUMENT_EVENT_LABELS: Record<string, string> = {
   updated: "Atualizado",
   printed: "Impresso",
   exported_pdf: "Exportado em PDF",
-  deleted: "Excluido",
+  deleted: "Excluído",
   restored: "Restaurado",
 };
 
 export function clinicalStatusLabel(status: string | null | undefined) {
-  if (!status) return "Inicio do fluxo";
+  if (!status) return "Início do fluxo";
   return CLINICAL_ENCOUNTER_STATUS_LABELS[status as ClinicalEncounterStatus] ?? status;
 }
 
 export function medicalRecordStatusLabel(status: string | null | undefined) {
-  if (!status) return "Nao informado";
+  if (!status) return "Não informado";
   return MEDICAL_RECORD_STATUS_LABELS[status as MedicalRecordStatus] ?? status;
 }
 
 export function medicalDocumentStatusLabel(status: string | null | undefined) {
-  if (!status) return "Nao informado";
+  if (!status) return "Não informado";
   return MEDICAL_DOCUMENT_STATUS_LABELS[status as MedicalPrescriptionStatus] ?? status;
 }
 

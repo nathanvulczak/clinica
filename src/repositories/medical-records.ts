@@ -4,6 +4,12 @@ import {
   isMedicalRecordFieldKey,
   type MedicalRecordFieldKey,
 } from "@/features/medical-records/config";
+import { getClinicalSpecialtyLabel } from "@/config/clinical-specialties";
+import { getClinicalFormAnalytics } from "@/features/medical-records/clinical-form-analytics";
+import {
+  parseClinicalFormDefinition,
+  type ClinicalFormResponses,
+} from "@/features/medical-records/clinical-form-schema";
 import {
   clinicalStatusLabel,
   medicalDocumentEventLabel,
@@ -220,9 +226,22 @@ export type MedicalRecordReports = {
   draftRecords: number;
   issuedDocuments: number;
   deletedDocuments: number;
+  recordsWithSpecialtyForm: number;
+  recordsWithDiagnostics: number;
+  correctionRequests: number;
+  averageFormCompletion: number;
   recordsByStatus: Array<{ status: string; count: number }>;
   recordsByProfessional: Array<{ professional: string; count: number }>;
   recordsBySpecialty: Array<{ specialty: string; count: number }>;
+  specialtyPerformance: Array<{
+    specialty: string;
+    records: number;
+    completed: number;
+    diagnostics: number;
+    documents: number;
+    averageFormCompletion: number;
+  }>;
+  documentsByStatus: Array<{ status: string; count: number }>;
 };
 
 export type PatientMedicalOverview = {
@@ -709,40 +728,126 @@ export async function getMedicalRecordReports(
   const admin = createSupabaseAdminClient();
   let documentQuery = admin
     .from("medical_prescriptions")
-    .select("id, status")
+    .select("id, status, professional_member_id")
     .eq("clinic_id", clinicId);
 
   if (!access.canViewAll && access.currentMemberId) {
     documentQuery = documentQuery.eq("professional_member_id", access.currentMemberId);
   }
 
-  let specialtyQuery = admin
+  let formQuery = admin
     .from("clinical_form_instances")
-    .select("professional_member_id, template:clinical_form_templates(name)")
+    .select("id, medical_record_id, professional_member_id, template_snapshot, responses")
     .eq("clinic_id", clinicId)
     .eq("is_current", true)
     .is("deleted_at", null);
   if (!access.canViewAll && access.currentMemberId) {
-    specialtyQuery = specialtyQuery.eq("professional_member_id", access.currentMemberId);
+    formQuery = formQuery.eq("professional_member_id", access.currentMemberId);
   }
 
-  const [{ data: documents }, { data: specialtyInstances }] = await Promise.all([
+  let diagnosticsQuery = admin
+    .from("diagnostic_orders")
+    .select("id, professional_member_id")
+    .eq("clinic_id", clinicId)
+    .is("deleted_at", null);
+  if (!access.canViewAll && access.currentMemberId) {
+    diagnosticsQuery = diagnosticsQuery.eq("professional_member_id", access.currentMemberId);
+  }
+
+  let correctionsQuery = admin
+    .from("medical_record_correction_requests")
+    .select("id, professional_member_id")
+    .eq("clinic_id", clinicId);
+  if (!access.canViewAll && access.currentMemberId) {
+    correctionsQuery = correctionsQuery.eq("professional_member_id", access.currentMemberId);
+  }
+
+  const professionalIds = [...new Set(records.map((record) => record.professional_member_id))];
+  const profilesQuery = professionalIds.length
+    ? admin
+        .from("clinic_professional_profiles")
+        .select("professional_member_id, specialty")
+        .eq("clinic_id", clinicId)
+        .in("professional_member_id", professionalIds)
+        .is("deleted_at", null)
+    : Promise.resolve({ data: [] });
+
+  const [
+    { data: documents },
+    { data: formInstances },
+    { data: diagnostics },
+    { data: corrections },
+    { data: professionalProfiles },
+  ] = await Promise.all([
     documentQuery,
-    specialtyQuery,
+    formQuery,
+    diagnosticsQuery,
+    correctionsQuery,
+    profilesQuery,
   ]);
   const statusMap = new Map<string, number>();
   const professionalMap = new Map<string, number>();
-  const specialtyMap = new Map<string, number>();
+  const documentStatusMap = new Map<string, number>();
+  const professionalSpecialtyMap = new Map(
+    ((professionalProfiles ?? []) as Array<{ professional_member_id: string; specialty: string | null }>).map(
+      (profile) => [profile.professional_member_id, profile.specialty],
+    ),
+  );
+  const specialtyPerformanceMap = new Map<string, {
+    records: number;
+    completed: number;
+    diagnostics: number;
+    documents: number;
+    completionValues: number[];
+  }>();
+
+  function specialtyForProfessional(professionalMemberId: string | null | undefined) {
+    const rawSpecialty = professionalMemberId ? professionalSpecialtyMap.get(professionalMemberId) : null;
+    return rawSpecialty ? getClinicalSpecialtyLabel(rawSpecialty) : "Sem especialidade informada";
+  }
+
+  function ensureSpecialtyPerformance(specialty: string) {
+    const current = specialtyPerformanceMap.get(specialty);
+    if (current) return current;
+    const created = { records: 0, completed: 0, diagnostics: 0, documents: 0, completionValues: [] };
+    specialtyPerformanceMap.set(specialty, created);
+    return created;
+  }
 
   for (const record of records) {
     statusMap.set(record.status, (statusMap.get(record.status) ?? 0) + 1);
     const professional = record.professional?.profile?.full_name ?? "Profissional";
     professionalMap.set(professional, (professionalMap.get(professional) ?? 0) + 1);
+    const specialty = specialtyForProfessional(record.professional_member_id);
+    const performance = ensureSpecialtyPerformance(specialty);
+    performance.records += 1;
+    if (record.status === "completed") performance.completed += 1;
   }
-  for (const instance of specialtyInstances ?? []) {
-    const template = instance.template as unknown as { name?: string } | null;
-    const specialty = template?.name ?? "Sem layout definido";
-    specialtyMap.set(specialty, (specialtyMap.get(specialty) ?? 0) + 1);
+
+  for (const document of (documents ?? []) as Array<{ status: string; professional_member_id?: string | null }>) {
+    documentStatusMap.set(document.status, (documentStatusMap.get(document.status) ?? 0) + 1);
+    const specialty = specialtyForProfessional(document.professional_member_id);
+    ensureSpecialtyPerformance(specialty).documents += 1;
+  }
+
+  for (const diagnostic of (diagnostics ?? []) as Array<{ professional_member_id?: string | null }>) {
+    const specialty = specialtyForProfessional(diagnostic.professional_member_id);
+    ensureSpecialtyPerformance(specialty).diagnostics += 1;
+  }
+
+  const formCompletionValues: number[] = [];
+  for (const instance of (formInstances ?? []) as Array<{
+    professional_member_id: string;
+    template_snapshot: unknown;
+    responses: unknown;
+  }>) {
+    const definition = parseClinicalFormDefinition(instance.template_snapshot);
+    const responses = instance.responses && typeof instance.responses === "object" && !Array.isArray(instance.responses)
+      ? (instance.responses as ClinicalFormResponses)
+      : {};
+    const completion = getClinicalFormAnalytics(definition, responses).completion;
+    formCompletionValues.push(completion);
+    ensureSpecialtyPerformance(specialtyForProfessional(instance.professional_member_id)).completionValues.push(completion);
   }
 
   return {
@@ -751,12 +856,32 @@ export async function getMedicalRecordReports(
     draftRecords: records.filter((record) => record.status === "draft").length,
     issuedDocuments: (documents ?? []).filter((doc) => doc.status === "issued").length,
     deletedDocuments: (documents ?? []).filter((doc) => doc.status === "deleted").length,
+    recordsWithSpecialtyForm: (formInstances ?? []).length,
+    recordsWithDiagnostics: (diagnostics ?? []).length,
+    correctionRequests: (corrections ?? []).length,
+    averageFormCompletion: formCompletionValues.length
+      ? Math.round(formCompletionValues.reduce((sum, value) => sum + value, 0) / formCompletionValues.length)
+      : 0,
     recordsByStatus: [...statusMap.entries()].map(([status, count]) => ({ status, count })),
     recordsByProfessional: [...professionalMap.entries()].map(([professional, count]) => ({
       professional,
       count,
     })),
-    recordsBySpecialty: [...specialtyMap.entries()].map(([specialty, count]) => ({ specialty, count })),
+    recordsBySpecialty: [...specialtyPerformanceMap.entries()].map(([specialty, entry]) => ({
+      specialty,
+      count: entry.records,
+    })),
+    specialtyPerformance: [...specialtyPerformanceMap.entries()].map(([specialty, entry]) => ({
+      specialty,
+      records: entry.records,
+      completed: entry.completed,
+      diagnostics: entry.diagnostics,
+      documents: entry.documents,
+      averageFormCompletion: entry.completionValues.length
+        ? Math.round(entry.completionValues.reduce((sum, value) => sum + value, 0) / entry.completionValues.length)
+        : 0,
+    })),
+    documentsByStatus: [...documentStatusMap.entries()].map(([status, count]) => ({ status, count })),
   };
 }
 
@@ -767,9 +892,15 @@ function emptyReports(): MedicalRecordReports {
     draftRecords: 0,
     issuedDocuments: 0,
     deletedDocuments: 0,
+    recordsWithSpecialtyForm: 0,
+    recordsWithDiagnostics: 0,
+    correctionRequests: 0,
+    averageFormCompletion: 0,
     recordsByStatus: [],
     recordsByProfessional: [],
     recordsBySpecialty: [],
+    specialtyPerformance: [],
+    documentsByStatus: [],
   };
 }
 

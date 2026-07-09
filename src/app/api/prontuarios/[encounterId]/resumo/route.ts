@@ -5,11 +5,20 @@ import {
   medicalDocumentStatusLabel,
   medicalRecordStatusLabel,
 } from "@/features/medical-records/labels";
+import {
+  getClinicalSpecialty,
+  getClinicalSpecialtyExperience,
+} from "@/config/clinical-specialties";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getMedicalRecordEncounterDetail } from "@/repositories/medical-records";
 import { getEncounterClinicalFormWorkspace } from "@/repositories/clinical-forms";
 import { getEncounterDiagnosticSummary } from "@/repositories/diagnostics";
 import type { ClinicalFormField, ClinicalFormResponseValue } from "@/features/medical-records/clinical-form-schema";
+import {
+  formatClinicalResponseValue,
+  getClinicalFormAnalytics,
+  summarizeClinicalMetadata,
+} from "@/features/medical-records/clinical-form-analytics";
 import { logAuditEvent } from "@/services/audit/audit-service";
 import {
   clinicDocumentCss,
@@ -46,13 +55,25 @@ function clinicalList(items: Array<string | null | undefined>) {
 }
 
 function clinicalResponse(field: ClinicalFormField, value: ClinicalFormResponseValue | undefined) {
-  if (value === null || value === undefined || value === "" || (Array.isArray(value) && !value.length)) return "Não informado";
-  if (typeof value === "boolean") return value ? "Sim" : "Não";
-  if (Array.isArray(value)) {
-    return value.map((item) => field.options?.find((option) => option.value === item)?.label ?? item).join(", ");
-  }
-  const display = field.options?.find((option) => option.value === String(value))?.label ?? String(value);
-  return field.unit ? `${display} ${field.unit}` : display;
+  return formatClinicalResponseValue(field, value);
+}
+
+function htmlList(items: string[]) {
+  return items.length
+    ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+    : '<p class="muted">Não informado.</p>';
+}
+
+function visualMapSummary(value: ClinicalFormResponseValue | undefined) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const maps = value as Record<string, ClinicalFormResponseValue>;
+  const rows = Object.entries(maps).flatMap(([specialtySlug, mapValue]) => {
+    const summary = summarizeClinicalMetadata(mapValue);
+    return summary && summary !== "Mapa sem marcações"
+      ? [`<article class="item"><strong>${escapeHtml(specialtySlug.replaceAll("_", " "))}</strong><span>${escapeHtml(summary)}</span></article>`]
+      : [];
+  });
+  return rows.join("");
 }
 
 export async function GET(
@@ -189,6 +210,17 @@ export async function GET(
   const specialtyTemplate = clinicalFormWorkspace?.instance
     ? clinicalFormWorkspace.templates.find((template) => template.id === clinicalFormWorkspace.instance?.template_id)
     : null;
+  const specialty = getClinicalSpecialty(specialtyTemplate?.specialty_slug ?? detail.professional_profile?.specialty);
+  const specialtyExperience = getClinicalSpecialtyExperience(specialty.slug);
+  const formAnalytics = clinicalFormWorkspace?.instance
+    ? getClinicalFormAnalytics(
+        clinicalFormWorkspace.instance.template_snapshot,
+        clinicalFormWorkspace.instance.responses,
+      )
+    : null;
+  const visualMap = clinicalFormWorkspace?.instance
+    ? visualMapSummary(clinicalFormWorkspace.instance.responses._visual_maps)
+    : "";
   const specialtySections = clinicalFormWorkspace?.instance
     ? clinicalFormWorkspace.instance.template_snapshot.sections.map((section) => {
         const rows = section.fields.map((field) => `
@@ -277,6 +309,12 @@ export async function GET(
       .clinical-section { break-inside: avoid; }
       .signature { display:grid; grid-template-columns:1fr 1fr; gap:36px; margin-top:34px; }
       .signature div { border-top:1px solid #64748b; padding-top:5px; text-align:center; color:#475569; font-size:9px; }
+      .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; border-top:1px solid #dbe3e1; border-left:1px solid #dbe3e1; }
+      .metric { border-right:1px solid #dbe3e1; border-bottom:1px solid #dbe3e1; padding:7px 9px; }
+      .metric span { display:block; color:#64748b; font-size:8px; text-transform:uppercase; }
+      .metric strong { display:block; margin-top:2px; font-size:13px; }
+      .two-columns { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+      .quiet-panel { border:1px solid #dbe3e1; background:#f8faf9; padding:8px 10px; }
       @media print {
         body { background: white; }
         .toolbar { display: none; }
@@ -317,6 +355,24 @@ export async function GET(
 
       <h2>Alertas e contexto</h2>
       ${paragraph(detail.patient?.clinical_alerts, "Sem alertas clinicos cadastrados.")}
+
+      <section class="clinical-section"><h2>Especialidade e qualidade do registro</h2>
+      <div class="metric-grid">
+        <div class="metric"><span>Especialidade</span><strong>${escapeHtml(specialty.shortLabel)}</strong></div>
+        <div class="metric"><span>Conselho sugerido</span><strong>${escapeHtml(specialty.suggestedCouncil)}</strong></div>
+        <div class="metric"><span>Cobertura</span><strong>${escapeHtml(formAnalytics ? `${formAnalytics.completion}%` : "Sem formulário")}</strong></div>
+        <div class="metric"><span>Alertas</span><strong>${escapeHtml(formAnalytics ? String(formAnalytics.alertFields.length) : "0")}</strong></div>
+      </div>
+      <div class="two-columns" style="margin-top:8px">
+        <div class="quiet-panel"><h3>Fluxo recomendado</h3>${htmlList(specialtyExperience.workflowSteps)}</div>
+        <div class="quiet-panel"><h3>Indicadores clínicos</h3>${htmlList(specialtyExperience.keyIndicators)}</div>
+      </div>
+      <div class="two-columns" style="margin-top:8px">
+        <div class="quiet-panel"><h3>Exames frequentes</h3>${htmlList(specialtyExperience.suggestedExams)}</div>
+        <div class="quiet-panel"><h3>Cuidados de preenchimento</h3>${htmlList(specialtyExperience.deduplicationHints)}</div>
+      </div>
+      ${formAnalytics?.missingRequiredFields.length ? `<h3>Campos obrigatórios pendentes no momento da emissão</h3>${htmlList(formAnalytics.missingRequiredFields.map((field) => field.label))}` : ""}
+      ${visualMap ? `<h3>Resumo do mapa visual</h3>${visualMap}` : ""}</section>
 
       <section class="clinical-section"><h2>Pré-consulta / Enfermagem</h2>
       <div class="grid">

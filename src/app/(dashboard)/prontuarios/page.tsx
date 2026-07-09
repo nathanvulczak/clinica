@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { ClinicalQueue } from "@/features/clinical-workflow/components/clinical-queue";
 import { MedicalLgpdAckCard } from "@/features/medical-records/components/medical-lgpd-ack-card";
-import { medicalRecordStatusLabel } from "@/features/medical-records/labels";
+import { medicalDocumentStatusLabel, medicalRecordStatusLabel } from "@/features/medical-records/labels";
 import { MedicalRecordPreferencesForm } from "@/features/medical-records/components/medical-record-preferences-form";
 import { PatientMedicalOverviewPanel } from "@/features/medical-records/components/patient-medical-overview-panel";
 import {
@@ -160,14 +160,60 @@ export default async function ProntuariosPage({
 
           {section === "reports" && reports ? (
             <div className="grid gap-4">
-              <div className="grid gap-3 lg:grid-cols-4">
-                {[{ label: "Prontuários", value: reports.totalRecords }, { label: "Concluídos", value: reports.completedRecords }, { label: "Rascunhos", value: reports.draftRecords }, { label: "Documentos emitidos", value: reports.issuedDocuments }].map((item) => <div key={item.label} className="rounded-lg border bg-card p-3.5"><p className="text-xs font-medium text-muted-foreground">{item.label}</p><p className="mt-2 text-xl font-semibold tabular-nums">{item.value}</p></div>)}
+              <div className="grid gap-3 lg:grid-cols-5">
+                {[
+                  { label: "Prontuários", value: reports.totalRecords, hint: "registros no escopo" },
+                  { label: "Concluídos", value: reports.completedRecords, hint: "fechados e protegidos" },
+                  { label: "Cobertura", value: `${reports.averageFormCompletion}%`, hint: "média dos formulários" },
+                  { label: "Exames", value: reports.recordsWithDiagnostics, hint: "pedidos vinculados" },
+                  { label: "Correções", value: reports.correctionRequests, hint: "fluxo formal" },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-md border bg-card p-3">
+                    <p className="text-[11px] font-medium uppercase text-muted-foreground">{item.label}</p>
+                    <p className="mt-1.5 text-xl font-semibold tabular-nums">{item.value}</p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">{item.hint}</p>
+                  </div>
+                ))}
               </div>
-              <div className="grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+                <section className="overflow-hidden rounded-md border bg-card">
+                  <div className="border-b px-4 py-3">
+                    <p className="text-sm font-semibold">Performance por especialidade</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Visão para gestão clínica, qualidade de preenchimento e volume assistencial.</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[760px] text-[13px]">
+                      <thead className="bg-muted/60 text-left text-[11px] uppercase text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2.5">Especialidade</th>
+                          <th className="px-3 py-2.5 text-right">Prontuários</th>
+                          <th className="px-3 py-2.5 text-right">Concluídos</th>
+                          <th className="px-3 py-2.5 text-right">Formulário</th>
+                          <th className="px-3 py-2.5 text-right">Exames</th>
+                          <th className="px-3 py-2.5 text-right">Documentos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reports.specialtyPerformance.length ? reports.specialtyPerformance.map((item) => (
+                          <tr key={item.specialty} className="border-t">
+                            <td className="px-3 py-2.5 font-medium">{item.specialty}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{item.records}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{item.completed}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{item.averageFormCompletion}%</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{item.diagnostics}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{item.documents}</td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">Nenhuma especialidade com prontuário no período atual.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
                 <Card>
                   <CardHeader>
-                    <CardTitle>Status dos prontuarios</CardTitle>
-                    <CardDescription>Distribuicao operacional da carteira clinica.</CardDescription>
+                    <CardTitle>Status dos prontuários</CardTitle>
+                    <CardDescription>Distribuição operacional da carteira clínica.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-2">
                     {reports.recordsByStatus.map((item) => (
@@ -176,12 +222,15 @@ export default async function ProntuariosPage({
                         <strong>{item.count}</strong>
                       </div>
                     ))}
+                    {!reports.recordsByStatus.length ? <p className="text-sm text-muted-foreground">Sem registros para analisar.</p> : null}
                   </CardContent>
                 </Card>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-3">
                 <Card>
                   <CardHeader>
                     <CardTitle>Por profissional</CardTitle>
-                    <CardDescription>Volume de prontuarios por responsavel.</CardDescription>
+                    <CardDescription>Volume de prontuários por responsável.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-2">
                     {reports.recordsByProfessional.map((item) => (
@@ -190,20 +239,41 @@ export default async function ProntuariosPage({
                         <strong>{item.count}</strong>
                       </div>
                     ))}
+                    {!reports.recordsByProfessional.length ? <p className="text-sm text-muted-foreground">Nenhum profissional com prontuário.</p> : null}
                   </CardContent>
                 </Card>
                 <Card>
                   <CardHeader>
-                    <CardTitle>Por especialidade</CardTitle>
-                    <CardDescription>Utilização dos layouts clínicos configuráveis.</CardDescription>
+                    <CardTitle>Documentos clínicos</CardTitle>
+                    <CardDescription>Histórico de emissão, exclusão e exportação.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-2">
-                    {reports.recordsBySpecialty.length ? reports.recordsBySpecialty.map((item) => (
-                      <div key={item.specialty} className="flex justify-between rounded-md border bg-muted/20 p-3 text-sm">
-                        <span>{item.specialty}</span>
+                    {reports.documentsByStatus.length ? reports.documentsByStatus.map((item) => (
+                      <div key={item.status} className="flex justify-between rounded-md border bg-muted/20 p-3 text-sm">
+                        <span>{medicalDocumentStatusLabel(item.status)}</span>
                         <strong>{item.count}</strong>
                       </div>
-                    )) : <p className="text-sm text-muted-foreground">Nenhum formulário especializado concluído.</p>}
+                    )) : <p className="text-sm text-muted-foreground">Nenhum documento clínico registrado.</p>}
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Qualidade assistencial</CardTitle>
+                    <CardDescription>Indicadores rápidos para auditoria e melhoria contínua.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-2 text-sm">
+                    <div className="flex justify-between rounded-md border bg-muted/20 p-3">
+                      <span>Prontuários com formulário especializado</span>
+                      <strong>{reports.recordsWithSpecialtyForm}</strong>
+                    </div>
+                    <div className="flex justify-between rounded-md border bg-muted/20 p-3">
+                      <span>Rascunhos em aberto</span>
+                      <strong>{reports.draftRecords}</strong>
+                    </div>
+                    <div className="flex justify-between rounded-md border bg-muted/20 p-3">
+                      <span>Documentos excluídos auditáveis</span>
+                      <strong>{reports.deletedDocuments}</strong>
+                    </div>
                   </CardContent>
                 </Card>
               </div>

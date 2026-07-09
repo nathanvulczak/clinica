@@ -5,10 +5,12 @@ import {
   AlertTriangle,
   Check,
   ChevronRight,
+  ClipboardCheck,
   ClipboardList,
   LockKeyhole,
   SlidersHorizontal,
   Sparkles,
+  Target,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -18,6 +20,7 @@ import {
   type ClinicalFormResponseValue,
   type ClinicalFormResponses,
 } from "@/features/medical-records/clinical-form-schema";
+import { getClinicalFormAnalytics } from "@/features/medical-records/clinical-form-analytics";
 import { ClinicalImmersionMap } from "@/features/medical-records/components/clinical-immersion-map";
 import type { ClinicalFormTemplate, ClinicalFormWorkspace } from "@/repositories/clinical-forms";
 
@@ -191,6 +194,7 @@ export function SpecialtyClinicalForm({
     const value = responses[field.key];
     return typeof value === "string" && field.alert_values?.includes(value);
   });
+  const analytics = getClinicalFormAnalytics(definition, responses);
   const visualMaps = metadataObject(responses._visual_maps);
 
   function selectTemplate(template: ClinicalFormTemplate) {
@@ -244,6 +248,63 @@ export function SpecialtyClinicalForm({
           </select>
         </label>
         <div className="flex items-center gap-2 text-xs text-muted-foreground"><SlidersHorizontal className="size-3.5" />{sourceLabels[workspace.selectionSource]}{workspace.professionalSpecialty ? ` · ${workspace.professionalSpecialty}` : ""}</div>
+      </div>
+
+      <div className="grid gap-3 border-b bg-background px-4 py-3 lg:grid-cols-4">
+        <div className="rounded-md border bg-muted/15 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase text-muted-foreground">Cobertura</p>
+          <p className="mt-1 text-sm font-semibold tabular-nums">{analytics.filledFields}/{analytics.totalFields} campos</p>
+        </div>
+        <div className="rounded-md border bg-muted/15 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase text-muted-foreground">Obrigatórios</p>
+          <p className={analytics.missingRequiredFields.length ? "mt-1 text-sm font-semibold text-amber-700" : "mt-1 text-sm font-semibold text-emerald-700"}>
+            {analytics.missingRequiredFields.length ? `${analytics.missingRequiredFields.length} pendente(s)` : "Tudo pronto"}
+          </p>
+        </div>
+        <div className="rounded-md border bg-muted/15 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase text-muted-foreground">Alertas</p>
+          <p className={analytics.alertFields.length ? "mt-1 text-sm font-semibold text-destructive" : "mt-1 text-sm font-semibold text-muted-foreground"}>
+            {analytics.alertFields.length ? `${analytics.alertFields.length} achado(s)` : "Sem alerta"}
+          </p>
+        </div>
+        <div className="rounded-md border bg-muted/15 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase text-muted-foreground">Mapa visual</p>
+          <p className="mt-1 text-sm font-semibold tabular-nums">{analytics.visualMapEntries} marcação(ões)</p>
+        </div>
+      </div>
+
+      <div className="grid gap-3 border-b bg-muted/10 px-4 py-3 lg:grid-cols-2">
+        <div className="rounded-md border bg-card p-3">
+          <div className="flex items-center gap-2">
+            <Target className="size-4 text-primary" />
+            <p className="text-xs font-semibold uppercase text-muted-foreground">Próximas ações clínicas</p>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {analytics.missingRequiredFields.slice(0, 4).map((field) => (
+              <Badge key={field.key} className="bg-amber-50 text-amber-800">{field.label}</Badge>
+            ))}
+            {analytics.alertFields.slice(0, 3).map((field) => (
+              <Badge key={`alert-${field.key}`} className="bg-destructive/10 text-destructive">{field.label}</Badge>
+            ))}
+            {!analytics.missingRequiredFields.length && !analytics.alertFields.length ? (
+              <span className="text-xs text-muted-foreground">Sem pendências críticas para este layout.</span>
+            ) : null}
+          </div>
+        </div>
+        <div className="rounded-md border bg-card p-3">
+          <div className="flex items-center gap-2">
+            <ClipboardCheck className="size-4 text-primary" />
+            <p className="text-xs font-semibold uppercase text-muted-foreground">Campos para relatório</p>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {analytics.reportableFields.slice(0, 6).map((field) => (
+              <span key={field.key} className="rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground">{field.label}</span>
+            ))}
+            {!analytics.reportableFields.length ? (
+              <span className="text-xs text-muted-foreground">Preencha campos reportáveis para enriquecer relatórios por especialidade.</span>
+            ) : null}
+          </div>
+        </div>
       </div>
 
       {warnings.length ? <div className="mx-4 mt-3 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><div><p className="font-semibold">Atenção clínica necessária</p><p className="mt-0.5">{warnings.map((field) => field.label).join(", ")}. Avalie e registre a conduta antes de concluir.</p></div></div> : null}
