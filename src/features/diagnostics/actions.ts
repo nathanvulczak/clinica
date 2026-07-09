@@ -3,10 +3,21 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getActiveClinicContext } from "@/features/clinics/context";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getDiagnosticsAccess } from "@/repositories/diagnostics";
+import { logAuditEvent } from "@/services/audit/audit-service";
 
 export type DiagnosticsActionState = { error?: string; success?: string; recordId?: string };
+
+const MAX_DIAGNOSTIC_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const ALLOWED_DIAGNOSTIC_ATTACHMENT_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/plain",
+]);
 
 const orderSchema = z.object({
   patient_id: z.string().uuid(), professional_member_id: z.string().uuid(),
@@ -16,6 +27,14 @@ const orderSchema = z.object({
   clinical_indication: z.string().trim().min(3).max(3000),
   fasting_instructions: z.string().trim().max(1000).nullable(), scheduled_at: z.string().nullable(),
   items: z.array(z.object({ code_system: z.enum(["internal", "tuss", "loinc"]), procedure_code: z.string().trim().max(40).nullable(), name: z.string().trim().min(2).max(180), specimen: z.string().trim().max(120).nullable(), instructions: z.string().trim().max(500).nullable(), sort_order: z.number().int() })).min(1).max(30),
+});
+
+const attachmentSchema = z.object({
+  order_id: z.string().uuid(),
+  order_item_id: z.string().uuid().nullable(),
+  attachment_type: z.enum(["external_report", "laboratory_pdf", "image", "exam_file", "other"]),
+  title: z.string().trim().min(2).max(160),
+  notes: z.string().trim().max(1000).nullable(),
 });
 
 async function context() {
@@ -63,6 +82,171 @@ export async function transitionDiagnosticOrderAction(_: DiagnosticsActionState,
   const { error } = await ctx.supabase.rpc("transition_diagnostic_order_transaction", { order_uuid: parsed.data.order_id, next_status: parsed.data.next_status, transition_reason: parsed.data.reason });
   if (error) return { error: diagnosticError(error.message) };
   revalidatePath("/exames"); return { success: "Etapa atualizada com rastreabilidade." };
+}
+
+export async function markDiagnosticOrderDeliveredAction(_: DiagnosticsActionState, formData: FormData): Promise<DiagnosticsActionState> {
+  const parsed = z.object({ order_id: z.string().uuid() }).safeParse({ order_id: formData.get("order_id") });
+  if (!parsed.success) return { error: "Pedido diagnostico invalido." };
+  const ctx = await context(); if (!ctx) return { error: "Sessao invalida." };
+  if (!ctx.access.canEdit && !ctx.access.canManage) return { error: "Seu perfil nao pode registrar entrega de solicitacao." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: order } = await admin
+    .from("diagnostic_orders")
+    .select("id, clinic_id, order_number, status, request_delivered_at, metadata")
+    .eq("id", parsed.data.order_id)
+    .eq("clinic_id", ctx.activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!order) return { error: "Pedido nao encontrado." };
+
+  const now = new Date().toISOString();
+  await Promise.all([
+    admin
+      .from("diagnostic_orders")
+      .update({
+        request_delivered_at: now,
+        request_delivered_by: ctx.user.id,
+        metadata: {
+          ...((order.metadata && typeof order.metadata === "object") ? order.metadata : {}),
+          request_delivery_source: "manual_confirmation",
+        },
+        updated_by: ctx.user.id,
+      })
+      .eq("id", order.id),
+    admin.from("diagnostic_order_events").insert({
+      clinic_id: ctx.activeClinic.id,
+      order_id: order.id,
+      event_type: "request_delivered",
+      previous_status: order.status,
+      next_status: order.status,
+      details: { order_number: order.order_number },
+      created_by: ctx.user.id,
+    }),
+    logAuditEvent({
+      clinicId: ctx.activeClinic.id,
+      userId: ctx.user.id,
+      actionType: "diagnostic_request_delivered",
+      module: "diagnostics",
+      recordTable: "diagnostic_orders",
+      recordId: order.id,
+      oldValues: { request_delivered_at: order.request_delivered_at },
+      newValues: { request_delivered_at: now },
+      level: "security",
+      notes: "Solicitacao de exame marcada como entregue ao paciente.",
+    }),
+  ]);
+
+  revalidatePath("/exames"); revalidatePath("/prontuarios");
+  return { success: "Solicitacao marcada como entregue ao paciente." };
+}
+
+export async function uploadDiagnosticAttachmentAction(_: DiagnosticsActionState, formData: FormData): Promise<DiagnosticsActionState> {
+  const parsed = attachmentSchema.safeParse({
+    order_id: formData.get("order_id"),
+    order_item_id: formData.get("order_item_id") || null,
+    attachment_type: formData.get("attachment_type"),
+    title: formData.get("title"),
+    notes: formData.get("notes") || null,
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Anexo diagnostico invalido." };
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) return { error: "Selecione um arquivo para anexar." };
+  if (file.size > MAX_DIAGNOSTIC_ATTACHMENT_SIZE) return { error: "O arquivo deve ter no maximo 10 MB." };
+  if (!ALLOWED_DIAGNOSTIC_ATTACHMENT_TYPES.has(file.type)) return { error: "Formato nao permitido. Use PDF, JPG, PNG, WEBP ou TXT." };
+
+  const ctx = await context(); if (!ctx) return { error: "Sessao invalida." };
+  if (!ctx.access.canEdit && !ctx.access.canManage) return { error: "Seu perfil nao pode anexar resultados diagnosticos." };
+
+  const admin = createSupabaseAdminClient();
+  const { data: order } = await admin
+    .from("diagnostic_orders")
+    .select("id, clinic_id, patient_id, encounter_id, professional_member_id, status, order_number")
+    .eq("id", parsed.data.order_id)
+    .eq("clinic_id", ctx.activeClinic.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!order) return { error: "Pedido diagnostico nao encontrado." };
+
+  if (parsed.data.order_item_id) {
+    const { data: item } = await admin
+      .from("diagnostic_order_items")
+      .select("id")
+      .eq("id", parsed.data.order_item_id)
+      .eq("order_id", order.id)
+      .eq("clinic_id", ctx.activeClinic.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!item) return { error: "Exame selecionado nao pertence ao pedido." };
+  }
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-120);
+  const filePath = `${ctx.activeClinic.id}/${order.patient_id}/diagnostics/${order.id}/${crypto.randomUUID()}-${safeName}`;
+  const { error: uploadError } = await admin.storage
+    .from("clinical-attachments")
+    .upload(filePath, file, {
+      cacheControl: "3600",
+      contentType: file.type,
+      upsert: false,
+    });
+  if (uploadError) return { error: "Nao foi possivel enviar o arquivo." };
+
+  const payload = {
+    clinic_id: ctx.activeClinic.id,
+    order_id: order.id,
+    order_item_id: parsed.data.order_item_id,
+    patient_id: order.patient_id,
+    encounter_id: order.encounter_id,
+    professional_member_id: order.professional_member_id,
+    attachment_type: parsed.data.attachment_type,
+    title: parsed.data.title,
+    notes: parsed.data.notes,
+    file_name: file.name,
+    file_path: filePath,
+    mime_type: file.type,
+    file_size: file.size,
+    created_by: ctx.user.id,
+    updated_by: ctx.user.id,
+  };
+
+  const { data: attachment, error } = await admin
+    .from("diagnostic_attachments")
+    .insert(payload)
+    .select("id")
+    .single<{ id: string }>();
+  if (error || !attachment) {
+    await admin.storage.from("clinical-attachments").remove([filePath]);
+    return { error: "Arquivo enviado, mas nao foi possivel registrar o laudo." };
+  }
+
+  const nextStatus = order.status === "completed" ? order.status : "partial";
+  await Promise.all([
+    admin.from("diagnostic_orders").update({ status: nextStatus, updated_by: ctx.user.id }).eq("id", order.id),
+    admin.from("diagnostic_order_events").insert({
+      clinic_id: ctx.activeClinic.id,
+      order_id: order.id,
+      event_type: "external_result_attached",
+      previous_status: order.status,
+      next_status: nextStatus,
+      details: { attachment_id: attachment.id, file_name: file.name, order_number: order.order_number },
+      created_by: ctx.user.id,
+    }),
+    logAuditEvent({
+      clinicId: ctx.activeClinic.id,
+      userId: ctx.user.id,
+      actionType: "diagnostic_attachment_uploaded",
+      module: "diagnostics",
+      recordTable: "diagnostic_attachments",
+      recordId: attachment.id,
+      newValues: payload,
+      level: "security",
+      notes: "Laudo/arquivo externo anexado ao pedido diagnostico.",
+    }),
+  ]);
+
+  revalidatePath("/exames"); revalidatePath("/prontuarios");
+  return { success: "Laudo externo anexado ao pedido.", recordId: attachment.id };
 }
 
 export async function saveDiagnosticResultAction(_: DiagnosticsActionState, formData: FormData): Promise<DiagnosticsActionState> {

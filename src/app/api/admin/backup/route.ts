@@ -42,6 +42,11 @@ const clinicalTables = [
   "patient_clinical_comments",
   "medical_record_attachments",
   "medical_record_correction_requests",
+  "diagnostic_orders",
+  "diagnostic_order_items",
+  "diagnostic_results",
+  "diagnostic_order_events",
+  "diagnostic_attachments",
 ];
 
 const financialTables = [

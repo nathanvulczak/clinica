@@ -274,6 +274,20 @@ export type PatientMedicalOverview = {
   }>;
   document_count: number;
   attachment_count: number;
+  diagnostic_count: number;
+  diagnostic_results: Array<{
+    id: string;
+    order_id: string;
+    order_number: string;
+    exam_name: string;
+    status: string;
+    value_text: string | null;
+    value_numeric: number | null;
+    unit: string | null;
+    reference_range: string | null;
+    flag: string;
+    resulted_at: string;
+  }>;
 };
 
 export const defaultMedicalRecordPreferences = (clinicId = ""): MedicalRecordPreferences => ({
@@ -918,6 +932,8 @@ export async function listPatientMedicalOverviews(
     { data: nursingAssessments },
     { data: documents },
     { data: attachments },
+    { data: diagnostics },
+    { data: diagnosticAttachments },
   ] = await Promise.all([
     admin
       .from("patient_clinical_comments")
@@ -951,6 +967,20 @@ export async function listPatientMedicalOverviews(
       .select("id, patient_id")
       .eq("clinic_id", clinicId)
       .in("patient_id", patientIds),
+    admin
+      .from("diagnostic_orders")
+      .select("id, patient_id, order_number, status, created_at, items:diagnostic_order_items(id, name, results:diagnostic_results(id, status, value_text, value_numeric, unit, reference_range, flag, resulted_at))")
+      .eq("clinic_id", clinicId)
+      .in("patient_id", patientIds)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(400),
+    admin
+      .from("diagnostic_attachments")
+      .select("id, patient_id")
+      .eq("clinic_id", clinicId)
+      .in("patient_id", patientIds)
+      .is("deleted_at", null),
   ]);
 
   const authorIds = [...new Set((comments ?? []).map((comment) => comment.created_by).filter(Boolean))];
@@ -983,6 +1013,8 @@ export async function listPatientMedicalOverviews(
       nursing_assessments: [],
       document_count: 0,
       attachment_count: 0,
+      diagnostic_count: 0,
+      diagnostic_results: [],
     });
   }
 
@@ -997,6 +1029,52 @@ export async function listPatientMedicalOverviews(
     const overview = byPatient.get(attachment.patient_id);
     if (overview) overview.attachment_count += 1;
   }
+  for (const attachment of diagnosticAttachments ?? []) {
+    const overview = byPatient.get(attachment.patient_id);
+    if (overview) overview.attachment_count += 1;
+  }
+  for (const diagnostic of (diagnostics ?? []) as Array<{
+    id: string;
+    patient_id: string;
+    order_number: string;
+    status: string;
+    items?: Array<{
+      id: string;
+      name: string;
+      results?: Array<{
+        id: string;
+        status: string;
+        value_text: string | null;
+        value_numeric: number | null;
+        unit: string | null;
+        reference_range: string | null;
+        flag: string;
+        resulted_at: string;
+      }>;
+    }>;
+  }>) {
+    const overview = byPatient.get(diagnostic.patient_id);
+    if (!overview) continue;
+    overview.diagnostic_count += 1;
+    for (const item of diagnostic.items ?? []) {
+      for (const result of item.results ?? []) {
+        if (!["preliminary", "final"].includes(result.status)) continue;
+        overview.diagnostic_results.push({
+          id: result.id,
+          order_id: diagnostic.id,
+          order_number: diagnostic.order_number,
+          exam_name: item.name,
+          status: result.status,
+          value_text: result.value_text,
+          value_numeric: result.value_numeric,
+          unit: result.unit,
+          reference_range: result.reference_range,
+          flag: result.flag,
+          resulted_at: result.resulted_at,
+        });
+      }
+    }
+  }
 
   for (const comment of (comments ?? []) as PatientClinicalComment[]) {
     const overview = byPatient.get(comment.patient_id);
@@ -1005,6 +1083,10 @@ export async function listPatientMedicalOverviews(
       ...comment,
       author: comment.created_by ? authorMap.get(comment.created_by) ?? null : null,
     });
+  }
+
+  for (const overview of byPatient.values()) {
+    overview.diagnostic_results.sort((left, right) => new Date(right.resulted_at).getTime() - new Date(left.resulted_at).getTime());
   }
 
   return [...byPatient.values()];

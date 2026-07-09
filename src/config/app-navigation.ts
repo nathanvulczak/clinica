@@ -109,8 +109,10 @@ export const APP_NAVIGATION_MODULES: AppNavigationModule[] = [
     pathPrefix: "/exames",
     items: [
       { label: "Central diagnóstica", href: "/exames?section=overview" },
-      { label: "Pedidos e coleta", href: "/exames?section=orders" },
-      { label: "Resultados", href: "/exames?section=results" },
+      { label: "Solicitações em aberto", href: "/exames?section=open" },
+      { label: "Aguardando retorno", href: "/exames?section=awaiting-return" },
+      { label: "Resultados recebidos", href: "/exames?section=received" },
+      { label: "Validados", href: "/exames?section=validated" },
       { label: "Alertas críticos", href: "/exames?section=alerts", separatorBefore: true },
       { label: "Relatórios", href: "/exames?section=reports" },
       { label: "Preferências", href: "/exames?section=preferences" },

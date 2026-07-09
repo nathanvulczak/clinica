@@ -2,30 +2,94 @@
 
 import { useActionState, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, AlertTriangle, Beaker, CheckCircle2, ChevronRight, CircleDot, Clock3, FileSearch, FlaskConical, LoaderCircle, Plus, Search, Settings2, Sparkles } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  Beaker,
+  CheckCircle2,
+  ChevronRight,
+  CircleDot,
+  Clock3,
+  Download,
+  FileSearch,
+  FileText,
+  FlaskConical,
+  LoaderCircle,
+  Paperclip,
+  Plus,
+  Search,
+  Send,
+  Settings2,
+  Sparkles,
+  TrendingUp,
+  UploadCloud,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalFooter, ModalSection } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { createDiagnosticOrderAction, saveDiagnosticResultAction, saveDiagnosticsPreferencesAction, transitionDiagnosticOrderAction, type DiagnosticsActionState } from "@/features/diagnostics/actions";
+import {
+  createDiagnosticOrderAction,
+  markDiagnosticOrderDeliveredAction,
+  saveDiagnosticResultAction,
+  saveDiagnosticsPreferencesAction,
+  transitionDiagnosticOrderAction,
+  uploadDiagnosticAttachmentAction,
+  type DiagnosticsActionState,
+} from "@/features/diagnostics/actions";
 import { getClinicalSpecialtyExperience, getClinicalSpecialtyLabel } from "@/config/clinical-specialties";
 import { formatCpf } from "@/lib/formatters";
 import type { DiagnosticItem, DiagnosticOrder, DiagnosticsWorkspace as WorkspaceData } from "@/repositories/diagnostics";
 
 const inputClass = "h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const textareaClass = "min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
 const sections = [
-  ["overview", "Central"], ["orders", "Pedidos"], ["results", "Resultados"], ["alerts", "Alertas"], ["reports", "Relatórios"], ["preferences", "Preferências"],
+  ["overview", "Central"],
+  ["open", "Solicitações em aberto"],
+  ["awaiting-return", "Aguardando retorno"],
+  ["received", "Resultados recebidos"],
+  ["validated", "Validados"],
+  ["alerts", "Alertas"],
+  ["reports", "Relatórios"],
+  ["preferences", "Preferências"],
 ] as const;
 
-const statusLabels: Record<string, string> = { draft: "Rascunho", requested: "Solicitado", scheduled: "Agendado", collected: "Coletado", in_progress: "Em processamento", partial: "Resultado parcial", completed: "Concluído", cancelled: "Cancelado", corrected: "Corrigido" };
+const statusLabels: Record<string, string> = {
+  draft: "Rascunho",
+  requested: "Solicitado",
+  scheduled: "Agendado",
+  collected: "Coletado",
+  in_progress: "Em processamento",
+  partial: "Resultado parcial",
+  completed: "Concluído",
+  cancelled: "Cancelado",
+  corrected: "Corrigido",
+};
 const categoryLabels: Record<string, string> = { laboratory: "Laboratório", imaging: "Imagem", pathology: "Patologia", functional: "Funcional", other: "Outro" };
 const priorityLabels: Record<string, string> = { routine: "Rotina", urgent: "Urgente", stat: "Imediato" };
 const flagLabels: Record<string, string> = { normal: "Normal", low: "Abaixo", high: "Acima", critical: "Crítico", indeterminate: "Indeterminado" };
+const attachmentTypeLabels: Record<string, string> = {
+  external_report: "Laudo externo",
+  laboratory_pdf: "PDF laboratorial",
+  image: "Imagem",
+  exam_file: "Arquivo de exame",
+  other: "Outro",
+};
 
 function useActionToast(state: DiagnosticsActionState, done?: () => void) {
-  const { toast } = useToast(); const handled = useRef("");
-  useEffect(() => { const key = `${state.error}:${state.success}:${state.recordId}`; if (handled.current === key || key === "undefined:undefined:undefined") return; handled.current = key; if (state.error) toast({ title: "Ação não concluída", description: state.error, variant: "destructive" }); if (state.success) { toast({ title: "Central diagnóstica", description: state.success }); done?.(); } }, [done, state, toast]);
+  const { toast } = useToast();
+  const handled = useRef("");
+  useEffect(() => {
+    const key = `${state.error}:${state.success}:${state.recordId}`;
+    if (handled.current === key || key === "undefined:undefined:undefined") return;
+    handled.current = key;
+    if (state.error) toast({ title: "Ação não concluída", description: state.error, variant: "destructive" });
+    if (state.success) {
+      toast({ title: "Central diagnóstica", description: state.success });
+      done?.();
+    }
+  }, [done, state, toast]);
 }
 
 function statusClass(status: string) {
@@ -35,45 +99,110 @@ function statusClass(status: string) {
   return "bg-amber-500/10 text-amber-700";
 }
 
-function dateTime(value?: string | null) { return value ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "Não informado"; }
+function dateTime(value?: string | null) {
+  if (!value) return "Não informado";
+  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(value));
+}
+
+function formatSize(value: number) {
+  if (value < 1024 * 1024) return `${Math.max(Math.round(value / 1024), 1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function orderHasAnyResult(order: DiagnosticOrder) {
+  return order.items.some((item) => item.results.length > 0);
+}
+
+function orderHasFinalResults(order: DiagnosticOrder) {
+  return order.items.some((item) => item.results.some((result) => result.status === "final"));
+}
+
+function orderIsAwaitingReturn(order: DiagnosticOrder) {
+  return Boolean(order.request_delivered_at) && !order.attachments.length && !orderHasAnyResult(order) && !["completed", "cancelled"].includes(order.status);
+}
+
+function filterBySection(orders: DiagnosticOrder[], section: string) {
+  if (section === "open") return orders.filter((order) => !order.request_delivered_at && ["requested", "scheduled"].includes(order.status));
+  if (section === "awaiting-return") return orders.filter(orderIsAwaitingReturn);
+  if (section === "received") return orders.filter((order) => order.attachments.length > 0 || (orderHasAnyResult(order) && order.status !== "completed"));
+  if (section === "validated") return orders.filter((order) => order.status === "completed" || orderHasFinalResults(order));
+  return orders;
+}
 
 type DraftItem = { code_system: "internal" | "tuss" | "loinc"; procedure_code: string; name: string; specimen: string; instructions: string; sort_order: number };
 
 function NewOrderModal({ open, onOpenChange, data }: { open: boolean; onOpenChange: (value: boolean) => void; data: WorkspaceData }) {
-  const router = useRouter(); const [state, action, pending] = useActionState(createDiagnosticOrderAction, {});
-  const [appointmentId, setAppointmentId] = useState(""); const [patientId, setPatientId] = useState(""); const [professionalId, setProfessionalId] = useState(""); const [encounterId, setEncounterId] = useState("");
+  const router = useRouter();
+  const [state, action, pending] = useActionState(createDiagnosticOrderAction, {});
+  const [appointmentId, setAppointmentId] = useState("");
+  const [patientId, setPatientId] = useState("");
+  const [professionalId, setProfessionalId] = useState("");
+  const [encounterId, setEncounterId] = useState("");
   const [items, setItems] = useState<DraftItem[]>([{ code_system: "tuss", procedure_code: "", name: "", specimen: "", instructions: "", sort_order: 0 }]);
-  const done = useCallback(() => { onOpenChange(false); router.refresh(); }, [onOpenChange, router]); useActionToast(state, done);
+  const done = useCallback(() => { onOpenChange(false); router.refresh(); }, [onOpenChange, router]);
+  useActionToast(state, done);
+
   const selectedProfessional = data.professionals.find((item) => item.id === professionalId) ?? null;
   const specialtyExperience = selectedProfessional ? getClinicalSpecialtyExperience(selectedProfessional.specialty) : null;
-  function selectAppointment(id: string) { const appointment = data.appointments.find((item) => item.id === id); setAppointmentId(id); setPatientId(appointment?.patient_id ?? ""); setProfessionalId(appointment?.professional_member_id ?? ""); setEncounterId(appointment?.encounter_id ?? ""); }
-  function patchItem(index: number, patch: Partial<DraftItem>) { setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item)); }
-  function addSuggestedExam(name: string) { setItems((current) => { if (current.some((item) => item.name.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"))) return current; const emptyIndex = current.findIndex((item) => !item.name.trim()); if (emptyIndex >= 0) return current.map((item, index) => index === emptyIndex ? { ...item, name } : item); return [...current, { code_system: "internal", procedure_code: "", name, specimen: "", instructions: "", sort_order: current.length }]; }); }
-  return <Modal open={open} onOpenChange={onOpenChange} title="Novo pedido diagnóstico" description="Pedido clínico estruturado, vinculado ao atendimento e preparado para resultados versionados." size="xl">
-    <form action={action} className="grid gap-4">
-      <input type="hidden" name="appointment_id" value={appointmentId} /><input type="hidden" name="encounter_id" value={encounterId} /><input type="hidden" name="items" value={JSON.stringify(items)} />
-      <ModalSection className="grid gap-3">
-        <div className="grid gap-3 lg:grid-cols-3">
-          <label className="grid gap-1.5 text-xs font-medium">Atendimento relacionado<select value={appointmentId} onChange={(event) => selectAppointment(event.target.value)} className={inputClass}><option value="">Pedido avulso</option>{data.appointments.map((item) => <option key={item.id} value={item.id}>{dateTime(item.starts_at)}</option>)}</select></label>
-          <label className="grid gap-1.5 text-xs font-medium">Paciente<select name="patient_id" value={patientId} onChange={(event) => { setPatientId(event.target.value); setAppointmentId(""); setEncounterId(""); }} className={inputClass} required><option value="">Selecione</option>{data.patients.map((item) => <option key={item.id} value={item.id}>{item.social_name || item.full_name} {item.cpf ? `· ${formatCpf(item.cpf)}` : ""}</option>)}</select></label>
-          <label className="grid gap-1.5 text-xs font-medium">Profissional solicitante<select name="professional_member_id" value={professionalId} onChange={(event) => setProfessionalId(event.target.value)} className={inputClass} required><option value="">Selecione</option>{data.professionals.map((item) => <option key={item.id} value={item.id}>{item.full_name}{item.specialty ? ` - ${getClinicalSpecialtyLabel(item.specialty)}` : ""}</option>)}</select></label>
-        </div>
-        {specialtyExperience ? <div className="rounded-md border bg-primary/5 p-3"><p className="text-xs font-semibold text-primary">Sugestões para {getClinicalSpecialtyLabel(selectedProfessional?.specialty)}</p><div className="mt-2 flex flex-wrap gap-1.5">{specialtyExperience.suggestedExams.slice(0, 8).map((exam) => <button key={exam} type="button" onClick={() => addSuggestedExam(exam)} className="rounded-md border bg-background px-2.5 py-1 text-xs hover:border-primary hover:text-primary">{exam}</button>)}</div></div> : null}
-        <div className="grid gap-3 lg:grid-cols-3"><label className="grid gap-1.5 text-xs font-medium">Categoria<select name="category" className={inputClass}>{Object.entries(categoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="grid gap-1.5 text-xs font-medium">Prioridade<select name="priority" className={inputClass}><option value="routine">Rotina</option><option value="urgent">Urgente</option><option value="stat">Imediato</option></select></label><label className="grid gap-1.5 text-xs font-medium">Agendamento previsto<input name="scheduled_at" type="datetime-local" className={inputClass} /></label></div>
-        <label className="grid gap-1.5 text-xs font-medium">Indicação clínica<textarea name="clinical_indication" className={textareaClass} placeholder="Hipótese, sinais, sintomas e objetivo da investigação" required /></label>
-        <label className="grid gap-1.5 text-xs font-medium">Preparo e jejum<textarea name="fasting_instructions" className={`${textareaClass} min-h-16`} /></label>
-      </ModalSection>
-      <ModalSection className="grid gap-3"><div className="flex items-center justify-between"><div><p className="text-sm font-semibold">Exames solicitados</p><p className="text-xs text-muted-foreground">Use TUSS ou LOINC quando disponível para interoperabilidade.</p></div><Button type="button" variant="outline" size="sm" onClick={() => setItems((current) => [...current, { code_system: "tuss", procedure_code: "", name: "", specimen: "", instructions: "", sort_order: current.length }])}><Plus />Adicionar exame</Button></div>
-        <div className="grid gap-2">{items.map((item, index) => <div key={index} className="grid gap-2 rounded-md border bg-muted/10 p-2.5 lg:grid-cols-[110px_130px_1fr_150px_auto]"><select value={item.code_system} onChange={(event) => patchItem(index, { code_system: event.target.value as DraftItem["code_system"] })} className={inputClass}><option value="tuss">TUSS</option><option value="loinc">LOINC</option><option value="internal">Interno</option></select><input value={item.procedure_code} onChange={(event) => patchItem(index, { procedure_code: event.target.value })} className={inputClass} placeholder="Código" /><input value={item.name} onChange={(event) => patchItem(index, { name: event.target.value })} className={inputClass} placeholder="Nome do exame" required /><input value={item.specimen} onChange={(event) => patchItem(index, { specimen: event.target.value })} className={inputClass} placeholder="Material/amostra" /><Button type="button" variant="ghost" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remover</Button></div>)}</div>
-      </ModalSection>
-      <ModalFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button><Button disabled={pending || !patientId || !professionalId || items.some((item) => !item.name.trim())}><FlaskConical />{pending ? "Criando..." : "Confirmar pedido"}</Button></ModalFooter>
-    </form>
-  </Modal>;
+
+  function selectAppointment(id: string) {
+    const appointment = data.appointments.find((item) => item.id === id);
+    setAppointmentId(id);
+    setPatientId(appointment?.patient_id ?? "");
+    setProfessionalId(appointment?.professional_member_id ?? "");
+    setEncounterId(appointment?.encounter_id ?? "");
+  }
+
+  function patchItem(index: number, patch: Partial<DraftItem>) {
+    setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+  }
+
+  function addSuggestedExam(name: string) {
+    setItems((current) => {
+      if (current.some((item) => item.name.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"))) return current;
+      const emptyIndex = current.findIndex((item) => !item.name.trim());
+      if (emptyIndex >= 0) return current.map((item, index) => index === emptyIndex ? { ...item, name } : item);
+      return [...current, { code_system: "internal", procedure_code: "", name, specimen: "", instructions: "", sort_order: current.length }];
+    });
+  }
+
+  return (
+    <Modal open={open} onOpenChange={onOpenChange} title="Novo pedido diagnóstico" description="Solicitação estruturada, imprimível e integrada ao prontuário." size="xl">
+      <form action={action} className="grid gap-4">
+        <input type="hidden" name="appointment_id" value={appointmentId} />
+        <input type="hidden" name="encounter_id" value={encounterId} />
+        <input type="hidden" name="items" value={JSON.stringify(items)} />
+        <ModalSection className="grid gap-3">
+          <div className="grid gap-3 lg:grid-cols-3">
+            <label className="grid gap-1.5 text-xs font-medium">Atendimento relacionado<select value={appointmentId} onChange={(event) => selectAppointment(event.target.value)} className={inputClass}><option value="">Pedido avulso</option>{data.appointments.map((item) => <option key={item.id} value={item.id}>{dateTime(item.starts_at)}</option>)}</select></label>
+            <label className="grid gap-1.5 text-xs font-medium">Paciente<select name="patient_id" value={patientId} onChange={(event) => { setPatientId(event.target.value); setAppointmentId(""); setEncounterId(""); }} className={inputClass} required><option value="">Selecione</option>{data.patients.map((item) => <option key={item.id} value={item.id}>{item.social_name || item.full_name} {item.cpf ? `· ${formatCpf(item.cpf)}` : ""}</option>)}</select></label>
+            <label className="grid gap-1.5 text-xs font-medium">Profissional solicitante<select name="professional_member_id" value={professionalId} onChange={(event) => setProfessionalId(event.target.value)} className={inputClass} required><option value="">Selecione</option>{data.professionals.map((item) => <option key={item.id} value={item.id}>{item.full_name}{item.specialty ? ` - ${getClinicalSpecialtyLabel(item.specialty)}` : ""}</option>)}</select></label>
+          </div>
+          {specialtyExperience ? <div className="rounded-md border bg-primary/5 p-3"><p className="text-xs font-semibold text-primary">Sugestões para {getClinicalSpecialtyLabel(selectedProfessional?.specialty)}</p><div className="mt-2 flex flex-wrap gap-1.5">{specialtyExperience.suggestedExams.slice(0, 8).map((exam) => <button key={exam} type="button" onClick={() => addSuggestedExam(exam)} className="rounded-md border bg-background px-2.5 py-1 text-xs hover:border-primary hover:text-primary">{exam}</button>)}</div></div> : null}
+          <div className="grid gap-3 lg:grid-cols-3">
+            <label className="grid gap-1.5 text-xs font-medium">Categoria<select name="category" className={inputClass}>{Object.entries(categoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label className="grid gap-1.5 text-xs font-medium">Prioridade<select name="priority" className={inputClass}><option value="routine">Rotina</option><option value="urgent">Urgente</option><option value="stat">Imediato</option></select></label>
+            <label className="grid gap-1.5 text-xs font-medium">Agendamento previsto<input name="scheduled_at" type="datetime-local" className={inputClass} /></label>
+          </div>
+          <label className="grid gap-1.5 text-xs font-medium">Indicação clínica<textarea name="clinical_indication" className={textareaClass} placeholder="Hipótese, sinais, sintomas e objetivo da investigação" required /></label>
+          <label className="grid gap-1.5 text-xs font-medium">Preparo e jejum<textarea name="fasting_instructions" className={`${textareaClass} min-h-16`} /></label>
+        </ModalSection>
+        <ModalSection className="grid gap-3">
+          <div className="flex items-center justify-between"><div><p className="text-sm font-semibold">Exames solicitados</p><p className="text-xs text-muted-foreground">Use TUSS ou LOINC quando disponível para interoperabilidade.</p></div><Button type="button" variant="outline" size="sm" onClick={() => setItems((current) => [...current, { code_system: "tuss", procedure_code: "", name: "", specimen: "", instructions: "", sort_order: current.length }])}><Plus />Adicionar exame</Button></div>
+          <div className="grid gap-2">{items.map((item, index) => <div key={index} className="grid gap-2 rounded-md border bg-muted/10 p-2.5 lg:grid-cols-[100px_120px_1fr_140px_auto]"><select value={item.code_system} onChange={(event) => patchItem(index, { code_system: event.target.value as DraftItem["code_system"] })} className={inputClass}><option value="tuss">TUSS</option><option value="loinc">LOINC</option><option value="internal">Interno</option></select><input value={item.procedure_code} onChange={(event) => patchItem(index, { procedure_code: event.target.value })} className={inputClass} placeholder="Código" /><input value={item.name} onChange={(event) => patchItem(index, { name: event.target.value })} className={inputClass} placeholder="Nome do exame" required /><input value={item.specimen} onChange={(event) => patchItem(index, { specimen: event.target.value })} className={inputClass} placeholder="Material" /><Button type="button" variant="ghost" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remover</Button></div>)}</div>
+        </ModalSection>
+        <ModalFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button><Button disabled={pending || !patientId || !professionalId || items.some((item) => !item.name.trim())}><FlaskConical />{pending ? "Criando..." : "Confirmar pedido"}</Button></ModalFooter>
+      </form>
+    </Modal>
+  );
 }
 
 function ResultModal({ order, item, open, onOpenChange, canApprove }: { order: DiagnosticOrder; item: DiagnosticItem; open: boolean; onOpenChange: (value: boolean) => void; canApprove: boolean }) {
-  const router = useRouter(); const [state, action, pending] = useActionState(saveDiagnosticResultAction, {}); const current = item.results.find((result) => ["preliminary", "final"].includes(result.status));
-  const done = useCallback(() => { onOpenChange(false); router.refresh(); }, [onOpenChange, router]); useActionToast(state, done);
+  const router = useRouter();
+  const [state, action, pending] = useActionState(saveDiagnosticResultAction, {});
+  const current = item.results.find((result) => ["preliminary", "final"].includes(result.status));
+  const done = useCallback(() => { onOpenChange(false); router.refresh(); }, [onOpenChange, router]);
+  useActionToast(state, done);
   return <Modal open={open} onOpenChange={onOpenChange} title={item.name} description={`${order.order_number} · resultado versionado e integrado ao prontuário`} size="lg"><form action={action} className="grid gap-4"><input type="hidden" name="order_item_id" value={item.id} />
     <div className="grid gap-3 lg:grid-cols-2"><label className="grid gap-1.5 text-xs font-medium">Resultado textual<input name="value_text" defaultValue={current?.value_text ?? ""} className={inputClass} /></label><div className="grid grid-cols-2 gap-2"><label className="grid gap-1.5 text-xs font-medium">Valor numérico<input name="value_numeric" type="number" step="any" defaultValue={current?.value_numeric ?? ""} className={inputClass} /></label><label className="grid gap-1.5 text-xs font-medium">Unidade<input name="unit" defaultValue={current?.unit ?? ""} className={inputClass} /></label></div><label className="grid gap-1.5 text-xs font-medium">Referência<input name="reference_range" defaultValue={current?.reference_range ?? ""} className={inputClass} /></label><label className="grid gap-1.5 text-xs font-medium">Sinalização<select name="flag" defaultValue={current?.flag ?? "normal"} className={inputClass}>{Object.entries(flagLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
     <label className="grid gap-1.5 text-xs font-medium">Interpretação<textarea name="interpretation" defaultValue={current?.interpretation ?? ""} className={textareaClass} /></label><label className="grid gap-1.5 text-xs font-medium">Laudo<textarea name="report_text" defaultValue={current?.report_text ?? ""} className={`${textareaClass} min-h-40`} /></label>{current?.status === "final" ? <label className="grid gap-1.5 text-xs font-medium text-destructive">Motivo da correção<input name="correction_reason" className={inputClass} required minLength={5} /></label> : null}
@@ -81,36 +210,126 @@ function ResultModal({ order, item, open, onOpenChange, canApprove }: { order: D
   </form></Modal>;
 }
 
+function AttachmentModal({ order, open, onOpenChange }: { order: DiagnosticOrder; open: boolean; onOpenChange: (value: boolean) => void }) {
+  const router = useRouter();
+  const [state, action, pending] = useActionState(uploadDiagnosticAttachmentAction, {});
+  const done = useCallback(() => { onOpenChange(false); router.refresh(); }, [onOpenChange, router]);
+  useActionToast(state, done);
+  return (
+    <Modal open={open} onOpenChange={onOpenChange} title="Anexar resultado externo" description={`${order.order_number} · laudos e arquivos permanecem privados e auditáveis`} size="lg">
+      <form action={action} className="grid gap-4">
+        <input type="hidden" name="order_id" value={order.id} />
+        <div className="grid gap-3 lg:grid-cols-2">
+          <label className="grid gap-1.5 text-xs font-medium">Vincular a exame<select name="order_item_id" className={inputClass}><option value="">Pedido geral</option>{order.items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label className="grid gap-1.5 text-xs font-medium">Tipo de arquivo<select name="attachment_type" defaultValue="external_report" className={inputClass}>{Object.entries(attachmentTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        </div>
+        <label className="grid gap-1.5 text-xs font-medium">Título<input name="title" className={inputClass} placeholder="Ex.: Laudo do hemograma, ultrassom, PDF do laboratório" required /></label>
+        <label className="grid gap-1.5 text-xs font-medium">Observações<textarea name="notes" className={`${textareaClass} min-h-16`} placeholder="Origem do arquivo, observações de conferência ou contexto clínico." /></label>
+        <label className="grid gap-1.5 text-xs font-medium">Arquivo<input type="file" name="file" accept="application/pdf,image/jpeg,image/png,image/webp,text/plain" className="rounded-md border bg-background px-3 py-2 text-sm" required /><span className="text-[11px] font-normal text-muted-foreground">Até 10 MB. Formatos: PDF, JPG, PNG, WEBP ou TXT.</span></label>
+        <ModalFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button><Button disabled={pending}><UploadCloud />{pending ? "Enviando..." : "Anexar resultado"}</Button></ModalFooter>
+      </form>
+    </Modal>
+  );
+}
+
+function DeliveryButton({ order }: { order: DiagnosticOrder }) {
+  const router = useRouter();
+  const [state, action, pending] = useActionState(markDiagnosticOrderDeliveredAction, {});
+  const done = useCallback(() => router.refresh(), [router]);
+  useActionToast(state, done);
+  return (
+    <form action={action}>
+      <input type="hidden" name="order_id" value={order.id} />
+      <Button type="submit" size="sm" variant="outline" disabled={pending || Boolean(order.request_delivered_at)}>
+        <Send />
+        {order.request_delivered_at ? "Entregue" : "Entregar"}
+      </Button>
+    </form>
+  );
+}
+
 function OrderTable({ orders, data }: { orders: DiagnosticOrder[]; data: WorkspaceData }) {
-  const router = useRouter(); const [selected, setSelected] = useState<{ order: DiagnosticOrder; item: DiagnosticItem } | null>(null); const [transitionOrder, setTransitionOrder] = useState<DiagnosticOrder | null>(null);
-  const [state, action, pending] = useActionState(transitionDiagnosticOrderAction, {}); const done = useCallback(() => { setTransitionOrder(null); router.refresh(); }, [router]); useActionToast(state, done);
-  return <><div className="overflow-x-auto rounded-md border"><table className="w-full min-w-[1040px] text-[13px]"><thead className="sticky top-0 bg-muted/80 text-left text-xs text-muted-foreground backdrop-blur"><tr><th className="px-3 py-2">Pedido</th><th className="px-3 py-2">Paciente</th><th className="px-3 py-2">Tipo</th><th className="px-3 py-2">Etapa</th><th className="px-3 py-2">Exames</th><th className="px-3 py-2">Atualização</th><th className="sticky right-0 bg-muted px-3 py-2 text-right">Ações</th></tr></thead><tbody>{orders.map((order) => <tr key={order.id} className="border-t hover:bg-muted/20"><td className="px-3 py-2.5"><p className="selectable font-mono text-xs font-medium">{order.order_number}</p><p className="mt-1 text-[11px] text-muted-foreground">{priorityLabels[order.priority]}</p></td><td className="px-3 py-2.5 font-medium">{order.patient?.social_name || order.patient?.full_name}</td><td className="px-3 py-2.5">{categoryLabels[order.category]}</td><td className="px-3 py-2.5"><Badge className={statusClass(order.status)}>{statusLabels[order.status]}</Badge></td><td className="px-3 py-2.5"><div className="flex flex-wrap gap-1">{order.items.slice(0, 3).map((item) => <button key={item.id} type="button" onClick={() => setSelected({ order, item })} disabled={!data.access.canEdit} className="rounded border bg-background px-2 py-1 text-[11px] hover:border-primary/50">{item.name}</button>)}{order.items.length > 3 ? <span className="px-1 py-1 text-[11px] text-muted-foreground">+{order.items.length - 3}</span> : null}</div></td><td className="px-3 py-2.5 text-xs text-muted-foreground">{dateTime(order.completed_at || order.collected_at || order.created_at)}</td><td className="sticky right-0 bg-card px-3 py-2.5 text-right"><Button variant="ghost" size="sm" onClick={() => setTransitionOrder(order)} disabled={!data.access.canEdit}>Atualizar <ChevronRight /></Button></td></tr>)}</tbody></table>{orders.length === 0 ? <div className="grid h-36 place-items-center text-sm text-muted-foreground">Nenhum pedido encontrado para os filtros atuais.</div> : null}</div>
+  const router = useRouter();
+  const [selected, setSelected] = useState<{ order: DiagnosticOrder; item: DiagnosticItem } | null>(null);
+  const [transitionOrder, setTransitionOrder] = useState<DiagnosticOrder | null>(null);
+  const [attachmentOrder, setAttachmentOrder] = useState<DiagnosticOrder | null>(null);
+  const [state, action, pending] = useActionState(transitionDiagnosticOrderAction, {});
+  const done = useCallback(() => { setTransitionOrder(null); router.refresh(); }, [router]);
+  useActionToast(state, done);
+
+  return <>
+    <div className="overflow-x-auto rounded-md border">
+      <table className="w-full min-w-[1220px] text-[13px]">
+        <thead className="sticky top-0 bg-muted/80 text-left text-xs text-muted-foreground backdrop-blur"><tr><th className="px-3 py-2">Pedido</th><th className="px-3 py-2">Paciente</th><th className="px-3 py-2">Etapa</th><th className="px-3 py-2">Entrega</th><th className="px-3 py-2">Exames</th><th className="px-3 py-2">Arquivos</th><th className="px-3 py-2">Atualização</th><th className="sticky right-0 bg-muted px-3 py-2 text-right">Ações</th></tr></thead>
+        <tbody>{orders.map((order) => {
+          const latestAttachment = order.attachments[0];
+          return <tr key={order.id} className="border-t align-top hover:bg-muted/20">
+            <td className="px-3 py-2.5"><p className="selectable font-mono text-xs font-medium">{order.order_number}</p><p className="mt-1 text-[11px] text-muted-foreground">{categoryLabels[order.category]} · {priorityLabels[order.priority]}</p></td>
+            <td className="px-3 py-2.5 font-medium">{order.patient?.social_name || order.patient?.full_name}</td>
+            <td className="px-3 py-2.5"><Badge className={statusClass(order.status)}>{statusLabels[order.status]}</Badge></td>
+            <td className="px-3 py-2.5 text-xs text-muted-foreground">{order.request_delivered_at ? `Entregue em ${dateTime(order.request_delivered_at)}` : order.request_printed_at ? `Impresso em ${dateTime(order.request_printed_at)}` : "Ainda não entregue"}</td>
+            <td className="px-3 py-2.5"><div className="flex max-w-[280px] flex-wrap gap-1">{order.items.slice(0, 4).map((item) => <button key={item.id} type="button" onClick={() => setSelected({ order, item })} disabled={!data.access.canEdit} className="rounded border bg-background px-2 py-1 text-[11px] hover:border-primary/50">{item.name}</button>)}{order.items.length > 4 ? <span className="px-1 py-1 text-[11px] text-muted-foreground">+{order.items.length - 4}</span> : null}</div></td>
+            <td className="px-3 py-2.5 text-xs">{latestAttachment ? <div><p className="font-medium">{latestAttachment.title}</p><p className="text-[11px] text-muted-foreground">{order.attachments.length} arquivo(s) · {formatSize(latestAttachment.file_size)}</p></div> : <span className="text-muted-foreground">Nenhum laudo anexado</span>}</td>
+            <td className="px-3 py-2.5 text-xs text-muted-foreground">{dateTime(order.completed_at || order.collected_at || order.created_at)}</td>
+            <td className="sticky right-0 bg-card px-3 py-2.5"><div className="flex justify-end gap-1.5">
+              <Button asChild size="sm" variant="outline"><a href={`/api/exames/${order.id}/solicitacao`} target="_blank" rel="noreferrer"><Download />Imprimir</a></Button>
+              {data.access.canEdit ? <DeliveryButton order={order} /> : null}
+              {data.access.canEdit ? <Button type="button" size="sm" variant="outline" onClick={() => setAttachmentOrder(order)}><Paperclip />Anexar</Button> : null}
+              <Button variant="ghost" size="sm" onClick={() => setTransitionOrder(order)} disabled={!data.access.canEdit}>Etapa <ChevronRight /></Button>
+            </div></td>
+          </tr>;
+        })}</tbody>
+      </table>
+      {orders.length === 0 ? <div className="grid h-36 place-items-center text-sm text-muted-foreground">Nenhum pedido encontrado para os filtros atuais.</div> : null}
+    </div>
     {selected ? <ResultModal order={selected.order} item={selected.item} open onOpenChange={(value) => !value && setSelected(null)} canApprove={data.access.canApprove || data.access.canManage} /> : null}
+    {attachmentOrder ? <AttachmentModal order={attachmentOrder} open onOpenChange={(value) => !value && setAttachmentOrder(null)} /> : null}
     {transitionOrder ? <Modal open onOpenChange={(value) => !value && setTransitionOrder(null)} title="Atualizar etapa" description={`${transitionOrder.order_number} · alterações excepcionais exigem justificativa`} size="sm"><form action={action} className="grid gap-3"><input type="hidden" name="order_id" value={transitionOrder.id} /><label className="grid gap-1.5 text-xs font-medium">Nova etapa<select name="next_status" className={inputClass}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="grid gap-1.5 text-xs font-medium">Motivo, quando aplicável<textarea name="reason" className={textareaClass} /></label><ModalFooter><Button type="button" variant="outline" onClick={() => setTransitionOrder(null)}>Cancelar</Button><Button disabled={pending}>Confirmar alteração</Button></ModalFooter></form></Modal> : null}
   </>;
 }
 
-function DiagnosticsIntelligencePanel({ data, orders, criticalCount }: { data: WorkspaceData; orders: DiagnosticOrder[]; criticalCount: number }) {
+function DiagnosticsIntelligencePanel({ orders, criticalCount }: { orders: DiagnosticOrder[]; criticalCount: number }) {
   const pendingItems = orders.reduce((sum, order) => sum + order.items.filter((item) => !item.results.some((result) => result.status === "final")).length, 0);
   const urgentOrders = orders.filter((order) => order.priority === "urgent" || order.priority === "stat").length;
-  const linkedToCare = orders.filter((order) => Boolean(order.appointment)).length;
+  const awaitingReturn = orders.filter(orderIsAwaitingReturn).length;
   const completionRate = orders.length ? Math.round((orders.filter((order) => order.status === "completed").length / orders.length) * 100) : 0;
-  const professionalMap = new Map<string, { name: string; total: number; pending: number }>();
-  for (const order of orders) {
-    const key = order.professional?.id ?? "unknown";
-    const current = professionalMap.get(key) ?? { name: order.professional?.profile?.full_name ?? "Profissional não identificado", total: 0, pending: 0 };
-    current.total += 1;
-    if (order.status !== "completed" && order.status !== "cancelled") current.pending += 1;
-    professionalMap.set(key, current);
-  }
-  const topProfessionals = [...professionalMap.values()].sort((a, b) => b.total - a.total).slice(0, 4);
   const cards = [
     { label: "Fila diagnóstica", value: String(orders.length), detail: `${urgentOrders} urgente(s) ou imediato(s)` },
-    { label: "Itens sem laudo final", value: String(pendingItems), detail: "Exames ainda aguardando validação" },
-    { label: "Alertas críticos", value: String(criticalCount), detail: "Resultados que exigem atenção" },
-    { label: "Vinculados ao atendimento", value: `${completionRate}%`, detail: `${linkedToCare} pedido(s) com contexto clínico` },
+    { label: "Aguardando retorno", value: String(awaitingReturn), detail: "Solicitações entregues ao paciente" },
+    { label: "Itens sem laudo final", value: String(pendingItems), detail: "Exames aguardando validação" },
+    { label: "Validação", value: `${completionRate}%`, detail: `${criticalCount} alerta(s) crítico(s)` },
   ];
-  return <section className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr]"><div className="grid gap-2 rounded-md border bg-card p-3 sm:grid-cols-4">{cards.map((card) => <div key={card.label} className="rounded-md bg-muted/20 p-3"><p className="text-[11px] font-semibold uppercase text-muted-foreground">{card.label}</p><p className="mt-1 text-lg font-semibold tabular-nums">{card.value}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{card.detail}</p></div>)}</div><div className="rounded-md border bg-card p-3"><p className="text-xs font-semibold uppercase text-muted-foreground">Operação por profissional</p><div className="mt-2 grid gap-2">{topProfessionals.length ? topProfessionals.map((row) => <div key={row.name} className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-xs"><span className="truncate font-medium">{row.name}</span><span className="shrink-0 text-muted-foreground">{row.total} pedido(s) · {row.pending} pendente(s)</span></div>) : <p className="rounded-md border bg-background p-3 text-xs text-muted-foreground">Nenhum pedido no filtro atual.</p>}</div>{data.access.canManage ? <p className="mt-2 text-[11px] text-muted-foreground">Gestores podem validar fluxo, preferências e permissões de resultados.</p> : null}</div></section>;
+  return <section className="grid gap-2 rounded-md border bg-card p-3 sm:grid-cols-4">{cards.map((card) => <div key={card.label} className="rounded-md bg-muted/20 p-3"><p className="text-[11px] font-semibold uppercase text-muted-foreground">{card.label}</p><p className="mt-1 text-lg font-semibold tabular-nums">{card.value}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{card.detail}</p></div>)}</section>;
+}
+
+function DiagnosticsComparisonPanel({ timeline }: { timeline: WorkspaceData["patientResultTimeline"] }) {
+  const grouped = useMemo(() => {
+    const map = new Map<string, typeof timeline>();
+    for (const row of timeline) {
+      const key = `${row.patient_id}:${row.exam_name.toLocaleLowerCase("pt-BR")}`;
+      const current = map.get(key) ?? [];
+      current.push(row);
+      map.set(key, current);
+    }
+    return [...map.values()]
+      .map((rows) => rows.sort((left, right) => new Date(right.resulted_at).getTime() - new Date(left.resulted_at).getTime()))
+      .filter((rows) => rows.length >= 1)
+      .slice(0, 8);
+  }, [timeline]);
+
+  return (
+    <section className="rounded-md border bg-card">
+      <div className="flex items-center justify-between gap-3 border-b px-4 py-3"><div><p className="text-sm font-semibold">Evolução dos resultados</p><p className="text-xs text-muted-foreground">Comparativo longitudinal por paciente e exame para apoiar retornos clínicos.</p></div><TrendingUp className="size-4 text-primary" /></div>
+      <div className="grid divide-y">
+        {grouped.length ? grouped.map((rows) => {
+          const latest = rows[0];
+          const previous = rows[1];
+          const delta = latest.value_numeric !== null && previous?.value_numeric !== null ? latest.value_numeric - previous.value_numeric : null;
+          return <article key={`${latest.patient_id}-${latest.exam_name}`} className="grid gap-3 px-4 py-3 lg:grid-cols-[1fr_170px_130px] lg:items-center"><div><p className="text-sm font-medium">{latest.exam_name}</p><p className="text-xs text-muted-foreground">{latest.patient_name} · {latest.order_number}</p></div><div className="text-xs"><p className="font-semibold tabular-nums">{latest.value_numeric !== null ? `${latest.value_numeric} ${latest.unit ?? ""}` : latest.value_text ?? "Resultado textual"}</p><p className="text-muted-foreground">{dateTime(latest.resulted_at)}</p></div><div className="text-right text-xs">{delta !== null ? <Badge className={Math.abs(delta) > 0 ? "bg-sky-500/10 text-sky-700" : "bg-muted text-muted-foreground"}>{delta > 0 ? "+" : ""}{delta.toFixed(2)}</Badge> : <span className="text-muted-foreground">{previous ? "Comparativo textual" : "Primeiro resultado"}</span>}</div></article>;
+        }) : <div className="px-4 py-8 text-center text-sm text-muted-foreground">Os comparativos aparecem conforme resultados forem lançados.</div>}
+      </div>
+    </section>
+  );
 }
 
 function DiagnosticsReportsPanel({ orders, criticalCount }: { orders: DiagnosticOrder[]; criticalCount: number }) {
@@ -123,31 +342,37 @@ function DiagnosticsReportsPanel({ orders, criticalCount }: { orders: Diagnostic
 }
 
 export function DiagnosticsWorkspace({ data, section, query, status }: { data: WorkspaceData; section: string; query: string; status: string }) {
-  const router = useRouter(); const [isNavigating, startNavigation] = useTransition(); const [orderOpen, setOrderOpen] = useState(false); const normalized = query.toLocaleLowerCase("pt-BR");
-  const filtered = useMemo(() => data.orders.filter((order) => (status === "all" || order.status === status) && (!normalized || order.order_number.toLowerCase().includes(normalized) || order.patient?.full_name.toLocaleLowerCase("pt-BR").includes(normalized) || order.items.some((item) => item.name.toLocaleLowerCase("pt-BR").includes(normalized)))), [data.orders, normalized, status]);
+  const router = useRouter();
+  const [isNavigating, startNavigation] = useTransition();
+  const [orderOpen, setOrderOpen] = useState(false);
+  const normalized = query.toLocaleLowerCase("pt-BR");
+  const baseBySection = filterBySection(data.orders, section);
+  const filtered = useMemo(() => baseBySection.filter((order) => (status === "all" || order.status === status) && (!normalized || order.order_number.toLowerCase().includes(normalized) || order.patient?.full_name.toLocaleLowerCase("pt-BR").includes(normalized) || order.patient?.cpf?.includes(normalized) || order.items.some((item) => item.name.toLocaleLowerCase("pt-BR").includes(normalized)))), [baseBySection, normalized, status]);
   const critical = data.orders.flatMap((order) => order.items.flatMap((item) => item.results.filter((result) => result.flag === "critical").map((result) => ({ order, item, result }))));
-  const metrics = [{ label: "Em andamento", value: data.orders.filter((item) => !["completed", "cancelled"].includes(item.status)).length, icon: Activity }, { label: "Aguardando resultado", value: data.orders.filter((item) => ["collected", "in_progress", "partial"].includes(item.status)).length, icon: Clock3 }, { label: "Concluídos", value: data.orders.filter((item) => item.status === "completed").length, icon: CheckCircle2 }, { label: "Alertas críticos", value: critical.length, icon: AlertTriangle }];
+  const metrics = [{ label: "Em aberto", value: data.orders.filter((item) => ["requested", "scheduled"].includes(item.status)).length, icon: Activity }, { label: "Aguardando retorno", value: data.orders.filter(orderIsAwaitingReturn).length, icon: Clock3 }, { label: "Com resultado", value: data.orders.filter((item) => item.attachments.length || orderHasAnyResult(item)).length, icon: FileText }, { label: "Alertas críticos", value: critical.length, icon: AlertTriangle }];
   function navigateUrl(url: string) { startNavigation(() => router.push(url)); }
   function navigate(nextSection: string) { navigateUrl(`/exames?section=${nextSection}`); }
+
   return <div className="relative grid gap-4 pb-10" aria-busy={isNavigating}>
     {isNavigating ? <div className="fixed inset-x-0 top-12 z-50 h-0.5 overflow-hidden bg-primary/15"><div className="h-full w-1/3 animate-pulse bg-primary" /></div> : null}
-    <section className="relative overflow-hidden rounded-md border bg-card px-4 py-4"><div className="absolute inset-y-0 left-0 w-1 bg-primary" /><div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-md bg-primary/10 text-primary"><Beaker className="size-4" /></span><div><h1 className="text-lg font-semibold">Exames e diagnóstico</h1><p className="text-xs text-muted-foreground">Do pedido ao resultado validado, com contexto clínico e rastreabilidade.</p></div></div></div>{data.access.canCreate ? <Button onClick={() => setOrderOpen(true)}><Plus />Novo pedido</Button> : null}</div></section>
-    <div className="sticky top-12 z-20 flex items-center justify-between gap-3 rounded-md border bg-background/90 p-1.5 shadow-sm backdrop-blur-xl"><nav className="flex items-center gap-1">{sections.map(([key, label]) => <button key={key} onClick={() => navigate(key)} disabled={isNavigating} className={`h-8 rounded px-3 text-xs font-medium ${section === key ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>{label}</button>)}</nav><div className="flex items-center gap-2 text-xs text-muted-foreground">{isNavigating ? <><LoaderCircle className="size-3.5 animate-spin text-primary" />Carregando visão</> : <><Sparkles className="size-3.5 text-primary" />Fluxo clínico conectado</>}</div></div>
+    <section className="relative overflow-hidden rounded-md border bg-card px-4 py-4"><div className="absolute inset-y-0 left-0 w-1 bg-primary" /><div className="flex items-start justify-between gap-4"><div><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-md bg-primary/10 text-primary"><Beaker className="size-4" /></span><div><h1 className="text-lg font-semibold">Exames e diagnóstico</h1><p className="text-xs text-muted-foreground">Solicitação, entrega ao paciente, retorno com laudos, comparação e validação clínica.</p></div></div></div>{data.access.canCreate ? <Button onClick={() => setOrderOpen(true)}><Plus />Novo pedido</Button> : null}</div></section>
+    <div className="sticky top-12 z-20 flex items-center justify-between gap-3 overflow-x-auto rounded-md border bg-background/90 p-1.5 shadow-sm backdrop-blur-xl"><nav className="flex items-center gap-1">{sections.map(([key, label]) => <button key={key} onClick={() => navigate(key)} disabled={isNavigating} className={`h-8 shrink-0 rounded px-3 text-xs font-medium ${section === key ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>{label}</button>)}</nav><div className="hidden items-center gap-2 text-xs text-muted-foreground lg:flex">{isNavigating ? <><LoaderCircle className="size-3.5 animate-spin text-primary" />Carregando visão</> : <><Sparkles className="size-3.5 text-primary" />Fluxo diagnóstico conectado</>}</div></div>
     <section className="grid grid-cols-4 divide-x rounded-md border bg-card">{metrics.map((metric) => <div key={metric.label} className="flex items-center gap-3 px-4 py-3"><metric.icon className="size-4 text-muted-foreground" /><div><p className="text-xl font-semibold tabular-nums">{metric.value}</p><p className="text-[11px] text-muted-foreground">{metric.label}</p></div></div>)}</section>
-    {section !== "preferences" ? <DiagnosticsIntelligencePanel data={data} orders={filtered} criticalCount={critical.length} /> : null}
-    {section !== "preferences" ? <div className="flex items-center gap-2 rounded-md border bg-card p-2"><div className="relative min-w-72 flex-1"><Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" /><input defaultValue={query} onKeyDown={(event) => { if (event.key === "Enter") navigateUrl(`/exames?section=${section}&status=${status}&query=${encodeURIComponent(event.currentTarget.value)}`); }} className={`${inputClass} pl-9`} placeholder="Pedido, paciente ou exame" /></div><select value={status} disabled={isNavigating} onChange={(event) => navigateUrl(`/exames?section=${section}&status=${event.target.value}&query=${encodeURIComponent(query)}`)} className="h-9 w-48 rounded-md border bg-background px-3 text-xs"><option value="all">Todas as etapas</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><Button variant="outline" size="sm"><Settings2 />Mais filtros</Button></div> : null}
+    {section !== "preferences" ? <DiagnosticsIntelligencePanel orders={filtered} criticalCount={critical.length} /> : null}
+    {section !== "preferences" ? <div className="flex items-center gap-2 rounded-md border bg-card p-2"><div className="relative min-w-72 flex-1"><Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" /><input defaultValue={query} onKeyDown={(event) => { if (event.key === "Enter") navigateUrl(`/exames?section=${section}&status=${status}&query=${encodeURIComponent(event.currentTarget.value)}`); }} className={`${inputClass} pl-9`} placeholder="Pedido, paciente, CPF ou exame" /></div><select value={status} disabled={isNavigating} onChange={(event) => navigateUrl(`/exames?section=${section}&status=${event.target.value}&query=${encodeURIComponent(query)}`)} className="h-9 w-48 rounded-md border bg-background px-3 text-xs"><option value="all">Todas as etapas</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><Button variant="outline" size="sm"><Settings2 />Mais filtros</Button></div> : null}
     <div className={isNavigating ? "pointer-events-none opacity-55 transition-opacity" : "contents"}>
-    {section === "overview" || section === "orders" ? <OrderTable orders={filtered} data={data} /> : null}
-    {section === "results" ? <OrderTable orders={filtered.filter((order) => order.items.some((item) => item.results.length))} data={data} /> : null}
-    {section === "alerts" ? <div className="overflow-hidden rounded-md border bg-card"><div className="border-b px-4 py-3"><p className="text-sm font-semibold">Resultados que exigem atenção</p><p className="text-xs text-muted-foreground">A sinalização apoia a priorização e não substitui avaliação profissional.</p></div>{critical.map(({ order, item, result }) => <div key={result.id} className="grid grid-cols-[1fr_1fr_160px] items-center gap-3 border-b px-4 py-3 last:border-0"><div><p className="text-sm font-medium">{order.patient?.full_name}</p><p className="text-xs text-muted-foreground">{order.order_number}</p></div><div><p className="text-sm font-medium">{item.name}</p><p className="text-xs text-muted-foreground">{result.value_text || `${result.value_numeric ?? "-"} ${result.unit ?? ""}`}</p></div><Badge className="justify-center bg-destructive/10 text-destructive">Crítico</Badge></div>)}{critical.length === 0 ? <div className="grid h-36 place-items-center text-sm text-muted-foreground">Nenhum alerta crítico ativo.</div> : null}</div> : null}
-    {section === "reports" ? <DiagnosticsReportsPanel orders={filtered} criticalCount={critical.length} /> : null}
-    {section === "preferences" ? <PreferencesForm preferences={data.preferences} /> : null}
+      {section === "overview" ? <div className="grid gap-4"><OrderTable orders={filtered} data={data} /><DiagnosticsComparisonPanel timeline={data.patientResultTimeline} /></div> : null}
+      {["open", "awaiting-return", "received", "validated"].includes(section) ? <OrderTable orders={filtered} data={data} /> : null}
+      {section === "alerts" ? <div className="overflow-hidden rounded-md border bg-card"><div className="border-b px-4 py-3"><p className="text-sm font-semibold">Resultados que exigem atenção</p><p className="text-xs text-muted-foreground">A sinalização apoia a priorização e não substitui avaliação profissional.</p></div>{critical.map(({ order, item, result }) => <div key={result.id} className="grid grid-cols-[1fr_1fr_160px] items-center gap-3 border-b px-4 py-3 last:border-0"><div><p className="text-sm font-medium">{order.patient?.full_name}</p><p className="text-xs text-muted-foreground">{order.order_number}</p></div><div><p className="text-sm font-medium">{item.name}</p><p className="text-xs text-muted-foreground">{result.value_text || `${result.value_numeric ?? "-"} ${result.unit ?? ""}`}</p></div><Badge className="justify-center bg-destructive/10 text-destructive">Crítico</Badge></div>)}{critical.length === 0 ? <div className="grid h-36 place-items-center text-sm text-muted-foreground">Nenhum alerta crítico ativo.</div> : null}</div> : null}
+      {section === "reports" ? <div className="grid gap-4"><DiagnosticsReportsPanel orders={filtered} criticalCount={critical.length} /><DiagnosticsComparisonPanel timeline={data.patientResultTimeline} /></div> : null}
+      {section === "preferences" ? <PreferencesForm preferences={data.preferences} /> : null}
     </div>
     <NewOrderModal open={orderOpen} onOpenChange={setOrderOpen} data={data} />
   </div>;
 }
 
 function PreferencesForm({ preferences }: { preferences: Record<string, unknown> }) {
-  const [state, action, pending] = useActionState(saveDiagnosticsPreferencesAction, {}); useActionToast(state);
+  const [state, action, pending] = useActionState(saveDiagnosticsPreferencesAction, {});
+  useActionToast(state);
   return <form action={action} className="overflow-hidden rounded-md border bg-card"><header className="border-b px-4 py-3"><p className="text-sm font-semibold">Minha estação diagnóstica</p><p className="text-xs text-muted-foreground">Essas escolhas valem somente para seu usuário nesta clínica.</p></header><div className="grid max-w-3xl gap-4 p-4"><div className="grid grid-cols-2 gap-3"><label className="grid gap-1.5 text-xs font-medium">Tela inicial<select name="default_section" defaultValue={String(preferences.defaultSection ?? "overview")} className={inputClass}>{sections.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="grid gap-1.5 text-xs font-medium">Densidade<select name="density" defaultValue={String(preferences.density ?? "compact")} className={inputClass}><option value="compact">Compacta</option><option value="comfortable">Confortável</option></select></label></div><label className="grid gap-1.5 text-xs font-medium">Filtro de etapa favorito<select name="saved_status" defaultValue={String(preferences.savedStatus ?? "all")} className={inputClass}><option value="all">Todas</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="flex items-center justify-between rounded-md border p-3 text-sm"><span><b className="block text-sm">Destacar resultados críticos</b><span className="text-xs text-muted-foreground">Mantém alertas clínicos em evidência.</span></span><input type="checkbox" name="highlight_critical" defaultChecked={preferences.highlightCritical !== false} /></label><label className="flex items-center justify-between rounded-md border p-3 text-sm"><span><b className="block text-sm">Abrir resultado após salvar</b><span className="text-xs text-muted-foreground">Agiliza conferência em rotinas sequenciais.</span></span><input type="checkbox" name="auto_open_result" defaultChecked={preferences.autoOpenResult === true} /></label></div><footer className="flex justify-end border-t px-4 py-3"><Button disabled={pending}>{pending ? "Salvando..." : "Salvar preferências"}</Button></footer></form>;
 }
