@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { PRESCRIPTION_TEMPLATES } from "@/features/medical-records/config";
+import { getClinicalSpecialtyDocumentTemplates } from "@/config/clinical-specialties";
 import {
   medicalDocumentEventLabel,
   medicalDocumentStatusLabel,
@@ -66,6 +67,13 @@ function DocumentForm({
   document?: MedicalPrescription | null;
   onDone: () => void;
 }) {
+  const templates = useMemo(
+    () => [
+      ...PRESCRIPTION_TEMPLATES,
+      ...getClinicalSpecialtyDocumentTemplates(detail.professional_profile?.specialty),
+    ],
+    [detail.professional_profile?.specialty],
+  );
   const [templateKey, setTemplateKey] = useState(document?.template_key ?? "");
   const [title, setTitle] = useState(document?.title ?? "");
   const [content, setContent] = useState(document?.content ?? "");
@@ -86,7 +94,7 @@ function DocumentForm({
   }, [onDone, state.error, state.success, toast]);
 
   function applyTemplate(key: string) {
-    const template = PRESCRIPTION_TEMPLATES.find((item) => item.key === key);
+    const template = templates.find((item) => item.key === key);
     setTemplateKey(key);
     if (!template) return;
     setTitle(template.title);
@@ -105,7 +113,7 @@ function DocumentForm({
           Modelo
           <Select value={templateKey} onChange={(event) => applyTemplate(event.target.value)}>
             <option value="">Selecionar modelo</option>
-            {PRESCRIPTION_TEMPLATES.map((template) => (
+            {templates.map((template) => (
               <option key={template.key} value={template.key}>
                 {template.title}
               </option>

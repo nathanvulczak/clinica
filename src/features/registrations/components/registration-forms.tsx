@@ -24,6 +24,7 @@ import {
   getClinicalSpecialty,
   normalizeClinicalSpecialtySlug,
 } from "@/config/clinical-specialties";
+import { SpecialtyExperiencePanel } from "@/features/medical-records/components/specialty-experience-panel";
 import type {
   ClinicRoom,
   ClinicService,
@@ -923,6 +924,8 @@ export function ProfessionalProfileForm({
           />
         </div>
       </div>
+
+      <SpecialtyExperiencePanel specialty={specialty} variant="compact" />
 
       <div className="grid gap-3 sm:grid-cols-[1fr_1.2fr_100px]">
         <div className="grid gap-2">

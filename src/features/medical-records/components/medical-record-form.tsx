@@ -30,6 +30,7 @@ import { MedicalDocumentsPanel } from "@/features/medical-records/components/med
 import { MedicalAttachmentsPanel } from "@/features/medical-records/components/medical-attachments-panel";
 import { MedicalTimelinePanel } from "@/features/medical-records/components/medical-timeline-panel";
 import { SpecialtyClinicalForm } from "@/features/medical-records/components/specialty-clinical-form";
+import { SpecialtyExperiencePanel } from "@/features/medical-records/components/specialty-experience-panel";
 import {
   openMedicalRecordCorrectionAction,
   saveMedicalRecordAction,
@@ -341,6 +342,7 @@ export function MedicalRecordForm({
           <input ref={modeRef} type="hidden" name="mode" value="draft" />
           <input type="hidden" name="correction_reason" value={correctionReason} />
 
+          <SpecialtyExperiencePanel specialty={detail.professional_profile?.specialty} />
           <SpecialtyClinicalForm workspace={clinicalFormWorkspace} disabled={locked} />
 
           <section className="grid gap-4 rounded-lg border bg-card p-4">
