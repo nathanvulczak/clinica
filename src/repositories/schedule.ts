@@ -28,6 +28,7 @@ export type ScheduleFilters = {
   endDate?: string;
   professionalId?: string;
   professionalIds?: string[];
+  roomId?: string;
   status?: AppointmentStatus | "all";
 };
 
@@ -314,6 +315,10 @@ export async function listAppointments(
 
   if (filters?.status && filters.status !== "all") {
     query = query.eq("status", filters.status);
+  }
+
+  if (filters?.roomId && filters.roomId !== "all") {
+    query = query.eq("room_id", filters.roomId);
   }
 
   const { data, error } = await query;

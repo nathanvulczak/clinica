@@ -31,8 +31,10 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalFooter } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { saveDashboardPreferencesAction } from "@/features/dashboard/actions";
+import { RoomBoardWidget } from "@/features/dashboard/components/room-board-widget";
 import {
   DEFAULT_DASHBOARD_LAYOUT,
+  type DashboardRoom,
   type DashboardLayoutItem,
   type DashboardPreferences,
   type DashboardWidgetId,
@@ -61,6 +63,8 @@ type DashboardWorkspaceProps = {
   canViewMembers: boolean;
   canViewAudit: boolean;
   canViewFinancial: boolean;
+  canViewSchedule: boolean;
+  rooms: DashboardRoom[];
   subscriptionPlan: string;
   clinicsCount: number;
   planLimit: number | null;
@@ -181,12 +185,20 @@ function WidgetChrome({
 
 function mergeLayout(current: DashboardLayoutItem[], changed: Layout): DashboardLayoutItem[] {
   const changedById = new Map(changed.map((item) => [item.i, item]));
-  return current.map((item) => {
+  const merged = current.map((item) => {
     const next = changedById.get(item.i);
     return next
       ? { ...item, x: next.x, y: next.y, w: next.w, h: next.h }
       : item;
   });
+
+  const knownIds = new Set<string>(current.map((item) => item.i));
+  return [
+    ...merged,
+    ...changed
+      .filter((item) => !knownIds.has(item.i))
+      .map((item) => ({ i: item.i as DashboardWidgetId, x: item.x, y: item.y, w: item.w, h: item.h })),
+  ];
 }
 
 export function DashboardWorkspace(props: DashboardWorkspaceProps) {
@@ -340,23 +352,38 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           </WidgetChrome>
         ),
       },
+      {
+        id: "roomBoard",
+        label: "Mapa de consultórios",
+        render: () => <RoomBoardWidget rooms={props.rooms} />,
+      },
     ];
 
     return widgets.filter((widget) => {
       if (widget.id === "cash") return props.canViewFinancial;
       if (widget.id === "administration") return props.canViewBilling || props.canViewMembers || props.canViewAudit;
+      if (widget.id === "roomBoard") return props.canViewSchedule;
       return true;
     });
   }, [careTotal, props]);
 
   const availableIds = new Set(availableWidgets.map((widget) => widget.id));
   const renderedWidgets = visibleWidgets.filter((id) => availableIds.has(id));
-  const renderedLayout = layout.filter((item) => renderedWidgets.includes(item.i));
+  const renderedLayout = renderedWidgets
+    .map((id) => layout.find((item) => item.i === id) ?? DEFAULT_DASHBOARD_LAYOUT.find((item) => item.i === id))
+    .filter((item): item is DashboardLayoutItem => Boolean(item));
 
   function toggleWidget(id: DashboardWidgetId) {
     setVisibleWidgets((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
     );
+
+    if (!visibleWidgets.includes(id)) {
+      const defaultItem = DEFAULT_DASHBOARD_LAYOUT.find((item) => item.i === id);
+      if (defaultItem) {
+        setLayout((current) => current.some((item) => item.i === id) ? current : [...current, defaultItem]);
+      }
+    }
   }
 
   function resetDashboard() {

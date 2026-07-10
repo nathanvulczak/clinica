@@ -10,10 +10,16 @@ import { listClinicalEncounters } from "@/repositories/clinical-workflow";
 import { getDashboardPreferences } from "@/repositories/dashboard";
 import { getFinancialWorkspace } from "@/repositories/financial";
 import { getCurrentProfile } from "@/repositories/profile";
-import { listAppointments } from "@/repositories/schedule";
+import { listAppointments, listScheduleProfessionals } from "@/repositories/schedule";
+import {
+  getRegistrationAccess,
+  listClinicRooms,
+  listProfessionalOperationalProfiles,
+} from "@/repositories/registrations";
 import { getCurrentSubscription } from "@/repositories/subscriptions";
 import { getClinicAuthorization } from "@/services/authorization/clinic-access";
 import { getBillingAuthorization } from "@/services/billing/authorization";
+import type { DashboardRoom } from "@/features/dashboard/types";
 import type { PlanSlug } from "@/types/domain";
 
 function todayInSaoPaulo() {
@@ -33,7 +39,8 @@ export default async function DashboardPage({
     getCurrentProfile(),
   ]);
   const today = todayInSaoPaulo();
-  const [subscription, members, appointments, encounters, financial, preferences, branding, setupSteps] = await Promise.all([
+  const canViewSchedule = authorization.can("schedule", "view");
+  const [subscription, members, appointments, encounters, financial, preferences, branding, setupSteps, roomBoardData] = await Promise.all([
     billingAuthorization.canView && billingAuthorization.ownerUserId
       ? getCurrentSubscription(billingAuthorization.ownerUserId)
       : Promise.resolve(null),
@@ -46,6 +53,17 @@ export default async function DashboardPage({
     getDashboardPreferences(activeClinic?.id),
     activeClinic ? getClinicBrandingSettings(activeClinic.id) : Promise.resolve(null),
     getClinicSetupProgress(activeClinic, authorization.role === "clinic_owner" || authorization.role === "clinic_admin"),
+    activeClinic && canViewSchedule
+      ? Promise.all([
+          listClinicRooms(activeClinic.id),
+          listScheduleProfessionals(activeClinic.id, {
+            scopeToCurrentUser: !authorization.can("schedule", "manage"),
+          }),
+          getRegistrationAccess(activeClinic.id).then((access) =>
+            listProfessionalOperationalProfiles(activeClinic.id, access),
+          ),
+        ])
+      : Promise.resolve(null),
   ]);
   const planLimit = subscription?.plan_slug ? PLAN_LIMITS[subscription.plan_slug as PlanSlug] : null;
   const canCreateClinic = billingAuthorization.initialSignup || authorization.can("clinics", "create");
@@ -62,6 +80,59 @@ export default async function DashboardPage({
       professional_name: appointment.professional?.profile?.full_name ?? "Profissional",
       service_name: appointment.service?.name ?? appointment.appointment_type,
     }));
+  const [rooms, professionals, operationalProfiles] = roomBoardData ?? [[], [], []];
+  const profilesByMemberId = new Map(operationalProfiles.map((profile) => [profile.professional_member_id, profile]));
+  const defaultProfessionalByRoomId = new Map(
+    operationalProfiles
+      .filter((profile) => profile.default_room_id)
+      .map((profile) => [profile.default_room_id as string, profile]),
+  );
+  const professionalsById = new Map(professionals.map((professional) => [professional.id, professional]));
+  const now = Date.now();
+  const allowedRoomIds = new Set([
+    ...activeAppointments.map((appointment) => appointment.room_id).filter(Boolean),
+    ...operationalProfiles.map((profile) => profile.default_room_id).filter(Boolean),
+  ]);
+  const visibleRooms = authorization.can("schedule", "manage")
+    ? rooms
+    : rooms.filter((room) => allowedRoomIds.has(room.id));
+  const roomBoard: DashboardRoom[] = visibleRooms.map((room) => {
+    const roomAppointments = activeAppointments
+      .filter((appointment) => appointment.room_id === room.id)
+      .sort((left, right) => new Date(left.starts_at).getTime() - new Date(right.starts_at).getTime());
+    const activeAppointment = roomAppointments.find((appointment) =>
+      ["checked_in", "in_progress"].includes(appointment.status),
+    );
+    const nextAppointment = roomAppointments.find((appointment) =>
+      !["cancelled", "no_show", "completed", "billing_pending", "billed"].includes(appointment.status) &&
+      new Date(appointment.ends_at).getTime() >= now,
+    );
+    const selectedAppointment = activeAppointment ?? nextAppointment;
+    const selectedProfessional = selectedAppointment?.professional;
+    const defaultProfile = defaultProfessionalByRoomId.get(room.id);
+    const defaultProfessional = defaultProfile
+      ? professionalsById.get(defaultProfile.professional_member_id)
+      : null;
+    const professional = selectedProfessional ?? defaultProfessional;
+    const professionalProfile = professional ? profilesByMemberId.get(professional.id) : null;
+
+    return {
+      id: room.id,
+      name: room.name,
+      code: room.code,
+      roomType: room.room_type,
+      status: activeAppointment ? "occupied" : nextAppointment ? "scheduled" : "available",
+      nextAppointmentAt: nextAppointment?.starts_at ?? null,
+      todayAppointments: roomAppointments.length,
+      professional: professional
+        ? {
+            name: professional.profile?.full_name ?? "Profissional",
+            avatarUrl: professional.profile?.avatar_url ?? null,
+            specialty: professionalProfile?.specialty ?? null,
+          }
+        : null,
+    };
+  });
 
   return (
     <>
@@ -77,6 +148,8 @@ export default async function DashboardPage({
       canViewMembers={authorization.can("members", "view") || authorization.can("members", "manage")}
       canViewAudit={authorization.can("audit", "view")}
       canViewFinancial={Boolean(financial?.access.canView)}
+      canViewSchedule={canViewSchedule}
+      rooms={roomBoard}
       subscriptionPlan={subscription?.plan_slug ?? "pendente"}
       clinicsCount={clinics.length}
       planLimit={planLimit}

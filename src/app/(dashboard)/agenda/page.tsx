@@ -135,6 +135,7 @@ export default async function AgendaPage({
   const expandedOptions = params.options === "expanded";
   const range = getCalendarRange(date, view);
   const status = normalizeStatus(params.status);
+  const roomId = params.room_id || "all";
   const confirmationUrlBase = `${getAppUrl()}/confirmar-consulta`;
   const scheduleAccess = await getScheduleAccess(activeClinic?.id);
   const registrationAccess = await getRegistrationAccess(activeClinic?.id);
@@ -174,6 +175,7 @@ export default async function AgendaPage({
             endDate: range.endDate,
             professionalId,
             professionalIds: view === "clinic" ? panelProfessionalIds : undefined,
+            roomId,
             status,
           }),
           listScheduleBlocks(activeClinic.id, {
@@ -259,7 +261,7 @@ export default async function AgendaPage({
           <RealtimeClinicSync clinicId={activeClinic.id} tables={["appointments", "clinical_encounters"]} />
 
           <section className="rounded-lg border bg-card px-4 py-3 shadow-sm">
-            <form className="grid gap-3 xl:grid-cols-[150px_minmax(220px,1fr)_190px_auto] xl:items-end">
+            <form className={`grid gap-3 xl:items-end ${scheduleAccess.canManage ? "xl:grid-cols-[150px_minmax(180px,1fr)_160px_190px_auto]" : "xl:grid-cols-[150px_minmax(220px,1fr)_190px_auto]"}`}>
               <input type="hidden" name="view" value={view} />
               {panelProfessionalIds.length ? (
                 <input type="hidden" name="professionals" value={panelProfessionalIds.join(",")} />
@@ -290,6 +292,17 @@ export default async function AgendaPage({
                   ))}
                 </Select>
               </div>
+              {scheduleAccess.canManage ? (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="room_id" className="text-xs">Consultório</Label>
+                  <Select id="room_id" name="room_id" defaultValue={roomId} className="h-9">
+                    <option value="all">Todos os consultórios</option>
+                    {rooms.map((room) => (
+                      <option key={room.id} value={room.id}>{room.name}</option>
+                    ))}
+                  </Select>
+                </div>
+              ) : null}
               <Button className="h-9">
                 <CalendarDays className="size-4" />
                 Filtrar
