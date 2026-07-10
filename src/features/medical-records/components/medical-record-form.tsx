@@ -10,6 +10,8 @@ import {
   ClipboardCheck,
   FileText,
   History,
+  PanelRightClose,
+  PanelRightOpen,
   Paperclip,
   Pill,
   RotateCcw,
@@ -29,6 +31,10 @@ import {
 import { MedicalDocumentsPanel } from "@/features/medical-records/components/medical-documents-panel";
 import { MedicalAttachmentsPanel } from "@/features/medical-records/components/medical-attachments-panel";
 import { MedicalTimelinePanel } from "@/features/medical-records/components/medical-timeline-panel";
+import {
+  ClinicalExamsPanel,
+  type ClinicalDiagnosticSummary,
+} from "@/features/medical-records/components/clinical-exams-panel";
 import { SpecialtyClinicalForm } from "@/features/medical-records/components/specialty-clinical-form";
 import { SpecialtyExperiencePanel } from "@/features/medical-records/components/specialty-experience-panel";
 import { getClinicalSpecialty, getClinicalSpecialtyExperience } from "@/config/clinical-specialties";
@@ -40,7 +46,6 @@ import {
 } from "@/features/medical-records/actions";
 import type { MedicalRecordEncounterDetail, MedicalRecordPreferences } from "@/repositories/medical-records";
 import type { ClinicalFormWorkspace } from "@/repositories/clinical-forms";
-import type { DiagnosticOrder } from "@/repositories/diagnostics";
 import type { ClinicDocumentBranding } from "@/services/documents/clinic-document-branding";
 import { clinicalStatusLabel } from "@/features/medical-records/labels";
 
@@ -198,7 +203,7 @@ function NursingSummary({ detail }: { detail: MedicalRecordEncounterDetail }) {
   );
 }
 
-type DiagnosticSummary = Array<Pick<DiagnosticOrder, "id" | "order_number" | "category" | "priority" | "status" | "created_at" | "items">>;
+type DiagnosticSummary = ClinicalDiagnosticSummary;
 
 function ClinicalDecisionBrief({
   detail,
@@ -356,6 +361,7 @@ export function MedicalRecordForm({
   const [correctionReason, setCorrectionReason] = useState(record?.correction_reason ?? "");
   const [contextOpen, setContextOpen] = useState(true);
   const [contextTab, setContextTab] = useState<ClinicalContextTab>("nursing");
+  const [workspacePreferencesReady, setWorkspacePreferencesReady] = useState(false);
   const [state, formAction, pending] = useActionState<MedicalRecordActionState, FormData>(
     saveMedicalRecordAction,
     {},
@@ -366,6 +372,32 @@ export function MedicalRecordForm({
   >(openMedicalRecordCorrectionAction, {});
   const { toast } = useToast();
   const router = useRouter();
+  const workspacePreferenceKey = `clinicore.medical-record.workspace.${detail.clinic_id}`;
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(workspacePreferenceKey);
+      if (stored) {
+        const parsed = JSON.parse(stored) as { contextOpen?: boolean; contextTab?: ClinicalContextTab };
+        if (typeof parsed.contextOpen === "boolean") setContextOpen(parsed.contextOpen);
+        if (parsed.contextTab && ["nursing", "exams", "documents", "attachments", "timeline"].includes(parsed.contextTab)) {
+          setContextTab(parsed.contextTab);
+        }
+      }
+    } catch {
+      // Preferencias visuais nao devem bloquear o atendimento.
+    } finally {
+      setWorkspacePreferencesReady(true);
+    }
+  }, [workspacePreferenceKey]);
+
+  useEffect(() => {
+    if (!workspacePreferencesReady) return;
+    window.localStorage.setItem(
+      workspacePreferenceKey,
+      JSON.stringify({ contextOpen, contextTab }),
+    );
+  }, [contextOpen, contextTab, workspacePreferenceKey, workspacePreferencesReady]);
 
   useEffect(() => {
     if (state.error) {
@@ -423,7 +455,7 @@ export function MedicalRecordForm({
     { key: "exams", label: "Exames", icon: Beaker, count: diagnosticSummary.length },
     { key: "documents", label: "Documentos", icon: Pill, count: detail.prescriptions.length },
     { key: "attachments", label: "Anexos", icon: Paperclip, count: detail.attachments.length },
-    { key: "timeline", label: "Timeline", icon: History, count: detail.timeline.length },
+    { key: "timeline", label: "Histórico", icon: History, count: detail.timeline.length },
   ];
 
   return (
@@ -446,6 +478,16 @@ export function MedicalRecordForm({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setContextOpen((value) => !value)}
+              title={contextOpen ? "Ocultar contexto clínico" : "Mostrar contexto clínico"}
+            >
+              {contextOpen ? <PanelRightClose /> : <PanelRightOpen />}
+              {contextOpen ? "Ocultar contexto" : "Mostrar contexto"}
+            </Button>
             <span className={`rounded-md px-2.5 py-1 text-xs font-medium ${allergies === "Sem alergias registradas" ? "bg-muted text-muted-foreground" : "bg-red-50 text-red-700"}`}>
               Alergias: {allergies}
             </span>
@@ -555,14 +597,7 @@ export function MedicalRecordForm({
               </div>
               <div className="clinical-context-panel max-h-[calc(100vh-13rem)] overflow-y-auto p-3">
                 {contextTab === "nursing" ? (preferences.show_nursing_summary ? <NursingSummary detail={detail} /> : <p className="p-4 text-sm text-muted-foreground">Resumo de Enfermagem desativado nas preferências.</p>) : null}
-                {contextTab === "exams" ? (
-                  diagnosticSummary.length ? <div className="grid gap-2">{diagnosticSummary.map((order) => (
-                    <article key={order.id} className="rounded-md border bg-background p-3">
-                      <div className="flex items-center justify-between gap-2"><p className="selectable font-mono text-xs font-medium">{order.order_number}</p><span className="text-[11px] text-muted-foreground">{order.status === "completed" ? "Concluído" : "Em andamento"}</span></div>
-                      <div className="mt-2 grid gap-1.5">{order.items.map((item) => { const result = item.results.find((entry) => entry.status === "final") ?? item.results[0]; return <div key={item.id} className="rounded-md bg-muted/30 px-2.5 py-2"><div className="flex items-center justify-between gap-2"><span className="text-xs font-medium">{item.name}</span>{result?.flag && result.flag !== "normal" ? <span className="flex items-center gap-1 text-[11px] text-destructive"><AlertTriangle className="size-3" />{result.flag === "critical" ? "Crítico" : "Alterado"}</span> : null}</div><p className="selectable mt-1 text-xs text-muted-foreground">{result ? result.value_text || `${result.value_numeric ?? "-"} ${result.unit ?? ""}` : "Resultado pendente"}</p></div>; })}</div>
-                    </article>
-                  ))}</div> : <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">Nenhum exame vinculado.</p>
-                ) : null}
+                {contextTab === "exams" ? <ClinicalExamsPanel orders={diagnosticSummary} /> : null}
                 {contextTab === "documents" ? <MedicalDocumentsPanel detail={detail} branding={documentBranding} /> : null}
                 {contextTab === "attachments" ? <MedicalAttachmentsPanel detail={detail} /> : null}
                 {contextTab === "timeline" ? <MedicalTimelinePanel events={detail.timeline} /> : null}

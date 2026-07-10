@@ -220,6 +220,14 @@ export async function getDiagnosticsWorkspace(clinicId?: string | null): Promise
 }
 
 export async function getEncounterDiagnosticSummary(clinicId: string, encounterId: string) {
+  const authorization = await getClinicAuthorization(clinicId);
+  if (
+    !authorization.can("medical_records", "view") ||
+    !authorization.can("medical_records", "access_medical_record")
+  ) {
+    return [];
+  }
+
   const admin = createSupabaseAdminClient();
   const { data } = await admin.from("diagnostic_orders")
     .select("id, order_number, category, priority, status, created_at, items:diagnostic_order_items(id, name, status, results:diagnostic_results(id, status, value_text, value_numeric, unit, reference_range, flag, interpretation, version_number, resulted_at))")

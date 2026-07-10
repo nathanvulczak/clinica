@@ -12,6 +12,8 @@ import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
 import { getInventoryCareConsumption } from "@/repositories/inventory";
 import { getEncounterClinicalFormWorkspace } from "@/repositories/clinical-forms";
 import { getEncounterDiagnosticSummary } from "@/repositories/diagnostics";
+import { getClinicAuthorization } from "@/services/authorization/clinic-access";
+import { logAuditEvent } from "@/services/audit/audit-service";
 import { getClinicDocumentBranding } from "@/services/documents/clinic-document-branding";
 import {
   getMedicalRecordEncounterDetail,
@@ -59,6 +61,25 @@ export default async function MedicalRecordPage({
   ]);
 
   if (!detail) notFound();
+
+  const authorization = await getClinicAuthorization(activeClinic.id);
+  if (authorization.userId) {
+    await logAuditEvent({
+      clinicId: activeClinic.id,
+      userId: authorization.userId,
+      actionType: "medical_record_viewed",
+      module: "medical_records",
+      recordTable: detail.medical_record ? "medical_records" : "clinical_encounters",
+      recordId: detail.medical_record?.id ?? detail.id,
+      newValues: {
+        encounter_id: detail.id,
+        patient_id: detail.patient_id,
+        encounter_status: detail.status,
+      },
+      level: "security",
+      notes: "Prontuário do atendimento aberto para consulta clínica autorizada.",
+    });
+  }
 
   return (
     <>

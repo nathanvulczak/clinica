@@ -25,6 +25,14 @@ function ChipList({ items, limit }: { items: string[]; limit?: number }) {
   );
 }
 
+const visualMapLabels: Record<string, string> = {
+  body_composition: "Composição corporal",
+  body_pain: "Mapa corporal e dor",
+  face_skin: "Face e pele",
+  odontogram: "Odontograma",
+  voice_pathway: "Voz e deglutição",
+};
+
 export function SpecialtyExperiencePanel({
   specialty,
   variant = "full",
@@ -42,7 +50,7 @@ export function SpecialtyExperiencePanel({
           <Sparkles className="size-4 text-primary" />
           <p className="text-sm font-semibold">Experiencia ativada: {definition.shortLabel}</p>
           <Badge className="bg-primary/10 text-primary">{definition.suggestedCouncil}</Badge>
-          {definition.visualMap ? <Badge className="bg-muted text-muted-foreground">Mapa visual</Badge> : null}
+          {definition.visualMap ? <Badge className="bg-muted text-muted-foreground">{visualMapLabels[definition.visualMap] ?? "Mapa visual"}</Badge> : null}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{definition.description}</p>
         <div className="mt-3">
@@ -63,14 +71,14 @@ export function SpecialtyExperiencePanel({
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-sm font-semibold">Workspace {definition.shortLabel}</p>
               <Badge className="bg-primary/10 text-primary">{definition.suggestedCouncil}</Badge>
-              {definition.visualMap ? <Badge className="bg-muted text-muted-foreground">Mapa {definition.visualMap.replaceAll("_", " ")}</Badge> : null}
+              {definition.visualMap ? <Badge className="bg-muted text-muted-foreground">{visualMapLabels[definition.visualMap] ?? "Mapa visual"}</Badge> : null}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">{definition.description}</p>
           </div>
         </div>
       </header>
 
-      <div className="grid gap-3 p-4 xl:grid-cols-[1.15fr_1fr_1fr]">
+      <div className="grid gap-3 p-4 xl:grid-cols-[1.15fr_1fr]">
         <div className="rounded-md border bg-muted/10 p-3">
           <div className="mb-3 flex items-center gap-2">
             <GitBranch className="size-4 text-primary" />
@@ -88,44 +96,51 @@ export function SpecialtyExperiencePanel({
           </ol>
         </div>
 
-        <div className="grid gap-3">
-          <div className="rounded-md border bg-background p-3">
-            <div className="mb-2 flex items-center gap-2">
-              <LineChart className="size-4 text-primary" />
-              <p className="text-xs font-semibold uppercase text-muted-foreground">Indicadores</p>
-            </div>
-            <ChipList items={experience.keyIndicators} />
+        <div className="rounded-md border bg-background p-3">
+          <div className="mb-2 flex items-center gap-2">
+            <LineChart className="size-4 text-primary" />
+            <p className="text-xs font-semibold uppercase text-muted-foreground">Indicadores prioritários</p>
           </div>
-          <div className="rounded-md border bg-background p-3">
-            <div className="mb-2 flex items-center gap-2">
-              <Beaker className="size-4 text-primary" />
-              <p className="text-xs font-semibold uppercase text-muted-foreground">Exames frequentes</p>
-            </div>
-            <ChipList items={experience.suggestedExams} limit={6} />
-          </div>
+          <ChipList items={experience.keyIndicators} />
         </div>
 
-        <div className="grid gap-3">
-          <div className="rounded-md border bg-background p-3">
-            <div className="mb-2 flex items-center gap-2">
-              <FileText className="size-4 text-primary" />
-              <p className="text-xs font-semibold uppercase text-muted-foreground">Documentos sugeridos</p>
+        <details className="rounded-md border bg-background p-3 xl:col-span-2">
+          <summary className="cursor-pointer list-none text-xs font-semibold text-foreground marker:hidden">
+            <span className="inline-flex items-center gap-2">
+              <Beaker className="size-4 text-primary" />
+              Referências clínicas sugeridas
+              <span className="text-[11px] font-normal text-muted-foreground">Exames e documentos do fluxo</span>
+            </span>
+          </summary>
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <div className="rounded-md border bg-muted/10 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <Beaker className="size-4 text-primary" />
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Exames frequentes</p>
+              </div>
+              <ChipList items={experience.suggestedExams} limit={8} />
             </div>
-            <div className="grid gap-1.5">
-              {experience.documentTemplates.map((template) => (
-                <div key={template.key} className="rounded-md bg-muted/35 px-2.5 py-2 text-xs">
-                  <p className="font-medium">{template.title}</p>
-                  <p className="mt-0.5 text-muted-foreground">{template.description}</p>
-                </div>
-              ))}
+            <div className="rounded-md border bg-muted/10 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <FileText className="size-4 text-primary" />
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Documentos sugeridos</p>
+              </div>
+              <div className="grid gap-1.5">
+                {experience.documentTemplates.map((template) => (
+                  <div key={template.key} className="rounded-md bg-background px-2.5 py-2 text-xs">
+                    <p className="font-medium">{template.title}</p>
+                    <p className="mt-0.5 text-muted-foreground">{template.description}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        </details>
       </div>
 
       {experience.deduplicationHints.length ? (
         <div className="border-t bg-amber-50/70 px-4 py-3 text-xs text-amber-900">
-          <p className="font-semibold">Evitar duplicidade de informacao</p>
+          <p className="font-semibold">Evitar duplicidade de informação</p>
           <ul className="mt-1 grid gap-1">
             {experience.deduplicationHints.map((hint) => (
               <li key={hint}>- {hint}</li>

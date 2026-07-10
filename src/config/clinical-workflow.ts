@@ -1,14 +1,14 @@
 import type { ClinicalEncounterStatus } from "@/types/domain";
 
 export const CLINICAL_ENCOUNTER_STATUS_LABELS: Record<ClinicalEncounterStatus, string> = {
-  awaiting_preconsultation_decision: "Aguardando definicao",
-  waiting_triage: "Aguardando pre-consulta",
-  triage_in_progress: "Em pre-consulta",
+  awaiting_preconsultation_decision: "Aguardando definição",
+  waiting_triage: "Aguardando pré-consulta",
+  triage_in_progress: "Em pré-consulta",
   ready_for_consultation: "Liberado para atendimento",
   consultation_in_progress: "Consulta em andamento",
-  consultation_completed: "Atendimento concluido",
-  billing_pending: "Liberado para cobranca",
-  billed: "Cobranca concluida",
+  consultation_completed: "Atendimento concluído",
+  billing_pending: "Liberado para cobrança",
+  billed: "Cobrança concluída",
   cancelled: "Cancelado",
 };
 
