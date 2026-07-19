@@ -13,6 +13,7 @@ import {
   Target,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { getClinicalWorkspaceConfig, type ClinicalWorkspaceMode } from "@/config/clinical-workspaces";
 import {
   clinicalFormCompletion,
   type ClinicalFormField,
@@ -23,6 +24,7 @@ import {
 import { getClinicalFormAnalytics } from "@/features/medical-records/clinical-form-analytics";
 import { ClinicalImmersionMap } from "@/features/medical-records/components/clinical-immersion-map";
 import type { ClinicalFormTemplate, ClinicalFormWorkspace } from "@/repositories/clinical-forms";
+import { SpecialtyWorkspaceSummary } from "@/features/medical-records/components/specialty-workspace-summary";
 
 const inputClass = "h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-65";
 const textareaClass = "min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-65";
@@ -156,9 +158,19 @@ function ClinicalField({
 export function SpecialtyClinicalForm({
   workspace,
   disabled,
+  workspaceMode,
+  showVisualMap,
+  onWorkspaceModeChange,
+  onShowVisualMapChange,
+  workspacePreferencePending,
 }: {
   workspace: ClinicalFormWorkspace | null;
   disabled: boolean;
+  workspaceMode: ClinicalWorkspaceMode;
+  showVisualMap: boolean;
+  onWorkspaceModeChange: (mode: ClinicalWorkspaceMode) => void;
+  onShowVisualMapChange: (visible: boolean) => void;
+  workspacePreferencePending: boolean;
 }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState(workspace?.selectedTemplateId ?? "");
   const [responses, setResponses] = useState<ClinicalFormResponses>(workspace?.instance?.responses ?? {});
@@ -186,6 +198,7 @@ export function SpecialtyClinicalForm({
   }
 
   const selectedSpecialtySlug = selectedTemplate.specialty_slug;
+  const workspaceConfig = getClinicalWorkspaceConfig(selectedSpecialtySlug);
   const currentSection = definition.sections.find((section) => section.key === activeSection) ?? definition.sections[0];
   const completion = clinicalFormCompletion(definition, responses);
   const templateLocked = disabled || Boolean(workspace.instance && workspace.instance.status !== "draft");
@@ -232,6 +245,29 @@ export function SpecialtyClinicalForm({
         </div>
       </header>
 
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-background px-4 py-2.5">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Sparkles className="size-3.5 text-primary" />
+          <span>{workspaceConfig.title}</span>
+          {workspacePreferencePending ? <span className="text-primary">Salvando preferência...</span> : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-md border bg-muted/20 p-0.5" aria-label="Modo do workspace">
+            {(["guided", "compact"] as const).map((mode) => (
+              <button key={mode} type="button" disabled={disabled || workspacePreferencePending} onClick={() => onWorkspaceModeChange(mode)} className={`h-7 rounded px-2.5 text-[11px] font-medium transition-colors ${workspaceMode === mode ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                {mode === "guided" ? "Guiado" : "Compacto"}
+              </button>
+            ))}
+          </div>
+          {workspaceConfig.visualTool !== "Formulário especializado" ? (
+            <label className="flex h-8 items-center gap-1.5 rounded-md border bg-card px-2.5 text-[11px] font-medium">
+              <input type="checkbox" checked={showVisualMap} disabled={disabled || workspacePreferencePending} onChange={(event) => onShowVisualMapChange(event.target.checked)} className="size-3.5" />
+              Mapa visual
+            </label>
+          ) : null}
+        </div>
+      </div>
+
       <div className="grid gap-3 border-b bg-muted/15 px-4 py-3 lg:grid-cols-[1fr_auto] lg:items-end">
         <label className="grid max-w-xl gap-1.5 text-xs font-medium">
           Layout clínico
@@ -273,7 +309,7 @@ export function SpecialtyClinicalForm({
         </div>
       </div>
 
-      <div className="grid gap-3 border-b bg-muted/10 px-4 py-3 lg:grid-cols-2">
+      {workspaceMode === "guided" ? <div className="grid gap-3 border-b bg-muted/10 px-4 py-3 lg:grid-cols-2">
         <div className="rounded-md border bg-card p-3">
           <div className="flex items-center gap-2">
             <Target className="size-4 text-primary" />
@@ -305,18 +341,26 @@ export function SpecialtyClinicalForm({
             ) : null}
           </div>
         </div>
-      </div>
+      </div> : null}
 
       {warnings.length ? <div className="mx-4 mt-3 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><div><p className="font-semibold">Atenção clínica necessária</p><p className="mt-0.5">{warnings.map((field) => field.label).join(", ")}. Avalie e registre a conduta antes de concluir.</p></div></div> : null}
 
       <div className="px-4 pt-3">
+        <SpecialtyWorkspaceSummary
+          specialtySlug={selectedSpecialtySlug}
+          responses={responses}
+          visualMap={visualMaps[selectedSpecialtySlug]}
+        />
+      </div>
+
+      {showVisualMap ? <div className="px-4 pt-3">
         <ClinicalImmersionMap
           specialtySlug={selectedSpecialtySlug}
           value={visualMaps[selectedSpecialtySlug]}
           disabled={disabled}
           onChange={updateVisualMap}
         />
-      </div>
+      </div> : null}
 
       <div className="grid min-h-[360px] lg:grid-cols-[210px_1fr]">
         <nav className="border-b bg-muted/10 p-2 lg:border-b-0 lg:border-r">

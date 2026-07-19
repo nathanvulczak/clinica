@@ -6,8 +6,10 @@ import {
   type ClinicalFormDefinition,
   type ClinicalFormResponses,
 } from "@/features/medical-records/clinical-form-schema";
+import type { ClinicalWorkspaceMode } from "@/config/clinical-workspaces";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
+import { getClinicAuthorization } from "@/services/authorization/clinic-access";
 
 export type ClinicalFormTemplate = {
   id: string;
@@ -42,6 +44,10 @@ export type ClinicalFormWorkspace = {
   selectionSource: "existing" | "assignment" | "professional" | "clinic_default" | "fallback";
   professionalSpecialty: string | null;
   allowTemplateChoice: boolean;
+  preferences: {
+    mode: ClinicalWorkspaceMode;
+    showVisualMap: boolean;
+  };
   instance: ClinicalFormInstance | null;
 };
 
@@ -77,6 +83,7 @@ export async function getEncounterClinicalFormWorkspace(
   if (!access.canViewAll && !access.canViewOwn) return null;
 
   const admin = createSupabaseAdminClient();
+  const authorization = await getClinicAuthorization(clinicId);
   const { data: encounter } = await admin
     .from("clinical_encounters")
     .select("id, appointment_id, professional_member_id")
@@ -94,6 +101,7 @@ export async function getEncounterClinicalFormWorkspace(
     { data: professionalProfile },
     { data: preferences },
     { data: assignments },
+    { data: userPreferences },
   ] = await Promise.all([
     getClinicalFormTemplates(clinicId),
     admin
@@ -128,6 +136,16 @@ export async function getEncounterClinicalFormWorkspace(
       .eq("active", true)
       .is("deleted_at", null)
       .order("priority"),
+    authorization.userId
+      ? admin
+          .from("module_user_preferences")
+          .select("preferences")
+          .eq("clinic_id", clinicId)
+          .eq("user_id", authorization.userId)
+          .eq("module_key", "medical_records")
+          .is("deleted_at", null)
+          .maybeSingle<{ preferences: Record<string, unknown> }>()
+      : Promise.resolve({ data: null }),
   ]);
 
   const activeTemplates = templates.filter((template) => template.active);
@@ -177,12 +195,17 @@ export async function getEncounterClinicalFormWorkspace(
       }
     : null;
 
+  const storedPreferences = userPreferences?.preferences ?? {};
+  const workspaceMode: ClinicalWorkspaceMode = storedPreferences.mode === "compact" ? "compact" : "guided";
+  const showVisualMap = storedPreferences.showVisualMap !== false;
+
   return {
     templates: availableTemplates,
     selectedTemplateId,
     selectionSource,
     professionalSpecialty: professionalProfile?.specialty ?? null,
     allowTemplateChoice: preferences?.allow_professional_template_choice ?? true,
+    preferences: { mode: workspaceMode, showVisualMap },
     instance: normalizedInstance,
   };
 }

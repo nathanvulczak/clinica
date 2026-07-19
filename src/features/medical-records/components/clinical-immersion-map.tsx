@@ -13,6 +13,10 @@ type MapEntry = {
   status?: string;
   intensity?: number;
   notes?: string;
+  surface?: string;
+  product?: string;
+  lot?: string;
+  quantity?: string;
 };
 
 type VisualMapValue = {
@@ -96,6 +100,10 @@ function asVisualMapValue(value: ClinicalFormResponseMetadata | undefined, prese
           status: typeof source.status === "string" ? source.status : undefined,
           intensity: typeof source.intensity === "number" ? source.intensity : undefined,
           notes: typeof source.notes === "string" ? source.notes : undefined,
+          surface: typeof source.surface === "string" ? source.surface : undefined,
+          product: typeof source.product === "string" ? source.product : undefined,
+          lot: typeof source.lot === "string" ? source.lot : undefined,
+          quantity: typeof source.quantity === "string" ? source.quantity : undefined,
         },
       ]];
     }),
@@ -125,6 +133,10 @@ function serializeVisualMapValue(value: VisualMapValue): ClinicalFormResponseMet
           status: entry.status ?? null,
           intensity: entry.intensity ?? null,
           notes: entry.notes ?? null,
+          surface: entry.surface ?? null,
+          product: entry.product ?? null,
+          lot: entry.lot ?? null,
+          quantity: entry.quantity ?? null,
         },
       ]),
     ),
@@ -250,6 +262,20 @@ export function ClinicalImmersionMap({
       ? `Dente ${selectedRegion}`
       : regions.find((region) => region.id === selectedRegion)?.label ?? "Area";
   const currentEntry = selectedRegion ? mapValue.entries[selectedRegion] : undefined;
+  const isAesthetics = specialtySlug === "aesthetics";
+  const isDermatology = specialtySlug === "dermatology";
+  const mapTitle = preset === "odontogram"
+    ? "Odontograma clínico"
+    : isAesthetics
+      ? "Mapa de planejamento estético"
+      : isDermatology
+        ? "Mapa dermatológico"
+        : "Mapa clínico visual";
+  const statusOptions = preset === "odontogram"
+    ? [["healthy", "Hígido"], ["caries", "Cárie"], ["restored", "Restaurado"], ["treatment", "Em tratamento"], ["missing", "Ausente"]]
+    : isAesthetics
+      ? [["planned", "Planejada"], ["performed", "Realizada"], ["follow_up", "Acompanhar"], ["adverse_event", "Intercorrência"]]
+      : [["normal", "Normal"], ["attention", "Acompanhar"], ["altered", "Alterado"], ["treated", "Tratado"], ["critical", "Prioritário"]];
 
   function updateMap(next: Partial<VisualMapValue>) {
     onChange(serializeVisualMapValue({
@@ -286,11 +312,11 @@ export function ClinicalImmersionMap({
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm font-semibold">Mapa clinico visual</p>
+              <p className="text-sm font-semibold">{mapTitle}</p>
               <Badge className="bg-primary/10 text-primary">{specialty.shortLabel}</Badge>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Registre marcacoes estruturadas por area. Os dados ficam salvos no prontuario e auditados junto ao atendimento.
+              Registre marcações estruturadas por área. Os dados ficam salvos no prontuário e auditados junto ao atendimento.
             </p>
           </div>
         </div>
@@ -358,15 +384,45 @@ export function ClinicalImmersionMap({
                   onChange={(event) => selectedRegion && updateEntry(selectedRegion, { status: event.target.value })}
                   className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <option value="">Sem status</option>
-                  <option value="normal">Normal</option>
-                  <option value="attention">Acompanhar</option>
-                  <option value="altered">Alterado</option>
-                  <option value="treated">Tratado</option>
-                  <option value="critical">Prioritario</option>
+                  <option value="">Sem classificação</option>
+                  {statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
             </div>
+            {preset === "odontogram" ? (
+              <label className="mt-3 grid gap-1.5 text-xs font-medium">
+                Superfície
+                <select
+                  value={currentEntry?.surface ?? ""}
+                  disabled={disabled || !selectedRegion}
+                  onChange={(event) => selectedRegion && updateEntry(selectedRegion, { surface: event.target.value })}
+                  className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="">Não especificada</option>
+                  <option value="oclusal">Oclusal</option>
+                  <option value="mesial">Mesial</option>
+                  <option value="distal">Distal</option>
+                  <option value="vestibular">Vestibular</option>
+                  <option value="lingual">Lingual/palatina</option>
+                </select>
+              </label>
+            ) : null}
+            {isAesthetics ? (
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <label className="grid gap-1.5 text-xs font-medium sm:col-span-1">
+                  Produto
+                  <input value={currentEntry?.product ?? ""} disabled={disabled || !selectedRegion} onChange={(event) => selectedRegion && updateEntry(selectedRegion, { product: event.target.value })} className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="Nome comercial" />
+                </label>
+                <label className="grid gap-1.5 text-xs font-medium">
+                  Lote
+                  <input value={currentEntry?.lot ?? ""} disabled={disabled || !selectedRegion} onChange={(event) => selectedRegion && updateEntry(selectedRegion, { lot: event.target.value })} className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="Lote" />
+                </label>
+                <label className="grid gap-1.5 text-xs font-medium">
+                  Quantidade
+                  <input value={currentEntry?.quantity ?? ""} disabled={disabled || !selectedRegion} onChange={(event) => selectedRegion && updateEntry(selectedRegion, { quantity: event.target.value })} className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="Ex.: 0,5 mL" />
+                </label>
+              </div>
+            ) : null}
             <label className="mt-3 grid gap-1.5 text-xs font-medium">
               Observacao da area
               <textarea
@@ -392,6 +448,8 @@ export function ClinicalImmersionMap({
                       <span className="font-medium">{entry.label}</span>
                       <span className="text-muted-foreground">{entry.status || entry.value || entry.intensity}</span>
                     </div>
+                    {entry.surface ? <p className="mt-1 text-muted-foreground">Superfície: {entry.surface}</p> : null}
+                    {entry.product || entry.lot || entry.quantity ? <p className="mt-1 text-muted-foreground">{[entry.product, entry.lot && `Lote ${entry.lot}`, entry.quantity].filter(Boolean).join(" · ")}</p> : null}
                     {entry.notes ? <p className="selectable mt-1 text-muted-foreground">{entry.notes}</p> : null}
                   </div>
                 ))

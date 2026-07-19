@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -48,6 +48,8 @@ import type { MedicalRecordEncounterDetail, MedicalRecordPreferences } from "@/r
 import type { ClinicalFormWorkspace } from "@/repositories/clinical-forms";
 import type { ClinicDocumentBranding } from "@/services/documents/clinic-document-branding";
 import { clinicalStatusLabel } from "@/features/medical-records/labels";
+import { saveMedicalWorkspacePreferencesAction } from "@/features/medical-records/actions";
+import type { ClinicalWorkspaceMode } from "@/config/clinical-workspaces";
 
 type ClinicalContextTab = "nursing" | "exams" | "documents" | "attachments" | "timeline";
 
@@ -361,6 +363,9 @@ export function MedicalRecordForm({
   const [correctionReason, setCorrectionReason] = useState(record?.correction_reason ?? "");
   const [contextOpen, setContextOpen] = useState(true);
   const [contextTab, setContextTab] = useState<ClinicalContextTab>("nursing");
+  const [workspaceMode, setWorkspaceMode] = useState<ClinicalWorkspaceMode>(clinicalFormWorkspace?.preferences.mode ?? "guided");
+  const [showVisualMap, setShowVisualMap] = useState(clinicalFormWorkspace?.preferences.showVisualMap ?? true);
+  const [workspacePreferencePending, startWorkspacePreferenceTransition] = useTransition();
   const [workspacePreferencesReady, setWorkspacePreferencesReady] = useState(false);
   const [state, formAction, pending] = useActionState<MedicalRecordActionState, FormData>(
     saveMedicalRecordAction,
@@ -373,6 +378,25 @@ export function MedicalRecordForm({
   const { toast } = useToast();
   const router = useRouter();
   const workspacePreferenceKey = `clinicore.medical-record.workspace.${detail.clinic_id}`;
+
+  function saveWorkspacePreferences(next: Partial<{ mode: ClinicalWorkspaceMode; showVisualMap: boolean }>) {
+    const nextMode = next.mode ?? workspaceMode;
+    const nextShowVisualMap = next.showVisualMap ?? showVisualMap;
+    setWorkspaceMode(nextMode);
+    setShowVisualMap(nextShowVisualMap);
+    startWorkspacePreferenceTransition(() => {
+      const formData = new FormData();
+      formData.set("mode", nextMode);
+      formData.set("show_visual_map", String(nextShowVisualMap));
+      void saveMedicalWorkspacePreferencesAction(formData).then((result) => {
+        if (result.error) {
+          toast({ title: "Preferência não salva", description: result.error, variant: "destructive" });
+        } else if (result.success) {
+          toast({ title: "Workspace clínico", description: result.success });
+        }
+      });
+    });
+  }
 
   useEffect(() => {
     try {
@@ -528,8 +552,16 @@ export function MedicalRecordForm({
           <input ref={modeRef} type="hidden" name="mode" value="draft" />
           <input type="hidden" name="correction_reason" value={correctionReason} />
 
-          <SpecialtyExperiencePanel specialty={detail.professional_profile?.specialty} />
-          <SpecialtyClinicalForm workspace={clinicalFormWorkspace} disabled={locked} />
+          <SpecialtyExperiencePanel specialty={detail.professional_profile?.specialty} variant={workspaceMode === "compact" ? "compact" : "full"} />
+          <SpecialtyClinicalForm
+            workspace={clinicalFormWorkspace}
+            disabled={locked}
+            workspaceMode={workspaceMode}
+            showVisualMap={showVisualMap}
+            onWorkspaceModeChange={(mode) => saveWorkspacePreferences({ mode })}
+            onShowVisualMapChange={(visible) => saveWorkspacePreferences({ showVisualMap: visible })}
+            workspacePreferencePending={workspacePreferencePending}
+          />
 
           <section className="grid gap-4 rounded-lg border bg-card p-4">
             <div className="flex items-center gap-3 border-b pb-3">

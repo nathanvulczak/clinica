@@ -84,6 +84,11 @@ const preferencesSchema = z.object({
   active_specialty_slugs: z.array(z.string().regex(/^[a-z][a-z0-9_]{2,79}$/)).min(1),
 });
 
+const workspacePreferencesSchema = z.object({
+  mode: z.enum(["guided", "compact"]),
+  show_visual_map: z.boolean(),
+});
+
 const commentSchema = z.object({
   patient_id: z.string().uuid(),
   encounter_id: z.string().uuid().optional().or(z.literal("")).transform((value) => value || null),
@@ -979,6 +984,68 @@ export async function upsertMedicalRecordPreferencesAction(
   revalidatePath("/prontuarios");
   revalidatePath("/auditoria");
   return { success: "Preferencias de prontuario salvas." };
+}
+
+export async function saveMedicalWorkspacePreferencesAction(
+  formData: FormData,
+): Promise<MedicalRecordActionState> {
+  const parsed = workspacePreferencesSchema.safeParse({
+    mode: formData.get("mode"),
+    show_visual_map: formData.get("show_visual_map") === "true",
+  });
+  if (!parsed.success) return { error: "Preferências do workspace inválidas." };
+
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clínica e autentique-se novamente." };
+  if (!context.access.canViewOwn && !context.access.canViewAll) {
+    return { error: "Seu perfil não possui acesso ao workspace clínico." };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: previous } = await admin
+    .from("module_user_preferences")
+    .select("preferences")
+    .eq("clinic_id", context.activeClinic.id)
+    .eq("user_id", context.user.id)
+    .eq("module_key", "medical_records")
+    .is("deleted_at", null)
+    .maybeSingle<{ preferences: Record<string, unknown> }>();
+
+  const preferences = {
+    ...(previous?.preferences ?? {}),
+    mode: parsed.data.mode,
+    showVisualMap: parsed.data.show_visual_map,
+  };
+  const { error } = await context.supabase.rpc("save_module_user_preferences", {
+    module_name: "medical_records",
+    preference_payload: {
+      clinic_id: context.activeClinic.id,
+      preferences,
+    },
+  });
+
+  if (error) {
+    reportServerError("medical_records.workspace_preferences", error, {
+      clinicId: context.activeClinic.id,
+      userId: context.user.id,
+    });
+    return { error: "Não foi possível salvar as preferências do workspace." };
+  }
+
+  await logAuditEvent({
+    clinicId: context.activeClinic.id,
+    userId: context.user.id,
+    actionType: "medical_workspace_preferences_updated",
+    module: "medical_records",
+    recordTable: "module_user_preferences",
+    recordId: context.user.id,
+    oldValues: previous?.preferences ?? null,
+    newValues: preferences,
+    notes: "Preferências pessoais do workspace clínico atualizadas.",
+  });
+
+  revalidatePath("/prontuarios");
+  return { success: "Preferência do workspace salva." };
 }
 
 export async function addPatientClinicalCommentAction(
