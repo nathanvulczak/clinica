@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CircleDot, ScanFace, Smile, UserRound, Waves } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -151,85 +151,179 @@ function iconForPreset(preset: string) {
   return UserRound;
 }
 
-function BodySilhouette({
-  regions,
-  value,
-  onSelect,
-}: {
-  regions: Region[];
-  value: VisualMapValue;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <svg viewBox="0 0 100 100" className="h-[300px] w-full max-w-[280px]" role="img" aria-label="Mapa corporal">
-      <defs>
-        <linearGradient id="clinical-body-fill" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stopColor="rgba(15,118,110,0.13)" />
-          <stop offset="100%" stopColor="rgba(15,118,110,0.03)" />
-        </linearGradient>
-      </defs>
-      <circle cx="50" cy="10" r="7" fill="url(#clinical-body-fill)" stroke="currentColor" strokeWidth="0.7" />
-      <path d="M38 21 C33 35 34 47 40 58 L42 91 M62 21 C67 35 66 47 60 58 L58 91 M39 24 C45 29 55 29 61 24 M42 58 C47 61 53 61 58 58" fill="none" stroke="currentColor" strokeWidth="1.1" opacity="0.45" />
-      <path d="M38 22 C25 28 22 44 25 58 M62 22 C75 28 78 44 75 58" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.35" />
-      {regions.map((region) => {
-        const active = value.selectedRegion === region.id;
-        const filled = Boolean(value.entries[region.id]?.value || value.entries[region.id]?.status);
-        return (
-          <g
-            key={region.id}
-            role="button"
-            tabIndex={0}
-            className="cursor-pointer outline-none"
-            onClick={() => onSelect(region.id)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") onSelect(region.id);
-            }}
-            aria-label={region.label}
-          >
-            <circle cx={region.x} cy={region.y} r={active ? 4.3 : 3.4} fill={active ? "var(--primary)" : filled ? "#14b8a6" : "white"} stroke="var(--primary)" strokeWidth="0.9" />
-            <circle cx={region.x} cy={region.y} r={active ? 8 : 6} fill="transparent" />
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-function Odontogram({
-  value,
-  onSelect,
-}: {
-  value: VisualMapValue;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div className="grid grid-cols-8 gap-1 rounded-md border bg-background p-2">
-      {odontogramTeeth.map((tooth, index) => {
-        const active = value.selectedRegion === tooth;
-        const status = value.entries[tooth]?.status;
-        return (
-          <button
-            key={`${tooth}-${index}`}
-            type="button"
-            onClick={() => onSelect(tooth)}
-            className={`h-8 rounded border text-[11px] font-medium tabular-nums transition-colors duration-150 ${
-              active ? "border-primary bg-primary text-primary-foreground" : status ? "border-primary/40 bg-primary/10" : "bg-card hover:bg-muted"
-            }`}
-          >
-            {tooth}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function selectedRegionsForPreset(preset: string) {
   if (preset === "body_composition") return bodyCompositionRegions;
   if (preset === "body_pain") return painRegions;
   if (preset === "face_skin") return faceRegions;
   if (preset === "voice_pathway") return voiceRegions;
   return [];
+}
+
+function CanvasClinicalMap({
+  preset,
+  regions,
+  value,
+  onSelect,
+}: {
+  preset: string;
+  regions: Region[];
+  value: VisualMapValue;
+  onSelect: (id: string) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const selectedId = value.selectedRegion ?? "";
+
+  const points = useMemo(() => {
+    if (preset !== "odontogram") return regions.map((region) => ({ ...region, width: 0, height: 0 }));
+    return odontogramTeeth.map((tooth, index) => ({
+      id: tooth,
+      label: `Dente ${tooth}`,
+      x: 25 + (index % 16) * 20.5,
+      y: index < 16 ? 34 : 106,
+      width: 17,
+      height: 42,
+    }));
+  }, [preset, regions]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const width = 360;
+    const height = preset === "odontogram" ? 150 : 280;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.aspectRatio = `${width} / ${height}`;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = "rgba(15, 118, 110, 0.035)";
+    context.fillRect(0, 0, width, height);
+    context.lineWidth = 1.4;
+    context.strokeStyle = "rgba(15, 118, 110, 0.55)";
+    context.fillStyle = "rgba(15, 118, 110, 0.08)";
+
+    if (preset === "odontogram") {
+      context.font = "600 11px system-ui";
+      context.textAlign = "center";
+      points.forEach((point) => {
+        const selected = point.id === selectedId;
+        const filled = Boolean(value.entries[point.id]?.status || value.entries[point.id]?.value);
+        context.fillStyle = selected ? "#0f766e" : filled ? "rgba(20, 184, 166, 0.24)" : "#ffffff";
+        context.strokeStyle = selected ? "#0f766e" : "rgba(15, 118, 110, 0.55)";
+        context.beginPath();
+        context.roundRect(point.x - point.width / 2, point.y - point.height / 2, point.width, point.height, 5);
+        context.fill();
+        context.stroke();
+        context.fillStyle = selected ? "#ffffff" : "#334155";
+        context.fillText(point.id, point.x, point.y + 4);
+      });
+      context.textAlign = "left";
+      context.fillStyle = "#64706f";
+      context.font = "11px system-ui";
+      context.fillText("Arcada superior", 12, 16);
+      context.fillText("Arcada inferior", 12, 142);
+      return;
+    }
+
+    const centerX = width / 2;
+    if (preset === "face_skin") {
+      context.beginPath();
+      context.ellipse(centerX, 140, 74, 112, 0, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+      context.beginPath();
+      context.moveTo(centerX - 28, 136);
+      context.quadraticCurveTo(centerX, 146, centerX + 28, 136);
+      context.moveTo(centerX - 22, 174);
+      context.quadraticCurveTo(centerX, 188, centerX + 22, 174);
+      context.stroke();
+    } else if (preset === "voice_pathway") {
+      context.beginPath();
+      context.moveTo(centerX - 24, 46);
+      context.lineTo(centerX - 38, 238);
+      context.moveTo(centerX + 24, 46);
+      context.lineTo(centerX + 38, 238);
+      context.moveTo(centerX - 38, 238);
+      context.quadraticCurveTo(centerX, 258, centerX + 38, 238);
+      context.stroke();
+      context.beginPath();
+      context.arc(centerX, 35, 22, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+    } else {
+      context.beginPath();
+      context.arc(centerX, 30, 23, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+      context.beginPath();
+      context.moveTo(centerX - 29, 58);
+      context.bezierCurveTo(centerX - 52, 84, centerX - 54, 138, centerX - 29, 163);
+      context.lineTo(centerX - 22, 258);
+      context.moveTo(centerX + 29, 58);
+      context.bezierCurveTo(centerX + 52, 84, centerX + 54, 138, centerX + 29, 163);
+      context.lineTo(centerX + 22, 258);
+      context.moveTo(centerX - 29, 163);
+      context.quadraticCurveTo(centerX, 176, centerX + 29, 163);
+      context.stroke();
+    }
+
+    points.forEach((point) => {
+      const selected = point.id === selectedId;
+      const filled = Boolean(value.entries[point.id]?.status || value.entries[point.id]?.value || value.entries[point.id]?.intensity);
+      context.beginPath();
+      context.arc((point.x / 100) * width, (point.y / 100) * height, selected ? 8 : 6, 0, Math.PI * 2);
+      context.fillStyle = selected ? "#0f766e" : filled ? "#14b8a6" : "#ffffff";
+      context.fill();
+      context.strokeStyle = "#0f766e";
+      context.stroke();
+    });
+  }, [points, preset, selectedId, value.entries]);
+
+  function selectFromPointer(event: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 360;
+    const height = preset === "odontogram" ? 150 : 280;
+    const y = ((event.clientY - rect.top) / rect.height) * height;
+    const selected = points.find((point) => {
+      if (preset === "odontogram") {
+        return Math.abs(x - point.x) <= point.width && Math.abs(y - point.y) <= point.height;
+      }
+      return Math.hypot(x - (point.x / 100) * 360, y - (point.y / 100) * height) <= 18;
+    });
+    if (selected) onSelect(selected.id);
+  }
+
+  return (
+    <div className="grid gap-2">
+      <canvas
+        ref={canvasRef}
+        className="h-auto w-full rounded-md border bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        role="img"
+        tabIndex={0}
+        aria-label="Mapa clínico visual interativo"
+        onPointerDown={selectFromPointer}
+      />
+      <details className="rounded-md border bg-background px-2.5 py-2">
+        <summary className="cursor-pointer text-[11px] font-semibold text-muted-foreground">Abrir lista acessível de regiões</summary>
+        <div className="mt-2 grid max-h-36 gap-1 overflow-y-auto sm:grid-cols-2">
+          {points.map((point) => (
+            <button
+              key={point.id}
+              type="button"
+              onClick={() => onSelect(point.id)}
+              className={`rounded px-2 py-1.5 text-left text-[11px] ${selectedId === point.id ? "bg-primary/10 font-medium text-primary" : "hover:bg-muted"}`}
+            >
+              {point.label}
+            </button>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
 }
 
 export function ClinicalImmersionMap({
@@ -339,13 +433,12 @@ export function ClinicalImmersionMap({
 
       <div className="grid gap-4 p-4 lg:grid-cols-[minmax(260px,340px)_1fr]">
         <div className="rounded-md border bg-muted/10 p-3">
-          {preset === "odontogram" ? (
-            <Odontogram value={mapValue} onSelect={(id) => updateMap({ selectedRegion: id })} />
-          ) : (
-            <div className="grid place-items-center text-primary">
-              <BodySilhouette regions={regions} value={mapValue} onSelect={(id) => updateMap({ selectedRegion: id })} />
-            </div>
-          )}
+          <CanvasClinicalMap
+            preset={preset}
+            regions={regions}
+            value={mapValue}
+            onSelect={(id) => updateMap({ selectedRegion: id })}
+          />
         </div>
 
         <div className="grid content-start gap-3">

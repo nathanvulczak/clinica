@@ -8,6 +8,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
 import { logAuditEvent } from "@/services/audit/audit-service";
 import { ensureClinicalEncounterForAppointment } from "@/services/clinical-workflow/ensure-encounter";
+import { advanceProtocolForEncounter } from "@/services/clinical-workflow/protocol-run";
 import type { ClinicalEncounterStatus } from "@/types/domain";
 
 export type ClinicalWorkflowActionState = {
@@ -204,7 +205,7 @@ export async function routeClinicalEncounterAction(
     return { error: workflowError(error.message) };
   }
 
-  const { error: protocolError } = await context.supabase.rpc("start_clinical_protocol_run", {
+  const { data: protocolRunId, error: protocolError } = await context.supabase.rpc("start_clinical_protocol_run", {
     encounter_uuid: encounterId,
   });
   if (protocolError && !/not_configured|not found|P0002/i.test(protocolError.message)) {
@@ -218,6 +219,25 @@ export async function routeClinicalEncounterAction(
       level: "warning",
       notes: "O encaminhamento foi salvo, mas a execução do protocolo não pôde ser iniciada.",
     });
+  }
+  if (!protocolError && protocolRunId) {
+    const protocolStep = await advanceProtocolForEncounter({
+      clinicId: context.activeClinic.id,
+      encounterId,
+      preferredKind: parsed.data.requires_preconsultation ? "nursing" : "clinical_form",
+    });
+    if (!protocolStep.ok) {
+      await logAuditEvent({
+        clinicId: context.activeClinic.id,
+        userId: context.user.id,
+        actionType: "clinical_protocol_step_sync_failed",
+        module: "medical_records",
+        recordTable: "clinical_protocol_runs",
+        recordId: String(protocolRunId),
+        level: "warning",
+        notes: "A etapa do protocolo nao pode ser sincronizada apos o encaminhamento.",
+      });
+    }
   }
 
   await logAuditEvent({
@@ -335,6 +355,26 @@ async function transitionClinicalEncounter(
       });
     }
     return { error: workflowError(error.message) };
+  }
+
+  if (targetStatus === "ready_for_consultation" || targetStatus === "consultation_completed") {
+    const protocolStep = await advanceProtocolForEncounter({
+      clinicId: context.activeClinic.id,
+      encounterId,
+      preferredKind: targetStatus === "ready_for_consultation" ? "clinical_form" : "checklist",
+    });
+    if (!protocolStep.ok) {
+      await logAuditEvent({
+        clinicId: context.activeClinic.id,
+        userId: context.user.id,
+        actionType: "clinical_protocol_step_sync_failed",
+        module: "medical_records",
+        recordTable: "clinical_protocol_runs",
+        recordId: encounterId,
+        level: "warning",
+        notes: "A etapa assistencial foi salva, mas o protocolo nao pode ser sincronizado.",
+      });
+    }
   }
 
   const labels: Record<ClinicalEncounterStatus, string> = {

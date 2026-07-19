@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getActiveClinicContext } from "@/features/clinics/context";
 import { InventoryConsumptionPanel } from "@/features/inventory/components/inventory-consumption-panel";
 import { MedicalRecordForm } from "@/features/medical-records/components/medical-record-form";
+import { getEncounterClinicalProtocolRun } from "@/repositories/clinical-protocols";
 import { getClinicalWorkflowAccess } from "@/repositories/clinical-workflow";
 import { getInventoryCareConsumption } from "@/repositories/inventory";
 import { getEncounterClinicalFormWorkspace } from "@/repositories/clinical-forms";
@@ -51,13 +52,14 @@ export default async function MedicalRecordPage({
     );
   }
 
-  const [detail, preferences, documentBranding, inventoryCare, clinicalFormWorkspace, diagnosticSummary] = await Promise.all([
+  const [detail, preferences, documentBranding, inventoryCare, clinicalFormWorkspace, diagnosticSummary, protocolRun] = await Promise.all([
     getMedicalRecordEncounterDetail(activeClinic.id, encounterId),
     getMedicalRecordPreferences(activeClinic.id),
     getClinicDocumentBranding(activeClinic.id),
     getInventoryCareConsumption(activeClinic.id, encounterId),
     getEncounterClinicalFormWorkspace(activeClinic.id, encounterId),
     getEncounterDiagnosticSummary(activeClinic.id, encounterId),
+    getEncounterClinicalProtocolRun(activeClinic.id, encounterId),
   ]);
 
   if (!detail) notFound();
@@ -110,7 +112,7 @@ export default async function MedicalRecordPage({
 
       <div className="grid gap-4">
         <RealtimeClinicSync clinicId={activeClinic.id} tables={["clinical_encounters"]} />
-        <MedicalRecordForm detail={detail} preferences={preferences} documentBranding={documentBranding} clinicalFormWorkspace={clinicalFormWorkspace} diagnosticSummary={diagnosticSummary} />
+        <MedicalRecordForm detail={detail} preferences={preferences} documentBranding={documentBranding} clinicalFormWorkspace={clinicalFormWorkspace} diagnosticSummary={diagnosticSummary} protocolRun={protocolRun} />
         <InventoryConsumptionPanel
           items={inventoryCare.items}
           locations={inventoryCare.locations}

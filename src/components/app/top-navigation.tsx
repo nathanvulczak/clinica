@@ -11,6 +11,7 @@ import {
 } from "@/config/app-navigation";
 import { signOutAction } from "@/features/auth/actions";
 import { ClinicSwitcher } from "@/features/clinics/components/clinic-switcher";
+import { SessionExpiryIndicator } from "@/components/app/session-expiry-indicator";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -309,6 +310,8 @@ export function TopNavigation({
             <ChevronRight className="size-3.5" />
           </button>
         </div>
+
+        <SessionExpiryIndicator userId={profile?.id} />
 
         <DropdownMenu modal={false} onOpenChange={(open) => open && setOpenMenu(null)}>
           <DropdownMenuTrigger asChild>

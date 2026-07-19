@@ -36,6 +36,18 @@ export type ClinicalProtocol = {
   } | null;
 };
 
+export type ClinicalProtocolRunWorkspace = {
+  id: string;
+  protocolId: string;
+  protocolName: string;
+  versionNumber: number;
+  status: "in_progress" | "completed" | "cancelled";
+  currentStepKey: string;
+  startedAt: string;
+  completedAt: string | null;
+  steps: ClinicalProtocolStep[];
+};
+
 function normalizeDefinition(value: unknown): ClinicalProtocolDefinition {
   if (!value || typeof value !== "object" || Array.isArray(value)) return { steps: [] };
   const root = value as { steps?: unknown };
@@ -99,4 +111,41 @@ export async function listClinicalProtocols(clinicId: string | null | undefined)
   }
 
   return (protocols ?? []).map((protocol) => ({ ...protocol, latest_version: versionMap.get(protocol.id) ?? null })) as ClinicalProtocol[];
+}
+
+export async function getEncounterClinicalProtocolRun(
+  clinicId: string | null | undefined,
+  encounterId: string,
+): Promise<ClinicalProtocolRunWorkspace | null> {
+  if (!clinicId) return null;
+
+  const authorization = await getClinicAuthorization(clinicId);
+  if (!authorization.can("medical_records", "view")) return null;
+
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin
+    .from("clinical_protocol_runs")
+    .select("id, protocol_id, protocol_version_id, version_snapshot, current_step_key, status, started_at, completed_at, protocol:clinical_protocols(name), version:clinical_protocol_versions(version_number)")
+    .eq("clinic_id", clinicId)
+    .eq("encounter_id", encounterId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (!data) return null;
+
+  const protocol = Array.isArray(data.protocol) ? data.protocol[0] : data.protocol;
+  const version = Array.isArray(data.version) ? data.version[0] : data.version;
+  const snapshot = normalizeDefinition(data.version_snapshot);
+
+  return {
+    id: data.id,
+    protocolId: data.protocol_id,
+    protocolName: protocol?.name ?? "Fluxo clínico da clínica",
+    versionNumber: version?.version_number ?? 1,
+    status: data.status,
+    currentStepKey: data.current_step_key,
+    startedAt: data.started_at,
+    completedAt: data.completed_at,
+    steps: snapshot.steps,
+  };
 }

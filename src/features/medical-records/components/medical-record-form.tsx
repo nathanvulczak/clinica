@@ -37,6 +37,7 @@ import {
 } from "@/features/medical-records/components/clinical-exams-panel";
 import { SpecialtyClinicalForm } from "@/features/medical-records/components/specialty-clinical-form";
 import { SpecialtyExperiencePanel } from "@/features/medical-records/components/specialty-experience-panel";
+import { ClinicalProtocolRibbon } from "@/features/medical-records/components/clinical-protocol-ribbon";
 import { getClinicalSpecialty, getClinicalSpecialtyExperience } from "@/config/clinical-specialties";
 import { getClinicalFormAnalytics } from "@/features/medical-records/clinical-form-analytics";
 import {
@@ -50,6 +51,7 @@ import type { ClinicDocumentBranding } from "@/services/documents/clinic-documen
 import { clinicalStatusLabel } from "@/features/medical-records/labels";
 import { saveMedicalWorkspacePreferencesAction } from "@/features/medical-records/actions";
 import type { ClinicalWorkspaceMode } from "@/config/clinical-workspaces";
+import type { ClinicalProtocolRunWorkspace } from "@/repositories/clinical-protocols";
 
 type ClinicalContextTab = "nursing" | "exams" | "documents" | "attachments" | "timeline";
 
@@ -345,12 +347,14 @@ export function MedicalRecordForm({
   documentBranding,
   clinicalFormWorkspace,
   diagnosticSummary,
+  protocolRun,
 }: {
   detail: MedicalRecordEncounterDetail;
   preferences: MedicalRecordPreferences;
   documentBranding: ClinicDocumentBranding;
   clinicalFormWorkspace: ClinicalFormWorkspace | null;
   diagnosticSummary: DiagnosticSummary;
+  protocolRun: ClinicalProtocolRunWorkspace | null;
 }) {
   const record = detail.medical_record;
   const requiredFields = new Set<MedicalRecordFieldKey>(preferences.required_fields);
@@ -537,6 +541,8 @@ export function MedicalRecordForm({
           </label>
         ) : null}
       </section>
+
+      <ClinicalProtocolRibbon run={protocolRun} />
 
       <ClinicalDecisionBrief
         detail={detail}
