@@ -39,6 +39,20 @@ Execute os arquivos uma única vez e na ordem numérica:
 33. `033_documents_inventory_operations.sql`
 34. `034_security_transactions_quality.sql`
 35. `035_clinical_encounter_routing_integrity.sql`
+36. `036_schedule_dashboard_experience.sql`
+37. `037_intelligent_document_issuance.sql`
+38. `038_advanced_specialty_clinical_forms.sql`
+39. `039_diagnostics_insurance_permission_modules.sql`
+40. `040_diagnostics_tiss_foundation.sql`
+41. `041_company_registration_profiles.sql`
+42. `042_document_editor_page_settings.sql`
+43. `043_normalize_document_template_content.sql`
+44. `044_specialty_immersion_packs.sql`
+45. `045_diagnostic_requests_attachments.sql`
+46. `046_clinical_protocol_engine.sql`
+47. `047_compliance_governance.sql`
+48. `048_reconcile_migration_history.sql`
+49. `049_reconcile_rbac_catalog.sql`
 
 As execuções são registradas em `app_migration_history`. Use os scripts do
 projeto para validar e aplicar uma migration com checksum, sem colar SQL

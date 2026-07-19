@@ -79,6 +79,7 @@ export const APP_NAVIGATION_MODULES: AppNavigationModule[] = [
       { label: "Pacientes", href: "/prontuarios?section=patients" },
       { label: "Relatórios", href: "/prontuarios?section=reports", separatorBefore: true },
       { label: "Preferências", href: "/prontuarios?section=preferences" },
+      { label: "Protocolos clínicos", href: "/prontuarios?section=protocols", separatorBefore: true },
     ],
   },
   {
@@ -169,6 +170,7 @@ export const APP_NAVIGATION_MODULES: AppNavigationModule[] = [
       { label: "Identidade e documentos", href: "/clinicas/identidade", navigationKey: "clinics" },
       { label: "Usuários e permissões", href: "/usuarios", navigationKey: "members" },
       { label: "Backup", href: "/administracao/backup", navigationKey: "backup" },
+      { label: "Conformidade e LGPD", href: "/administracao/conformidade", navigationKey: "compliance" },
       { label: "Assinatura", href: "/assinatura", navigationKey: "billing", separatorBefore: true },
       { label: "Auditoria", href: "/auditoria", navigationKey: "audit" },
     ],

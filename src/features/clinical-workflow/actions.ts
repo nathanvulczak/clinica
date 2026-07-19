@@ -204,6 +204,22 @@ export async function routeClinicalEncounterAction(
     return { error: workflowError(error.message) };
   }
 
+  const { error: protocolError } = await context.supabase.rpc("start_clinical_protocol_run", {
+    encounter_uuid: encounterId,
+  });
+  if (protocolError && !/not_configured|not found|P0002/i.test(protocolError.message)) {
+    await logAuditEvent({
+      clinicId: context.activeClinic.id,
+      userId: context.user.id,
+      actionType: "clinical_protocol_start_failed",
+      module: "medical_records",
+      recordTable: "clinical_protocol_runs",
+      recordId: encounterId,
+      level: "warning",
+      notes: "O encaminhamento foi salvo, mas a execução do protocolo não pôde ser iniciada.",
+    });
+  }
+
   await logAuditEvent({
     clinicId: context.activeClinic.id,
     userId: context.user.id,

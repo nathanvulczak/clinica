@@ -84,6 +84,7 @@ export default function Home() {
       </section>
 
       <section className="bg-white py-16"><div className="mx-auto flex max-w-7xl flex-col gap-6 px-5 lg:flex-row lg:items-center lg:justify-between lg:px-8"><div><ClipboardList className="size-5 text-primary" /><h2 className="mt-3 text-2xl font-semibold">Uma operação mais clara começa pela base.</h2><p className="mt-2 text-sm text-muted-foreground">Crie sua conta, escolha o plano e configure a primeira clínica.</p></div><Button asChild size="lg"><Link href="/cadastro">Começar agora<ArrowRight /></Link></Button></div></section>
+      <footer className="border-t bg-[#f7f8f7] px-5 py-6 text-xs text-muted-foreground"><div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3"><span>CliniCore · Gestão clínica, assistencial e financeira</span><nav className="flex gap-4"><Link href="/termos" className="hover:text-foreground">Termos de uso</Link><Link href="/privacidade" className="hover:text-foreground">Privacidade</Link><Link href="/ajuda" className="hover:text-foreground">Ajuda</Link></nav></div></footer>
     </main>
   );
 }

@@ -125,6 +125,27 @@ const ALLOWED_ATTACHMENT_TYPES = new Set([
   "text/plain",
 ]);
 
+const clinicalProtocolStepSchema = z.object({
+  key: z.string().trim().regex(/^[a-z][a-z0-9_]{1,47}$/),
+  title: z.string().trim().min(2).max(120),
+  kind: z.enum(["check_in", "nursing", "clinical_form", "checklist", "billing", "document"]),
+  position: z.number().int().positive(),
+  required_fields: z.array(z.string().trim().max(80)).max(30).optional(),
+  required_documents: z.array(z.string().trim().max(120)).max(20).optional(),
+  responsible_roles: z.array(z.string().trim().max(60)).max(12).optional(),
+  terminal: z.boolean().optional(),
+});
+
+const clinicalProtocolSchema = z.object({
+  protocol_id: z.string().uuid().optional().or(z.literal("")),
+  name: z.string().trim().min(2, "Informe o nome do protocolo.").max(160),
+  description: z.string().trim().max(1000).optional(),
+  specialty_slug: z.string().trim().regex(/^[a-z][a-z0-9_]{2,79}$/),
+  publish: z.enum(["true", "false"]),
+  change_summary: z.string().trim().max(800).optional(),
+  steps: z.string().min(2),
+});
+
 async function getContext() {
   const [{ activeClinic }, supabase] = await Promise.all([
     getActiveClinicContext(),
@@ -1143,4 +1164,59 @@ export async function acknowledgeMedicalLgpdAction(
 
   revalidatePath("/prontuarios");
   return { success: "Ciencia LGPD registrada." };
+}
+
+export async function saveClinicalProtocolAction(
+  formData: FormData,
+): Promise<MedicalRecordActionState> {
+  const parsed = clinicalProtocolSchema.safeParse({
+    protocol_id: formData.get("protocol_id"),
+    name: formData.get("name"),
+    description: formData.get("description"),
+    specialty_slug: formData.get("specialty_slug"),
+    publish: formData.get("publish"),
+    change_summary: formData.get("change_summary"),
+    steps: formData.get("steps"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Protocolo invalido." };
+
+  let rawSteps: unknown;
+  try {
+    rawSteps = JSON.parse(parsed.data.steps);
+  } catch {
+    return { error: "As etapas do protocolo possuem uma configuracao invalida." };
+  }
+  const stepsResult = z.array(clinicalProtocolStepSchema).min(1).max(20).safeParse(rawSteps);
+  if (!stepsResult.success) return { error: "Revise as etapas e informe titulo, tipo e ordem." };
+  const steps = stepsResult.data.map((step, index) => ({ ...step, position: (index + 1) * 10 }));
+  if (steps.filter((step) => step.terminal).length > 1) return { error: "Defina apenas uma etapa final para o protocolo." };
+
+  const context = await getContext();
+  if (!context) return { error: "Selecione uma clinica e autentique-se novamente." };
+  if (!context.access.canViewAll) return { error: "Apenas administradores podem configurar protocolos." };
+
+  const { error } = await context.supabase.rpc("save_clinical_protocol_transaction", {
+    protocol_payload: {
+      clinic_id: context.activeClinic.id,
+      protocol_id: parsed.data.protocol_id || null,
+      name: parsed.data.name,
+      description: parsed.data.description || null,
+      specialty_slug: parsed.data.specialty_slug,
+      change_summary: parsed.data.change_summary || null,
+      active: true,
+    },
+    version_definition: { steps },
+    publish_version: parsed.data.publish === "true",
+  });
+  if (error) {
+    reportServerError("medical_records.clinical_protocol_save", error, {
+      clinicId: context.activeClinic.id,
+      userId: context.user.id,
+    });
+    return { error: "Nao foi possivel salvar o protocolo clinico." };
+  }
+
+  revalidatePath("/prontuarios");
+  revalidatePath("/auditoria");
+  return { success: parsed.data.publish === "true" ? "Protocolo publicado com nova versao." : "Rascunho do protocolo salvo." };
 }

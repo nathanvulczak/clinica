@@ -24,11 +24,13 @@ import {
   listPatientMedicalOverviews,
 } from "@/repositories/medical-records";
 import { getClinicalFormTemplates } from "@/repositories/clinical-forms";
+import { listClinicalProtocols } from "@/repositories/clinical-protocols";
+import { ClinicalProtocolsPanel } from "@/features/medical-records/components/clinical-protocols-panel";
 
-type MedicalRecordSection = "queue" | "records" | "patients" | "reports" | "preferences";
+type MedicalRecordSection = "queue" | "records" | "patients" | "reports" | "preferences" | "protocols";
 
 function normalizeSection(value?: string): MedicalRecordSection {
-  return ["queue", "records", "patients", "reports", "preferences"].includes(value ?? "")
+  return ["queue", "records", "patients", "reports", "preferences", "protocols"].includes(value ?? "")
     ? (value as MedicalRecordSection)
     : "queue";
 }
@@ -73,6 +75,10 @@ export default async function ProntuariosPage({
   const clinicalFormTemplates =
     activeClinic && canView && section === "preferences"
       ? await getClinicalFormTemplates(activeClinic.id)
+      : [];
+  const clinicalProtocols =
+    activeClinic && canView && section === "protocols"
+      ? await listClinicalProtocols(activeClinic.id)
       : [];
   const patientOverviews =
     activeClinic && canView && section === "patients"
@@ -282,6 +288,14 @@ export default async function ProntuariosPage({
 
           {section === "preferences" && preferences ? (
             <MedicalRecordPreferencesForm preferences={preferences} canEdit={access.canViewAll} templates={clinicalFormTemplates} />
+          ) : null}
+
+          {section === "protocols" ? (
+            access.canViewAll ? (
+              <ClinicalProtocolsPanel protocols={clinicalProtocols} canEdit={access.canViewAll} />
+            ) : (
+              <Card><CardHeader><CardTitle>Configuração restrita</CardTitle><CardDescription>Apenas administradores da clínica podem publicar protocolos e alterar etapas assistenciais.</CardDescription></CardHeader></Card>
+            )
           ) : null}
         </div>
       )}
