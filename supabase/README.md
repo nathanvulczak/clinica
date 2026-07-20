@@ -53,6 +53,11 @@ Execute os arquivos uma única vez e na ordem numérica:
 47. `047_compliance_governance.sql`
 48. `048_reconcile_migration_history.sql`
 49. `049_reconcile_rbac_catalog.sql`
+50. `050_platform_roles.sql`
+51. `051_platform_control_and_clinical_provenance.sql`
+52. `052_clinical_timeline_backfill.sql`
+53. `053_platform_owner_console.sql`
+54. `054_platform_user_controls.sql`
 
 As execuções são registradas em `app_migration_history`. Use os scripts do
 projeto para validar e aplicar uma migration com checksum, sem colar SQL

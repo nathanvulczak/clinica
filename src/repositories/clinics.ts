@@ -2,7 +2,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { Clinic, ClinicMember } from "@/types/domain";
 
-const CLINIC_SELECT = "id, legal_name, trade_name, document, email, phone, city, state, created_at, created_by";
+const CLINIC_SELECT = "id, legal_name, trade_name, document, email, phone, city, state, created_at, created_by, platform_status";
 
 export async function getCurrentUserId() {
   const supabase = await createSupabaseServerClient();
@@ -17,12 +17,12 @@ export async function userCanAccessClinic(clinicId: string, userId: string) {
   const admin = createSupabaseAdminClient();
   const { data: clinic } = await admin
     .from("clinics")
-    .select("id, created_by")
+    .select("id, created_by, platform_status")
     .eq("id", clinicId)
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (!clinic) {
+  if (!clinic || clinic.platform_status !== "active") {
     return false;
   }
 
@@ -109,6 +109,7 @@ export async function listUserClinics(): Promise<Clinic[]> {
       .from("clinics")
       .select(CLINIC_SELECT)
       .eq("created_by", userId)
+      .eq("platform_status", "active")
       .is("deleted_at", null)
       .order("created_at", { ascending: false }),
   ]);
@@ -116,7 +117,7 @@ export async function listUserClinics(): Promise<Clinic[]> {
   const clinicIds = [...new Set((memberships ?? []).map((membership) => membership.clinic_id).filter(Boolean))];
   const { data: memberClinics } =
     clinicIds.length > 0
-      ? await admin.from("clinics").select(CLINIC_SELECT).in("id", clinicIds).is("deleted_at", null)
+      ? await admin.from("clinics").select(CLINIC_SELECT).in("id", clinicIds).eq("platform_status", "active").is("deleted_at", null)
       : { data: [] };
 
   const clinicsById = new Map<string, Clinic>();
@@ -150,6 +151,7 @@ export async function getClinicById(clinicId: string): Promise<Clinic | null> {
     .from("clinics")
     .select(CLINIC_SELECT)
     .eq("id", clinicId)
+    .eq("platform_status", "active")
     .is("deleted_at", null)
     .maybeSingle();
 

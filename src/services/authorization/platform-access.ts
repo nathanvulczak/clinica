@@ -2,27 +2,30 @@ import "server-only";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { AppRole } from "@/types/domain";
+import type { PlatformOperatorRole } from "@/types/domain";
 
 export type PlatformScope =
   | "overview"
   | "health"
-  | "access"
+  | "operations"
   | "billing"
-  | "audit"
+  | "errors"
+  | "usage"
   | "diagnostics"
-  | "controls";
+  | "security";
 
-const scopeMatrix: Record<Exclude<AppRole, "clinic_owner" | "clinic_admin" | "doctor" | "nurse" | "receptionist" | "financial" | "professional">, PlatformScope[]> = {
-  platform_admin: ["overview", "health", "access", "billing", "audit", "diagnostics", "controls"],
-  platform_support: ["overview", "health", "diagnostics"],
-  platform_billing: ["overview", "billing"],
-  platform_security: ["overview", "health", "audit", "diagnostics"],
+const scopeMatrix: Record<PlatformOperatorRole, PlatformScope[]> = {
+  owner: ["overview", "health", "operations", "billing", "errors", "usage", "diagnostics", "security"],
+  support: ["overview", "health", "errors", "diagnostics"],
+  billing: ["overview", "billing"],
+  security: ["overview", "health", "errors", "security", "diagnostics"],
 };
 
 export type PlatformAccess = {
   userId: string | null;
-  role: AppRole | null;
+  role: PlatformOperatorRole | null;
+  mfaRequired: boolean;
+  mfaEnrolled: boolean;
   allowed: boolean;
   can: (scope: PlatformScope) => boolean;
 };
@@ -33,21 +36,22 @@ export async function getPlatformAccess(): Promise<PlatformAccess> {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) return { userId: null, role: null, allowed: false, can: () => false };
+  if (!user) return { userId: null, role: null, mfaRequired: false, mfaEnrolled: false, allowed: false, can: () => false };
 
   const admin = createSupabaseAdminClient();
   const { data: profile } = await admin
-    .from("profiles")
-    .select("platform_role")
-    .eq("id", user.id)
-    .is("deleted_at", null)
-    .maybeSingle<{ platform_role: AppRole }>();
+    .from("platform_operators")
+    .select("role, status, mfa_required, mfa_enrolled")
+    .eq("user_id", user.id)
+    .maybeSingle<{ role: PlatformOperatorRole; status: string; mfa_required: boolean; mfa_enrolled: boolean }>();
 
-  const role = profile?.platform_role ?? null;
-  const scopes = role && role in scopeMatrix ? scopeMatrix[role as keyof typeof scopeMatrix] : [];
+  const role = profile?.status === "active" ? profile.role : null;
+  const scopes = role ? scopeMatrix[role] : [];
   return {
     userId: user.id,
     role,
+    mfaRequired: profile?.mfa_required ?? false,
+    mfaEnrolled: profile?.mfa_enrolled ?? false,
     allowed: scopes.length > 0,
     can: (scope) => scopes.includes(scope),
   };

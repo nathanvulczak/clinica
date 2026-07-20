@@ -8,7 +8,6 @@ import {
   getClinicAuthorization,
 } from "@/services/authorization/clinic-access";
 import { getBillingAuthorization } from "@/services/billing/authorization";
-import { getPlatformAccess } from "@/services/authorization/platform-access";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();
@@ -20,10 +19,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect("/login");
   }
 
-  const [profile, clinicContext, platformAccess] = await Promise.all([
+  const [profile, clinicContext] = await Promise.all([
     getCurrentProfile(),
     getActiveClinicContext(),
-    getPlatformAccess(),
   ]);
   const [authorization, billingAuthorization] = await Promise.all([
     getClinicAuthorization(clinicContext.activeClinic?.id),
@@ -36,10 +34,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (billingAuthorization.canView && !allowedNavigation.includes("billing")) {
     allowedNavigation.push("billing");
   }
-  if (platformAccess.allowed) {
-    allowedNavigation.push("platform");
-  }
-
   return (
     <AppShell
       profile={profile}

@@ -43,8 +43,8 @@ export async function getClinicAuthorization(clinicId?: string): Promise<ClinicA
   }
 
   const admin = createSupabaseAdminClient();
-  const [{ data: profile }, { data: membership }] = await Promise.all([
-    admin.from("profiles").select("platform_role").eq("id", user.id).maybeSingle(),
+  const [{ data: clinic }, { data: membership }] = await Promise.all([
+    admin.from("clinics").select("platform_status, deleted_at").eq("id", clinicId).maybeSingle(),
     admin
       .from("clinic_members")
       .select("id, role, status")
@@ -55,14 +55,8 @@ export async function getClinicAuthorization(clinicId?: string): Promise<ClinicA
       .maybeSingle(),
   ]);
 
-  if (profile?.platform_role === "platform_admin") {
-    return {
-      memberId: membership?.id ?? null,
-      permissions: new Set(),
-      role: "platform_admin",
-      userId: user.id,
-      can: () => true,
-    };
+  if (!clinic || clinic.platform_status !== "active" || clinic.deleted_at) {
+    return emptyAuthorization(user.id);
   }
 
   if (!membership) {
@@ -119,7 +113,6 @@ export async function getClinicAuthorization(clinicId?: string): Promise<ClinicA
 }
 
 export type NavigationKey =
-  | "platform"
   | "dashboard"
   | "clinics"
   | "registrations"

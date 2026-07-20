@@ -237,6 +237,36 @@ export async function inviteMemberAction(
     .eq("user_id", targetUserId)
     .maybeSingle();
 
+  const [{ data: clinicLimit }, { count: memberCount }, { count: professionalCount }] = await Promise.all([
+    admin
+      .from("platform_clinic_limits")
+      .select("max_active_users, max_active_professionals")
+      .eq("clinic_id", activeClinic.id)
+      .maybeSingle(),
+    admin
+      .from("clinic_members")
+      .select("id", { count: "exact", head: true })
+      .eq("clinic_id", activeClinic.id)
+      .in("status", ["active", "invited"])
+      .is("deleted_at", null),
+    admin
+      .from("clinic_members")
+      .select("id", { count: "exact", head: true })
+      .eq("clinic_id", activeClinic.id)
+      .in("role", ["doctor", "nurse", "professional"])
+      .in("status", ["active", "invited"])
+      .is("deleted_at", null),
+  ]);
+  const maxUsers = clinicLimit?.max_active_users ?? 25;
+  const maxProfessionals = clinicLimit?.max_active_professionals ?? 10;
+  const isExistingActiveMember = previousMembership?.status === "active" || previousMembership?.status === "invited";
+  if (!isExistingActiveMember && (memberCount ?? 0) >= maxUsers) {
+    return { error: `Limite da clínica atingido: até ${maxUsers} usuários ativos ou convidados.` };
+  }
+  if (!isExistingActiveMember && ["doctor", "nurse", "professional"].includes(parsed.data.role) && (professionalCount ?? 0) >= maxProfessionals) {
+    return { error: `Limite da clínica atingido: até ${maxProfessionals} profissionais ativos ou convidados.` };
+  }
+
   const { data: targetAuth } = await admin.auth.admin.getUserById(targetUserId);
   const hasConfirmedAccount = Boolean(targetAuth.user?.email_confirmed_at);
   const shouldRemainInvited =
@@ -272,6 +302,12 @@ export async function inviteMemberAction(
     .single();
 
   if (memberError) {
+    if (memberError.message.includes("clinic_user_limit_reached")) {
+      return { error: `Limite da clínica atingido: até ${maxUsers} usuários ativos ou convidados.` };
+    }
+    if (memberError.message.includes("clinic_professional_limit_reached")) {
+      return { error: `Limite da clínica atingido: até ${maxProfessionals} profissionais ativos ou convidados.` };
+    }
     return { error: "Não foi possível vincular o usuário à clínica." };
   }
 

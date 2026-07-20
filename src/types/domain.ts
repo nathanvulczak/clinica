@@ -20,6 +20,9 @@ export type AppRole =
   | "financial"
   | "professional";
 
+export type PlatformOperatorRole = "owner" | "support" | "billing" | "security";
+export type PlatformOperatorStatus = "active" | "suspended" | "revoked";
+
 export type PermissionModule =
   | "clinics"
   | "members"
@@ -64,6 +67,7 @@ export type Clinic = {
   registration_status?: string | null;
   created_at: string;
   created_by?: string | null;
+  platform_status?: "active" | "suspended";
 };
 
 export type SubscriptionSummary = {

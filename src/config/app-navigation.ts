@@ -28,20 +28,6 @@ const financialItems: AppNavigationItem[] = financialSections.map((section) => (
 
 export const APP_NAVIGATION_MODULES: AppNavigationModule[] = [
   {
-    id: "platform",
-    label: "Plataforma",
-    navigationKey: "platform",
-    pathPrefix: "/plataforma",
-    items: [
-      { label: "Visão geral", href: "/plataforma?section=overview" },
-      { label: "Saúde e integrações", href: "/plataforma?section=health" },
-      { label: "Acessos e controle", href: "/plataforma?section=access" },
-      { label: "Billing", href: "/plataforma?section=billing" },
-      { label: "Auditoria técnica", href: "/plataforma?section=audit" },
-      { label: "Diagnósticos", href: "/plataforma?section=diagnostics" },
-    ],
-  },
-  {
     id: "dashboard",
     label: "Painel",
     href: "/dashboard",

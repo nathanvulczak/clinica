@@ -13,6 +13,17 @@ export default function FinancialError({
 }) {
   useEffect(() => {
     console.error("financial_workspace_error", error);
+    void fetch("/api/telemetry/error", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        error_code: "financial_workspace_error",
+        message: "Falha ao carregar o módulo financeiro.",
+        route: window.location.pathname,
+        digest: error.digest,
+      }),
+      keepalive: true,
+    }).catch(() => undefined);
   }, [error]);
 
   return (

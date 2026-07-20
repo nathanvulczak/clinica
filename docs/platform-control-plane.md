@@ -1,49 +1,49 @@
-# Control plane da plataforma
+# Console do Proprietario
 
-O control plane fica em `/plataforma` e usa o mesmo Supabase Auth do sistema. Não
-existe uma senha paralela: o acesso é concedido pelo `platform_role` do perfil.
+O console tecnico fica em `/console` e nao depende de uma clinica ativa. Ele
+possui login dedicado e nao aparece no menu do sistema clinico.
 
-## Papéis
+## Primeiro acesso
 
-- `platform_admin`: administração global, saúde, billing, auditoria técnica,
-  diagnostics, feature flags e controles.
-- `platform_support`: saúde e diagnósticos técnicos, sem dados de pacientes.
-- `platform_billing`: planos, assinaturas e indicadores agregados de billing.
-- `platform_security`: auditoria técnica, saúde e diagnósticos de segurança.
-
-Nenhum desses papéis recebe automaticamente permissões clínicas. O painel usa
-leituras server-side e não exibe CPF, prontuários, laudos, documentos médicos ou
-conteúdo assistencial.
-
-## Primeiro acesso do proprietário da plataforma
-
-1. Crie ou confirme a conta normalmente pelo login do CliniCore.
-2. No SQL Editor do Supabase, execute o comando abaixo substituindo o e-mail:
+1. Crie ou confirme a conta do proprietario no Supabase Auth.
+2. No SQL Editor, cadastre somente a conta do proprietario:
 
 ```sql
-update public.profiles
-set platform_role = 'platform_admin'
-where email = 'seu-email@dominio.com'
-  and deleted_at is null;
+insert into public.platform_operators(user_id, role, status, display_name, mfa_required)
+select id, 'owner', 'active', 'Nathan', true
+from public.profiles
+where lower(email) = lower('SEU_EMAIL_DO_CONSOLE@DOMINIO.COM')
+on conflict (user_id) do update
+set role = 'owner', status = 'active', display_name = 'Nathan', mfa_required = true, updated_at = now();
 ```
 
-3. Saia e entre novamente no sistema.
-4. Abra `/plataforma` ou use o menu superior **Plataforma**.
+3. Acesse `/console/login` usando a conta cadastrada.
 
-Nunca salve a senha em código, migration ou documentação. Para os papéis
-limitados, substitua o valor por `platform_support`, `platform_billing` ou
-`platform_security`.
+Nao existe login por clinica no console e nenhuma conta de clinica recebe esse
+acesso automaticamente. A senha continua armazenada apenas pelo Supabase Auth.
 
-## Acesso emergencial
+## Escopos
 
-O recurso registra uma solicitação com motivo, escopo somente leitura, duração
-máxima de 60 minutos e aprovação obrigatória. Ele não abre prontuários e não
-concede acesso clínico por si só. A implantação de MFA obrigatório e aprovação
-por segundo administrador deve ser concluída antes de habilitar qualquer acesso
-assistencial excepcional.
+- `owner`: operacoes, limites, billing, erros, uso agregado, saude e seguranca.
+- `support`: saude, diagnosticos e erros tecnicos.
+- `billing`: planos e sincronizacao de assinatura.
+- `security`: saude, erros e solicitacoes emergenciais.
 
-## Diagnósticos
+O primeiro acesso deve permanecer como `owner` do proprietario da plataforma.
+O console exige MFA TOTP. No primeiro acesso, configure o autenticador em
+`/console/mfa`; sem MFA validado a sessao nao entra no console.
 
-Os testes do painel registram somente metadados. Testes que criem registros
-devem usar uma clínica técnica separada, com dados fictícios, e nunca uma clínica
-de cliente.
+## Break glass
+
+O recurso cria uma solicitacao com motivo, clinica alvo opcional, prazo de ate
+60 minutos, somente leitura e aprovacao obrigatoria. Ele nao abre prontuarios
+nem libera conteudo clinico. A aprovacao deve ser feita por outro operador com
+escopo de seguranca; o console nao possui uma rota de acesso assistencial
+automatico.
+
+## Dados exibidos
+
+O console exibe somente metadados administrativos e tecnicos: contagens,
+limites, status de clinicas, assinaturas, erros, uso agregado, migrations,
+health checks e operacoes. Nao exibe CPF, pacientes, prontuarios, laudos,
+documentos medicos ou conteudo de consultas.
