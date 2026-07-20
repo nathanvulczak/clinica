@@ -141,6 +141,9 @@ export type MedicalTimelineEvent = {
   title: string;
   description: string;
   tone: "info" | "success" | "warning" | "critical";
+  source_table?: string;
+  source_id?: string | null;
+  actor?: { id: string; full_name: string } | null;
 };
 
 export type MedicalRecordEncounterDetail = {
@@ -452,6 +455,7 @@ export async function getMedicalRecordEncounterDetail(
     { data: encounterEvents },
     { data: attachments },
     { data: correctionRequests },
+    { data: canonicalTimelineEvents },
   ] = await Promise.all([
     medicalRecord?.id
       ? admin
@@ -490,6 +494,13 @@ export async function getMedicalRecordEncounterDetail(
           .eq("medical_record_id", medicalRecord.id)
           .order("created_at", { ascending: false })
       : Promise.resolve({ data: [] }),
+    admin
+      .from("clinical_timeline_events")
+      .select("id, event_type, title, summary, source_table, source_id, occurred_at, actor_id, metadata")
+      .eq("encounter_id", encounter.id)
+      .is("deleted_at", null)
+      .order("occurred_at", { ascending: false })
+      .limit(100),
   ]);
 
   const documentIds = ((prescriptions ?? []) as MedicalPrescription[]).map((item) => item.id);
@@ -514,7 +525,25 @@ export async function getMedicalRecordEncounterDetail(
       return { ...attachment, signed_url: data?.signedUrl ?? null };
     }),
   );
-  const timeline = buildTimeline({
+  const timelineActorIds = [...new Set(
+    ((canonicalTimelineEvents ?? []) as Array<{ actor_id: string | null }>).map((item) => item.actor_id).filter(Boolean),
+  )] as string[];
+  const { data: timelineActors } = timelineActorIds.length
+    ? await admin.from("profiles").select("id, full_name").in("id", timelineActorIds)
+    : { data: [] };
+  const timelineActorMap = new Map((timelineActors ?? []).map((item) => [item.id, item]));
+  const canonicalRows = (canonicalTimelineEvents ?? []) as Array<{
+    id: string;
+    event_type: string;
+    title: string;
+    summary: string;
+    source_table: string;
+    source_id: string | null;
+    occurred_at: string;
+    actor_id: string | null;
+    metadata: Record<string, unknown>;
+  }>;
+  const timeline = canonicalRows.length ? buildCanonicalTimeline(canonicalRows, timelineActorMap) : buildTimeline({
     encounter,
     encounterEvents: (encounterEvents ?? []) as Array<{
       id: string;
@@ -550,6 +579,32 @@ export async function getMedicalRecordEncounterDetail(
     correction_requests: (correctionRequests ?? []) as MedicalCorrectionRequest[],
     timeline,
   };
+}
+
+function buildCanonicalTimeline(
+  rows: Array<{
+    id: string;
+    event_type: string;
+    title: string;
+    summary: string;
+    source_table: string;
+    source_id: string | null;
+    occurred_at: string;
+    actor_id: string | null;
+  }>,
+  actors: Map<string, { id: string; full_name: string }>,
+): MedicalTimelineEvent[] {
+  return rows.map((row) => ({
+    id: row.id,
+    occurred_at: row.occurred_at,
+    type: row.event_type,
+    title: row.title,
+    description: row.summary || "Evento clínico registrado.",
+    tone: row.event_type.includes("correction") ? "warning" : row.event_type.includes("completed") ? "success" : "info",
+    source_table: row.source_table,
+    source_id: row.source_id,
+    actor: row.actor_id ? actors.get(row.actor_id) ?? null : null,
+  }));
 }
 
 function buildTimeline({

@@ -33,6 +33,9 @@ export const PERMISSION_ACTIONS: PermissionAction[] = [
 
 export const ROLE_LABELS: Record<AppRole, string> = {
   platform_admin: "Administrador da plataforma",
+  platform_support: "Suporte da plataforma",
+  platform_billing: "Billing da plataforma",
+  platform_security: "Segurança da plataforma",
   clinic_owner: "Proprietário",
   clinic_admin: "Administrador da clínica",
   doctor: "Médico",
@@ -73,6 +76,9 @@ export const ACTION_LABELS: Record<PermissionAction, string> = {
 
 export const ROLE_PRESET_DESCRIPTIONS: Record<AppRole, string> = {
   platform_admin: "Acesso administrativo global da plataforma.",
+  platform_support: "Acesso técnico limitado a saúde e diagnósticos sem dados clínicos.",
+  platform_billing: "Acesso global a planos, assinaturas e indicadores de cobrança.",
+  platform_security: "Acesso global a auditoria técnica, incidentes e controles de segurança.",
   clinic_owner: "Controle total da clínica, assinatura, usuários, permissões e auditoria.",
   clinic_admin: "Administração operacional da clínica, usuários e rotinas internas.",
   doctor: "Atendimento clínico, pacientes e prontuário conforme permissões da clínica.",
@@ -84,6 +90,9 @@ export const ROLE_PRESET_DESCRIPTIONS: Record<AppRole, string> = {
 
 export const ROLE_PERMISSION_PRESETS: Record<AppRole, PermissionKey[]> = {
   platform_admin: [],
+  platform_support: [],
+  platform_billing: [],
+  platform_security: [],
   clinic_owner: [],
   clinic_admin: [
     "clinics:view",

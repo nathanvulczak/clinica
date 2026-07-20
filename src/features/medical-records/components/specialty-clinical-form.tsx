@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   ClipboardList,
+  Info,
   LockKeyhole,
   SlidersHorizontal,
   Sparkles,
@@ -173,7 +174,7 @@ export function SpecialtyClinicalForm({
   workspacePreferencePending: boolean;
 }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState(workspace?.selectedTemplateId ?? "");
-  const [responses, setResponses] = useState<ClinicalFormResponses>(workspace?.instance?.responses ?? {});
+  const [responses, setResponses] = useState<ClinicalFormResponses>(workspace?.instance?.responses ?? workspace?.prefillResponses ?? {});
   const selectedTemplate = useMemo(
     () => workspace?.templates.find((template) => template.id === selectedTemplateId) ?? null,
     [selectedTemplateId, workspace?.templates],
@@ -209,6 +210,8 @@ export function SpecialtyClinicalForm({
   });
   const analytics = getClinicalFormAnalytics(definition, responses);
   const visualMaps = metadataObject(responses._visual_maps);
+  const provenance = metadataObject(responses._provenance);
+  const fieldLabels = new Map(definition.sections.flatMap((section) => section.fields.map((field) => [field.key, field.label] as const)));
 
   function selectTemplate(template: ClinicalFormTemplate) {
     setSelectedTemplateId(template.id);
@@ -267,6 +270,23 @@ export function SpecialtyClinicalForm({
           ) : null}
         </div>
       </div>
+
+      {Object.keys(provenance).length ? (
+        <div className="flex items-start gap-2 border-b bg-sky-50/70 px-4 py-2.5 text-[11px] text-sky-900">
+          <Info className="mt-0.5 size-3.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="font-semibold">Dados pré-preenchidos da Enfermagem</p>
+            <p className="mt-0.5 text-sky-800/80">Os campos abaixo vieram da pré-consulta e não substituem um valor já registrado.</p>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {Object.entries(provenance).map(([fieldKey, rawValue]) => {
+                const source = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue as Record<string, ClinicalFormResponseMetadata> : {};
+                const capturedAt = typeof source.captured_at === "string" ? source.captured_at : "";
+                return <span key={fieldKey} className="rounded border border-sky-200 bg-white/70 px-1.5 py-0.5">{fieldLabels.get(fieldKey) ?? fieldKey}{capturedAt ? ` · ${new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(capturedAt))}` : ""}</span>;
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid gap-3 border-b bg-muted/15 px-4 py-3 lg:grid-cols-[1fr_auto] lg:items-end">
         <label className="grid max-w-xl gap-1.5 text-xs font-medium">

@@ -119,6 +119,7 @@ export async function getClinicAuthorization(clinicId?: string): Promise<ClinicA
 }
 
 export type NavigationKey =
+  | "platform"
   | "dashboard"
   | "clinics"
   | "registrations"

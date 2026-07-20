@@ -329,6 +329,7 @@ function LongitudinalClinicalSnapshot({ detail }: { detail: MedicalRecordEncount
             <div className="min-w-0">
               <p className="truncate font-medium">{event.title}</p>
               <p className="truncate text-muted-foreground">{event.description}</p>
+              {event.actor?.full_name ? <p className="mt-0.5 truncate text-[10px] text-muted-foreground">Responsável: {event.actor.full_name}</p> : null}
             </div>
           </div>
         )) : (

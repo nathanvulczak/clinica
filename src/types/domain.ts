@@ -9,6 +9,9 @@ export type SubscriptionStatus =
 
 export type AppRole =
   | "platform_admin"
+  | "platform_support"
+  | "platform_billing"
+  | "platform_security"
   | "clinic_owner"
   | "clinic_admin"
   | "doctor"

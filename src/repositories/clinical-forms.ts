@@ -4,6 +4,7 @@ import {
   normalizeSpecialtySlug,
   parseClinicalFormDefinition,
   type ClinicalFormDefinition,
+  type ClinicalFormResponseMetadata,
   type ClinicalFormResponses,
 } from "@/features/medical-records/clinical-form-schema";
 import type { ClinicalWorkspaceMode } from "@/config/clinical-workspaces";
@@ -48,6 +49,7 @@ export type ClinicalFormWorkspace = {
     mode: ClinicalWorkspaceMode;
     showVisualMap: boolean;
   };
+  prefillResponses: ClinicalFormResponses;
   instance: ClinicalFormInstance | null;
 };
 
@@ -102,6 +104,8 @@ export async function getEncounterClinicalFormWorkspace(
     { data: preferences },
     { data: assignments },
     { data: userPreferences },
+    { data: nursingAssessment },
+    { data: fieldMappings },
   ] = await Promise.all([
     getClinicalFormTemplates(clinicId),
     admin
@@ -146,6 +150,20 @@ export async function getEncounterClinicalFormWorkspace(
           .is("deleted_at", null)
           .maybeSingle<{ preferences: Record<string, unknown> }>()
       : Promise.resolve({ data: null }),
+    admin
+      .from("nursing_assessments")
+      .select("id, chief_complaint, allergies, current_medications, comorbidities, systolic_bp, diastolic_bp, heart_rate, respiratory_rate, temperature_c, oxygen_saturation, capillary_glucose, weight_kg, height_cm, bmi, completed_at, created_at, performed_by")
+      .eq("encounter_id", encounterId)
+      .is("deleted_at", null)
+      .maybeSingle(),
+    admin
+      .from("clinical_field_mappings")
+      .select("source_field, target_field, strategy")
+      .eq("clinic_id", clinicId)
+      .eq("source_module", "nursing_assessments")
+      .eq("target_module", "clinical_form")
+      .eq("active", true)
+      .is("deleted_at", null),
   ]);
 
   const activeTemplates = templates.filter((template) => template.active);
@@ -185,13 +203,52 @@ export async function getEncounterClinicalFormWorkspace(
     selectionSource = "fallback";
   }
 
+  const selectedTemplate = availableTemplates.find((template) => template.id === selectedTemplateId) ?? null;
+  const selectedFieldKeys = new Set(
+    selectedTemplate?.definition.sections.flatMap((section) => section.fields.map((field) => field.key)) ?? [],
+  );
+  const nursingValues = (nursingAssessment ?? {}) as Record<string, unknown>;
+  const prefillResponses: ClinicalFormResponses = {};
+  const provenance: Record<string, ClinicalFormResponseMetadata> = {};
+  const existingResponses = instance?.responses && typeof instance.responses === "object" && !Array.isArray(instance.responses)
+    ? (instance.responses as ClinicalFormResponses)
+    : {};
+  const mergedResponses: ClinicalFormResponses = { ...existingResponses };
+
+  for (const mapping of fieldMappings ?? []) {
+    if (!selectedFieldKeys.has(mapping.target_field)) continue;
+    const sourceValue = nursingValues[mapping.source_field];
+    if (sourceValue === null || sourceValue === undefined || sourceValue === "") continue;
+    const targetHasValue = mergedResponses[mapping.target_field] !== undefined
+      && mergedResponses[mapping.target_field] !== null
+      && mergedResponses[mapping.target_field] !== "";
+    if (targetHasValue && mapping.strategy === "fill_empty") continue;
+    if (typeof sourceValue !== "string" && typeof sourceValue !== "number" && typeof sourceValue !== "boolean") continue;
+    if (!targetHasValue) {
+      mergedResponses[mapping.target_field] = sourceValue;
+      prefillResponses[mapping.target_field] = sourceValue;
+      provenance[mapping.target_field] = {
+        source: "nursing_assessment",
+        source_record_id: String(nursingValues.id ?? ""),
+        captured_at: String(nursingValues.completed_at ?? nursingValues.created_at ?? ""),
+        label: "Pré-consulta de enfermagem",
+      };
+    }
+  }
+
+  if (Object.keys(provenance).length) {
+    const currentProvenance = mergedResponses._provenance && typeof mergedResponses._provenance === "object" && !Array.isArray(mergedResponses._provenance)
+      ? (mergedResponses._provenance as Record<string, ClinicalFormResponseMetadata>)
+      : {};
+    mergedResponses._provenance = { ...currentProvenance, ...provenance };
+    prefillResponses._provenance = { ...provenance };
+  }
+
   const normalizedInstance = instance
     ? {
         ...instance,
         template_snapshot: parseClinicalFormDefinition(instance.template_snapshot),
-        responses: instance.responses && typeof instance.responses === "object" && !Array.isArray(instance.responses)
-          ? (instance.responses as ClinicalFormResponses)
-          : {},
+        responses: mergedResponses,
       }
     : null;
 
@@ -206,6 +263,7 @@ export async function getEncounterClinicalFormWorkspace(
     professionalSpecialty: professionalProfile?.specialty ?? null,
     allowTemplateChoice: preferences?.allow_professional_template_choice ?? true,
     preferences: { mode: workspaceMode, showVisualMap },
+    prefillResponses,
     instance: normalizedInstance,
   };
 }

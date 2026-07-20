@@ -65,6 +65,8 @@ O banco inclui:
 5. O criador é vinculado como `clinic_owner`.
 6. Convites, RBAC e RLS controlam os demais acessos.
 
+O control plane global e a forma correta de conceder o primeiro acesso estão em [`docs/platform-control-plane.md`](docs/platform-control-plane.md).
+
 ## Qualidade
 
 ```bash
