@@ -11,11 +11,13 @@ import {
 } from "lucide-react";
 import { ROLE_LABELS } from "@/config/permissions";
 import { InviteMemberForm } from "@/features/members/components/invite-member-form";
+import { InvitationTable } from "@/features/members/components/invitation-table";
 import {
   MEMBER_STATUS_LABELS,
   MembersTable,
 } from "@/features/members/components/members-table";
 import type { ClinicMember, MemberPermissionOverride } from "@/types/domain";
+import type { ClinicInvitation } from "@/repositories/invitations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -25,6 +27,7 @@ const PAGE_SIZE = 6;
 
 export function UsersWorkspace({
   members,
+  invitations,
   currentUserId,
   permissionOverrides,
   activeClinicName,
@@ -32,6 +35,7 @@ export function UsersWorkspace({
   canManagePermissions,
 }: {
   members: ClinicMember[];
+  invitations: ClinicInvitation[];
   currentUserId?: string | null;
   permissionOverrides: Record<string, MemberPermissionOverride[]>;
   activeClinicName?: string | null;
@@ -165,6 +169,16 @@ export function UsersWorkspace({
         canManageMembers={canManageMembers}
         canManagePermissions={canManagePermissions}
       />
+
+      <section className="grid gap-3 border-t pt-5">
+        <div>
+          <h3 className="text-sm font-semibold">Convites e acessos pendentes</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Reenvios invalidam o link anterior. Convites expirados e cancelados permanecem no historico.
+          </p>
+        </div>
+        <InvitationTable invitations={invitations} canManageMembers={canManageMembers} />
+      </section>
 
       {totalPages > 1 ? (
         <nav className="flex items-center justify-between border-t pt-4" aria-label="Paginação de usuários">

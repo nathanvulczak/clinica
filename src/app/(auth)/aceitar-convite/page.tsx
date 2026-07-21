@@ -15,6 +15,7 @@ export default async function AcceptInvitePage({
 }) {
   const params = await searchParams;
   const clinicId = params.clinic;
+  const invitationId = params.invitation;
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -29,6 +30,21 @@ export default async function AcceptInvitePage({
   }
 
   const admin = createSupabaseAdminClient();
+  let invitationInfo: { role: string; expires_at: string } | null = null;
+  if (invitationId) {
+    const { data: invitation } = await admin
+      .from("clinic_invitations")
+      .select("id, status, expires_at, user_id, email, role")
+      .eq("id", invitationId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    const invitationExpired = invitation && new Date(invitation.expires_at).getTime() <= Date.now();
+    const invitationEmailMismatch = invitation && invitation.user_id !== user.id;
+    if (!invitation || invitationExpired || invitationEmailMismatch || !["pending", "sent"].includes(invitation.status)) {
+      redirect("/login?invite=expired");
+    }
+    invitationInfo = invitation;
+  }
   const { data: membership } = await admin
     .from("clinic_members")
     .select("id, status, role, clinic:clinics!clinic_members_clinic_id_fkey(trade_name)")
@@ -72,9 +88,15 @@ export default async function AcceptInvitePage({
               Você foi convidado para {clinic?.trade_name ?? "uma clínica"}. Defina sua senha para concluir
               o vínculo com segurança.
             </CardDescription>
+            {invitationInfo ? (
+              <div className="mt-3 grid gap-1 rounded-md border bg-muted/35 p-3 text-xs text-muted-foreground">
+                <p><span className="font-medium text-foreground">Perfil:</span> {invitationInfo.role}</p>
+                <p><span className="font-medium text-foreground">Valido ate:</span> {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(invitationInfo.expires_at))}</p>
+              </div>
+            ) : null}
           </CardHeader>
           <CardContent className="grid gap-5">
-            <AcceptInviteForm clinicId={clinicId} />
+            <AcceptInviteForm clinicId={clinicId} invitationId={invitationId} />
             <div className="flex gap-3 rounded-md border bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">
               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
               Seu perfil, clínica e permissões já foram preparados. A senha é criada somente por você.

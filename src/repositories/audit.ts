@@ -17,6 +17,7 @@ export type AuditLogFilters = {
   module?: PermissionModule | "all";
   level?: string;
   user_id?: string;
+  record_id?: string;
   role?: AppRole | "all";
 };
 
@@ -172,6 +173,10 @@ export async function listClinicAuditLogs(
     clinicQuery = clinicQuery.eq("user_id", filters.user_id);
   }
 
+  if (filters.record_id) {
+    clinicQuery = clinicQuery.eq("record_id", filters.record_id);
+  }
+
   let globalLogs: AuditLogEntry[] = [];
 
   if (memberUserIds.length > 0 && (!filters.module || filters.module === "all")) {
@@ -200,6 +205,10 @@ export async function listClinicAuditLogs(
 
     if (filters.level && filters.level !== "all") {
       globalQuery = globalQuery.eq("level", filters.level);
+    }
+
+    if (filters.record_id) {
+      globalQuery = globalQuery.eq("record_id", filters.record_id);
     }
 
     const { data: globalData } = await globalQuery;

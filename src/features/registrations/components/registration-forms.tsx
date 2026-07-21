@@ -1368,6 +1368,20 @@ export function RegistrationPreferencesForm({
           </Select>
         </div>
       </div>
+      <div className="grid gap-2 sm:max-w-xs">
+        <Label htmlFor="invitation_ttl_hours">Validade do convite (horas)</Label>
+        <Input
+          id="invitation_ttl_hours"
+          name="invitation_ttl_hours"
+          type="number"
+          min={24}
+          max={168}
+          step={24}
+          defaultValue={preferences.invitation_ttl_hours ?? 72}
+          disabled={disabled || pending}
+        />
+        <p className="text-xs text-muted-foreground">Entre 24 horas e 7 dias. O padrao e 72 horas.</p>
+      </div>
       <label className="flex items-center gap-3 rounded-md border bg-background p-3 text-sm">
         <input
           type="checkbox"

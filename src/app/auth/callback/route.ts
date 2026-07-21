@@ -47,11 +47,15 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const errorUrl = new URL("/login", request.url);
+  const isRecovery = next.startsWith("/redefinir-senha");
+  const errorUrl = new URL(isRecovery ? "/recuperar-senha" : "/login", request.url);
   errorUrl.searchParams.set("auth", "callback_error");
 
   if (type === "invite") {
     errorUrl.searchParams.set("invite", "expired");
+  }
+  if (isRecovery) {
+    errorUrl.searchParams.set("recovery", "expired");
   }
 
   return NextResponse.redirect(errorUrl);

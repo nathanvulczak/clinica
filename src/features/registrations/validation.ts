@@ -172,6 +172,7 @@ export const registrationPreferencesSchema = z.object({
     .enum(["on", "off"])
     .optional()
     .transform((value) => value === "on"),
+  invitation_ttl_hours: z.coerce.number().int().min(24).max(168),
 });
 
 export const professionalProfileSchema = z.object({

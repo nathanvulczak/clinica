@@ -2,17 +2,18 @@
 
 import { useActionState } from "react";
 import { CheckCircle2, LoaderCircle } from "lucide-react";
-import { acceptInviteAction } from "@/features/members/actions";
+import { acceptInvitationLifecycleAction } from "@/features/members/invitation-actions";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 
-export function AcceptInviteForm({ clinicId }: { clinicId: string }) {
-  const [state, formAction, pending] = useActionState(acceptInviteAction, {});
+export function AcceptInviteForm({ clinicId, invitationId }: { clinicId: string; invitationId?: string }) {
+  const [state, formAction, pending] = useActionState(acceptInvitationLifecycleAction, {});
 
   return (
     <form action={formAction} className="grid gap-4">
       <input type="hidden" name="clinic_id" value={clinicId} />
+      {invitationId ? <input type="hidden" name="invitation_id" value={invitationId} /> : null}
       <div className="grid gap-2">
         <Label htmlFor="invite-password">Crie sua senha</Label>
         <PasswordInput

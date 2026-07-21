@@ -3,6 +3,7 @@ import { UsersWorkspace } from "@/features/members/components/users-workspace";
 import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUserId, listClinicMembers } from "@/repositories/clinics";
+import { listClinicInvitations } from "@/repositories/invitations";
 import { listClinicMemberPermissionOverrides } from "@/repositories/permissions";
 import { redirect } from "next/navigation";
 import {
@@ -27,8 +28,9 @@ export default async function UsuariosPage() {
     redirect("/dashboard?access=denied&module=members");
   }
 
-  const [members, currentUserId, permissionOverrides] = await Promise.all([
+  const [members, invitations, currentUserId, permissionOverrides] = await Promise.all([
     listClinicMembers(activeClinic?.id),
+    listClinicInvitations(activeClinic?.id),
     getCurrentUserId(),
     listClinicMemberPermissionOverrides(activeClinic?.id),
   ]);
@@ -48,6 +50,7 @@ export default async function UsuariosPage() {
         <CardContent>
           <UsersWorkspace
             members={members}
+            invitations={invitations}
             currentUserId={currentUserId}
             permissionOverrides={permissionOverrides}
             activeClinicName={activeClinic?.trade_name}

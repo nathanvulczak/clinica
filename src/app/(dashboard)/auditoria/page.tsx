@@ -27,6 +27,10 @@ const actionLabels: Record<string, string> = {
   record_deleted: "Registro excluído",
   clinic_created: "Clínica cadastrada",
   member_invited: "Convite enviado",
+  member_invite_resent: "Convite reenviado",
+  member_invite_canceled: "Convite cancelado",
+  member_invite_failed: "Falha no convite",
+  member_invite_link_generated: "Link de convite gerado",
   member_invite_accepted: "Convite aceito",
   member_account_deleted: "Conta de usuário excluída",
   member_added: "Usuário vinculado",
@@ -92,6 +96,7 @@ const moduleLabels: Record<string, string> = {
 };
 
 const tableLabels: Record<string, string> = {
+  clinic_invitations: "Convite de usuario",
   profiles: "Perfil do usuário",
   clinics: "Clínica",
   clinic_members: "Membro da clínica",
@@ -284,6 +289,7 @@ export default async function AuditoriaPage({
     module: params.module as PermissionModule | "all" | undefined,
     level: params.level,
     user_id: params.user_id,
+    record_id: params.record_id,
     role: params.role as AppRole | "all" | undefined,
   };
 

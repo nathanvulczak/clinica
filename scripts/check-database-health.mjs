@@ -41,6 +41,13 @@ const checks = [
           where exposed`,
     validate: (value) => value === 0,
   },
+  {
+    name: "convites com token bruto armazenado",
+    sql: `select count(*)::integer as value
+          from public.clinic_invitations
+          where token is not null`,
+    validate: (value) => value === 0,
+  },
 ];
 
 const client = createDatabaseClient();

@@ -674,6 +674,7 @@ export async function saveRegistrationPreferencesAction(
     allow_preconsultation_override:
       formData.get("allow_preconsultation_override") ?? "off",
     require_follow_up_decision: formData.get("require_follow_up_decision") ?? "off",
+    invitation_ttl_hours: formData.get("invitation_ttl_hours"),
   });
 
   if (!parsed.success) {

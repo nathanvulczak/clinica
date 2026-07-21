@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PlatformLoginForm } from "@/features/platform/components/platform-login-form";
 
-export default async function PlatformLoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+export default async function PlatformLoginPage({ searchParams }: { searchParams: Promise<{ error?: string; password?: string }> }) {
   const params = await searchParams;
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10 text-slate-100">
@@ -21,6 +21,7 @@ export default async function PlatformLoginPage({ searchParams }: { searchParams
         </CardHeader>
         <CardContent>
           {params.error === "access_denied" ? <p className="mb-4 rounded-md border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-200">Esta conta não está autorizada no Console do Proprietário.</p> : null}
+          {params.password === "updated" ? <p className="mb-4 rounded-md border border-cyan-400/30 bg-cyan-400/10 p-3 text-xs text-cyan-200">Senha atualizada. Entre novamente e conclua a validação MFA.</p> : null}
           <PlatformLoginForm />
         </CardContent>
       </Card>

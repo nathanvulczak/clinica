@@ -58,6 +58,10 @@ Execute os arquivos uma única vez e na ordem numérica:
 52. `052_clinical_timeline_backfill.sql`
 53. `053_platform_owner_console.sql`
 54. `054_platform_user_controls.sql`
+55. `055_secure_invitation_lifecycle.sql`
+56. `056_owner_only_platform_console.sql`
+57. `057_remove_raw_invitation_tokens.sql`
+58. `058_audit_expired_invitations.sql`
 
 As execuções são registradas em `app_migration_history`. Use os scripts do
 projeto para validar e aplicar uma migration com checksum, sem colar SQL

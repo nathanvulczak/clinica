@@ -26,6 +26,47 @@ export type MemberActionState = {
   success?: string;
 };
 
+/* Legacy invitation helpers kept temporarily for old callers.
+async function sendInvitationEmail({
+  admin,
+  supabase,
+  email,
+  userId,
+  redirectUrl,
+  metadata,
+}: {
+  admin: ReturnType<typeof createSupabaseAdminClient>;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  email: string;
+  userId?: string | null;
+  redirectUrl: string;
+  metadata: Record<string, string>;
+}) {
+  if (!userId) {
+    const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
+      redirectTo: redirectUrl,
+      data: metadata,
+    });
+
+    if (error || !data.user) {
+      return { userId: null, error: error?.message ?? "Não foi possível criar o acesso." };
+    }
+
+    return { userId: data.user.id, error: null };
+  }
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: redirectUrl,
+  });
+
+  return { userId, error: error?.message ?? null };
+}
+
+function newInvitationHash() {
+  return createHash("sha256").update(randomBytes(32)).digest("hex");
+}
+*/
+
 async function canManageMembers(clinicId: string) {
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase.rpc("user_has_permission", {

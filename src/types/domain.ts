@@ -240,6 +240,7 @@ export type RegistrationPreferences = {
   preconsultation_mode: Exclude<PreconsultationMode, "inherit">;
   allow_preconsultation_override: boolean;
   require_follow_up_decision: boolean;
+  invitation_ttl_hours?: number;
 };
 
 export type PreconsultationMode = "inherit" | "required" | "optional" | "disabled";

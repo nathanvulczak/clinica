@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; invite?: string }>;
+  searchParams: Promise<{ next?: string; invite?: string; password?: string }>;
 }) {
   const params = await searchParams;
   const inviteMessage =
@@ -16,6 +16,7 @@ export default async function LoginPage({
       : params.invite === "invalid"
         ? "Este convite não está mais disponível ou não pertence ao usuário autenticado."
         : null;
+  const passwordMessage = params.password === "updated" ? "Senha atualizada. Entre com sua nova senha." : null;
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
@@ -35,6 +36,9 @@ export default async function LoginPage({
             <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800">
               {inviteMessage}
             </div>
+          ) : null}
+          {passwordMessage ? (
+            <div className="mb-4 rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-primary">{passwordMessage}</div>
           ) : null}
           <LoginForm next={params.next} />
           <p className="mt-5 text-center text-sm text-muted-foreground">

@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import { LoaderCircle, UserPlus } from "lucide-react";
 import { ROLE_LABELS } from "@/config/permissions";
-import { inviteMemberAction } from "@/features/members/actions";
+import { inviteMemberLifecycleAction } from "@/features/members/invitation-actions";
 import { formatCpf, formatPhone, normalizeEmail } from "@/lib/formatters";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,7 @@ export function InviteMemberForm({
   disabled?: boolean;
   onCompleted?: () => void;
 }) {
-  const [state, formAction, pending] = useActionState(inviteMemberAction, {});
+  const [state, formAction, pending] = useActionState(inviteMemberLifecycleAction, {});
   const [cpf, setCpf] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");

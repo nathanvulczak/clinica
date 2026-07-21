@@ -22,12 +22,12 @@ set role = 'owner', status = 'active', display_name = 'Nathan', mfa_required = t
 Nao existe login por clinica no console e nenhuma conta de clinica recebe esse
 acesso automaticamente. A senha continua armazenada apenas pelo Supabase Auth.
 
-## Escopos
+## Acesso unico
 
-- `owner`: operacoes, limites, billing, erros, uso agregado, saude e seguranca.
-- `support`: saude, diagnosticos e erros tecnicos.
-- `billing`: planos e sincronizacao de assinatura.
-- `security`: saude, erros e solicitacoes emergenciais.
+O console possui um unico operador ativo: `owner`, pertencente ao proprietario
+do SaaS. Os antigos papéis auxiliares (`support`, `billing` e `security`) nao
+concedem mais acesso e novos operadores diferentes de `owner` sao bloqueados no
+banco.
 
 O primeiro acesso deve permanecer como `owner` do proprietario da plataforma.
 O console exige MFA TOTP. No primeiro acesso, configure o autenticador em
@@ -37,9 +37,9 @@ O console exige MFA TOTP. No primeiro acesso, configure o autenticador em
 
 O recurso cria uma solicitacao com motivo, clinica alvo opcional, prazo de ate
 60 minutos, somente leitura e aprovacao obrigatoria. Ele nao abre prontuarios
-nem libera conteudo clinico. A aprovacao deve ser feita por outro operador com
-escopo de seguranca; o console nao possui uma rota de acesso assistencial
-automatico.
+nem libera conteudo clinico. Como o console e exclusivo do proprietario, uma
+solicitacao fica pendente ate uma aprovacao externa formal; o sistema nao
+permite autoaprovacao.
 
 ## Dados exibidos
 

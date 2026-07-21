@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import Link from "next/link";
 import { LogIn } from "lucide-react";
 import { signInAction } from "@/features/auth/actions";
 import { normalizeEmail } from "@/lib/formatters";
@@ -35,6 +36,9 @@ export function LoginForm({ next }: { next?: string }) {
       <div className="grid gap-2">
         <Label htmlFor="password">Senha</Label>
         <PasswordInput id="password" name="password" autoComplete="current-password" required />
+        <div className="flex justify-end">
+          <Link href="/recuperar-senha" className="text-xs font-medium text-primary hover:underline">Esqueci minha senha</Link>
+        </div>
       </div>
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
       <Button type="submit" disabled={pending}>

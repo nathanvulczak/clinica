@@ -69,9 +69,18 @@ export const removeMemberSchema = z.object({
   member_id: z.string().uuid(),
 });
 
+export const invitationIdSchema = z.object({
+  invitation_id: z.string().uuid("Convite nao identificado."),
+});
+
+export const cancelInvitationSchema = invitationIdSchema.extend({
+  reason: z.string().trim().max(500, "O motivo deve ter ate 500 caracteres.").optional(),
+});
+
 export const acceptInviteSchema = z
   .object({
     clinic_id: z.string().uuid("Clínica do convite não identificada."),
+    invitation_id: z.string().uuid().optional(),
     password: z.string().min(8, "A senha deve ter pelo menos 8 caracteres."),
     password_confirm: z.string().min(8, "Confirme a senha."),
   })

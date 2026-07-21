@@ -45,7 +45,7 @@ export async function getPlatformAccess(): Promise<PlatformAccess> {
     .eq("user_id", user.id)
     .maybeSingle<{ role: PlatformOperatorRole; status: string; mfa_required: boolean; mfa_enrolled: boolean }>();
 
-  const role = profile?.status === "active" ? profile.role : null;
+  const role = profile?.status === "active" && profile.role === "owner" ? profile.role : null;
   const scopes = role ? scopeMatrix[role] : [];
   return {
     userId: user.id,
